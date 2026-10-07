@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Warning
@@ -164,7 +165,7 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
             KChip("Plan first", planFirst) { planFirst = !planFirst; if (planFirst) untilVerified = false }
             KChip("Keep going until verified", untilVerified) { untilVerified = !untilVerified; if (untilVerified) planFirst = false }
         }
-        Composer(running, hint = when {
+        Composer(running, ps.draft, hint = when {
                 running -> "Add to what it's doing…"
                 planFirst -> "Describe the app — you'll get a plan first"
                 feed.isEmpty() -> "Describe what to build…"
@@ -570,11 +571,20 @@ private fun Prompts(loop: AgentLoop) {
 }
 
 @Composable
-private fun Composer(running: Boolean, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
+private fun Composer(running: Boolean, draft: kotlinx.coroutines.flow.MutableStateFlow<String?>, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
     var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }   // survives rotation and tab switches
     val files = remember { androidx.compose.runtime.mutableStateListOf<app.kiln.agent.Attachment>() }
     val pick = rememberAttachmentPicker { files += it }
+    val pending by draft.collectAsStateWithLifecycle()
+    LaunchedEffect(pending) { pending?.let { text = it + text; draft.value = null } }
     var menu by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Dictation through the system recogniser; the words land in the field to edit before sending.
+    val voice = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
+        r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { said ->
+            text = if (text.isBlank()) said else text.trimEnd() + " " + said
+        }
+    }
     var started by remember { mutableLongStateOf(0L) }
     var elapsed by remember { mutableLongStateOf(0L) }
     LaunchedEffect(running) {
@@ -606,6 +616,13 @@ private fun Composer(running: Boolean, hint: String, onSend: (String, List<app.k
             }
             Spacer(Modifier.width(8.dp))
             if (running && text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, onClick = onStop)
+            else if (text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Mic, "Speak") {
+                runCatching {
+                    voice.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                        .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say what to build or change"))
+                }.onFailure { android.widget.Toast.makeText(ctx, "No speech recogniser on this phone", android.widget.Toast.LENGTH_SHORT).show() }
+            }
             // While it works, sending steers the run (it reads the message at its next step).
             else FilledIconBtn(Icons.Rounded.ArrowUpward, "Send", enabled = text.isNotBlank() || (files.isNotEmpty() && !running)) {
                 onSend(text.trim(), files.toList()); text = ""; files.clear()

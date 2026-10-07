@@ -79,6 +79,11 @@ class ToolsOnDeviceTest {
             override fun spill(text: String, maxChars: Int) = if (text.length <= maxChars) text else text.take(maxChars) + "\n…"
         }
 
+        // A mock-up to compare against.
+        File(p.dir, "attachments/target.png").apply { parentFile!!.mkdirs() }.outputStream().use {
+            android.graphics.Bitmap.createBitmap(90, 160, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(22, 24, 38)) }
+                .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
         val files = listOf(
             Case("project_info", "{}", expect = "kiln.app.tooltest"),
             Case("list_dir", """{"path":""}""", expect = "kiln.json"),
@@ -123,6 +128,10 @@ class ToolsOnDeviceTest {
             Case("web_fetch", """{"url":"https://example.com","max_chars":2000}""", expect = "Example Domain"),
             Case("web_fetch", """{"url":"http://example.com"}""", expectError = true),
             Case("check", "{}", expect = "BUILD OK"),
+            Case("load_skill", """{"name":"timers"}""", expect = "LaunchedEffect"),
+            Case("load_skill", """{"name":"teleport"}""", expectError = true, expect = "available"),
+            Case("propose_rule", """{"rule":"Show volumes in ml, never oz","why":"user said so"}""", expect = "Proposed"),
+            Case("security_check", "{}", expect = "security"),
             // A stale import (old package) and a missing one are fixed by Kiln itself — the model once
             // gave up on KeyboardOptions as "not in the kit" after importing it from the wrong package.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.ui.text.input.KeyboardOptions\n\nval k = KeyboardOptions(keyboardType = KeyboardType.Number)\n"}"""),
@@ -139,6 +148,9 @@ class ToolsOnDeviceTest {
             Case("install", "{}"),
             Case("run_app", """{"wait_ms":3000}""", expect = "running", images = true),
             Case("screenshot", "{}", expect = "screen pixels", images = true),
+            Case("ui_check", "{}", expect = "checked"),
+            Case("compare_screen", """{"target":"attachments/target.png"}""", expect = "Similarity", images = true),
+            Case("compare_screen", """{"target":"kiln.json"}""", expectError = true, expect = "not an image"),
             Case("ui_tree", "{}", expect = "Built on this phone"),
             Case("tap", """{"target":"Text \"Built on this phone with Kiln.\"","x":0,"y":0}""", expect = "tapped"),
             Case("tap", """{"target":"640, 1400"}""", expect = "640,1400"),
@@ -175,9 +187,9 @@ class ToolsOnDeviceTest {
             println("TOOLTEST ${if (ok) "PASS" else "FAIL"} ${c.tool.padEnd(16)} ${c.input.take(70)} -> ${if (r.isError) "ERR " else ""}${text.replace('\n', ' ').take(160)}")
             if (!ok) failures += "${c.tool} ${c.input.take(60)} -> ${if (r.isError) "error" else "ok"}: ${text.take(200)}"
         }
-        // Every registered tool appears at least once above (subagent needs a model; MCP/command tools are user-defined).
+        // Every registered tool appears at least once above (subagent and qa_check need a model; MCP/command tools are user-defined).
         val covered = (files + dev).map { it.tool }.toSet()
-        val skipped = tools.keys - covered - setOf("subagent", "read_output") - tools.keys.filter { '.' in it || it.startsWith("mcp_") }.toSet()
+        val skipped = tools.keys - covered - setOf("subagent", "qa_check", "read_output") - tools.keys.filter { '.' in it || it.startsWith("mcp_") }.toSet()
         println("TOOLTEST tools=${tools.size} covered=${covered.size} device=$device uncovered=$skipped")
         // Leave nothing behind: the project, its sessions and the installed app.
         if (device) Graph.device.uninstall(p.meta().`package`)

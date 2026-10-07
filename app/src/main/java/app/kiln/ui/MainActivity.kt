@@ -59,6 +59,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -164,7 +169,8 @@ private fun ProjectsScreen(vm: KilnVM, open: (String) -> Unit, settings: () -> U
         item { NewAppCard(enabled = toolchain is Toolchain.State.Ready) { label, prompt -> vm.createProject(label, prompt, open) } }
         if (projects.isNotEmpty()) item { Overline("Your apps", Modifier.padding(start = 16.dp, top = 12.dp)) }
         items(projects, key = { it.project.name }) { p ->
-            ProjectCard(p, installed = p.pkg in installed, onOpen = { open(p.project.name) }, onDelete = { deleting = p })
+            ProjectCard(p, installed = p.pkg in installed, onOpen = { open(p.project.name) }, onDelete = { deleting = p },
+                onDuplicate = { vm.duplicateProject(p.project.name, open) })
         }
     }
     deleting?.let { p ->
@@ -224,8 +230,24 @@ private fun NewAppCard(enabled: Boolean, onCreate: (label: String, prompt: Strin
                 onCreate(label.trim(), prompt.trim()); prompt = ""; name = ""; nameEdited = false
             }
         }
+        if (prompt.isEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TEMPLATES.forEach { (title, text) -> KChip(title, false) { prompt = text; name = title; nameEdited = true } }
+        }
     }
 }
+
+/** Starting points: a name and a prompt detailed enough to build something good in one go. */
+private val TEMPLATES = listOf(
+    "Habit Tracker" to "A habit tracker: add habits, tick them off each day, see a 7-day streak chart per habit, and get a daily reminder notification at a time I choose. Keep everything across restarts.",
+    "Tip Calculator" to "A tip calculator: bill amount, tip % slider with 10/15/20 presets, split between N people, and a big clear per-person total. Remember the last tip %.",
+    "Pomodoro Timer" to "A pomodoro timer: 25-minute focus and 5-minute break cycles, start/pause/reset, a ring showing progress, a notification when each phase ends, and today's completed count.",
+    "Expense Log" to "An expense log: add expenses with amount, category and note, see this month's total and a bar chart by category, swipe to delete. Keep everything across restarts.",
+    "Notes" to "A notes app: a list of notes with title and preview, tap to edit, search, pin notes to the top, and share a note. Keep everything across restarts.",
+    "Unit Converter" to "A unit converter for length, weight, temperature and volume: pick the category, type a value, and see it converted to every unit in that category live.",
+    "Flashcards" to "A flashcards app: make decks of cards (front/back), study a deck by flipping cards, mark known/unknown, and show progress per deck. Keep everything across restarts.",
+    "Water Reminder" to "A water intake tracker: tap to add a glass, a daily goal ring, a 7-day history chart, and reminders every 2 hours during the day.",
+)
 
 /** "A habit tracker with a weekly chart…" → "Habit Tracker". */
 private fun suggestName(prompt: String): String {
@@ -238,7 +260,7 @@ private fun suggestName(prompt: String): String {
 }
 
 @Composable
-private fun ProjectCard(p: ProjectInfo, installed: Boolean, onOpen: () -> Unit, onDelete: () -> Unit) {
+private fun ProjectCard(p: ProjectInfo, installed: Boolean, onOpen: () -> Unit, onDelete: () -> Unit, onDuplicate: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth().vCard(N.shapeLg).clickable(onClick = onOpen)
         .padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -256,6 +278,8 @@ private fun ProjectCard(p: ProjectInfo, installed: Boolean, onOpen: () -> Unit, 
         Box {
             IconBtn(Icons.Rounded.MoreVert, "More") { menu = true }
             DropdownMenu(menu, { menu = false }, containerColor = N.surfaceHi) {
+                DropdownMenuItem(text = { Text("Duplicate", style = T.body) },
+                    leadingIcon = { Icon(Icons.Rounded.ContentCopy, null, tint = N.textLabel) }, onClick = { menu = false; onDuplicate() })
                 DropdownMenuItem(text = { Text("Delete", style = T.body.copy(color = N.danger)) },
                     leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = N.danger) }, onClick = { menu = false; onDelete() })
             }
@@ -276,8 +300,10 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(false) }
+    var preview by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val isInstalled = ps.pkg in installed
+    val ctx = androidx.compose.ui.platform.LocalContext.current
 
     Column(Modifier.fillMaxSize()) {
         KTopBar(ps.label, subtitle = runStep ?: if (running) "Working…" else ps.pkg, onBack = back,
@@ -285,12 +311,23 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
             if (runStep != null) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = N.accent, strokeWidth = 2.dp)
             } else IconBtn(Icons.Rounded.PlayArrow, "Run", tint = N.accent, enabled = !running) { vm.run(name) }
+            if (isInstalled) IconBtn(Icons.Rounded.Smartphone, "Preview") { preview = true }
             IconBtn(Icons.Rounded.History, "Chats") { history = true }
             Box {
                 IconBtn(Icons.Rounded.MoreVert, "More") { menu = true }
                 DropdownMenu(menu, { menu = false }, containerColor = N.surfaceHi) {
                     DropdownMenuItem(text = { Text("New chat", style = T.body) }, leadingIcon = { Icon(Icons.Rounded.Add, null, tint = N.textLabel) },
                         onClick = { menu = false; vm.newChat(name); tab = 0 })
+                    DropdownMenuItem(text = { Text("Share chat", style = T.body) },
+                        leadingIcon = { Icon(Icons.Rounded.Share, null, tint = N.textLabel) }, enabled = loop != null,
+                        onClick = {
+                            menu = false
+                            vm.transcriptMarkdown(name)?.let { md ->
+                                ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                                    .setType("text/markdown").putExtra(android.content.Intent.EXTRA_SUBJECT, ps.label + " chat")
+                                    .putExtra(android.content.Intent.EXTRA_TEXT, md.take(200_000)), "Share chat"))
+                            }
+                        })
                     DropdownMenuItem(text = { Text("Redesign icon", style = T.body) },
                         leadingIcon = { Icon(Icons.Rounded.Palette, null, tint = N.textLabel) },
                         enabled = !running,
@@ -322,6 +359,7 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
         }
     }
 
+    if (preview) PreviewSheet(vm, ps, onDismiss = { preview = false }) { picked -> ps.draft.value = picked; preview = false; tab = 0 }
     if (history) ModalBottomSheet({ history = false }, containerColor = N.surface) {
         val sessions by ps.sessions.collectAsStateWithLifecycle()
         Column(Modifier.padding(horizontal = 4.dp).padding(bottom = 24.dp)) {
@@ -329,10 +367,18 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                 Text("Chats", style = T.cardTitle, modifier = Modifier.weight(1f))
                 KButton("New chat", Tone.Accent) { history = false; vm.newChat(name); tab = 0 }
             }
+            var query by remember { mutableStateOf("") }
+            var hits by remember { mutableStateOf<Set<String>?>(null) }
+            LaunchedEffect(query) {
+                kotlinx.coroutines.delay(250)
+                hits = if (query.isBlank()) null else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.searchChats(name, query.trim()) }
+            }
+            if (sessions.size > 1) KField("", query, { query = it }, Modifier.padding(horizontal = 12.dp).padding(top = 8.dp), hint = "Search chats")
             Spacer(Modifier.height(8.dp))
+            if (hits?.isEmpty() == true) Text("No chat mentions that.", style = T.bodySmall.copy(color = N.textMuted), modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp))
             if (sessions.isEmpty()) Text("No chats yet.", style = T.bodySmall.copy(color = N.textMuted), modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp))
             // An empty chat (no message yet, so no title) is only worth listing while it is the open one.
-            sessions.filter { it.title.isNotBlank() || it.id == loop?.session?.meta?.id }.take(30).forEach { s ->
+            sessions.filter { (it.title.isNotBlank() || it.id == loop?.session?.meta?.id) && hits?.contains(it.id) != false }.take(30).forEach { s ->
                 val current = loop?.session?.meta?.id == s.id
                 Row(Modifier.fillMaxWidth().clip(N.shapeMd).clickable { history = false; vm.openSession(name, s.id); tab = 0 }
                     .background(if (current) N.accent800.copy(alpha = 0.5f) else androidx.compose.ui.graphics.Color.Transparent)

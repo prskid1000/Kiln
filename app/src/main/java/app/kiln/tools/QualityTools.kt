@@ -201,7 +201,7 @@ fun securityIssues(files: Map<String, String>, permissions: List<String>): List<
         text.lineSequence().forEachIndexed { i, line ->
             for ((what, re) in SECRET_PATTERNS) if (re.containsMatchIn(line))
                 out += "$path:${i + 1}: $what in source — anything in an APK can be extracted; use per-project secrets and a server/proxy for paid APIs"
-            if (Regex("""["']http://(?!localhost|127\.0\.0\.1|10\.0\.2\.2)""").containsMatchIn(line))
+            if (Regex("""["']http://(?!localhost|schemas\.android\.com|www\.w3\.org|ns\.adobe\.com|127\.0\.0\.1|10\.0\.2\.2)""").containsMatchIn(line))
                 out += "$path:${i + 1}: cleartext http:// URL — use https (cleartext is blocked on Android 9+)"
             if ("addJavascriptInterface" in line) out += "$path:${i + 1}: WebView JavaScript bridge — only load your own content in that WebView"
         }

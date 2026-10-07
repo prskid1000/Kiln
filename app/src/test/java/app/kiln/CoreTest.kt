@@ -279,4 +279,13 @@ class CoreTest {
         assertEquals(0, f.messages.size); assertEquals(2, s.messages.size)
         tmp.deleteRecursively()
     }
+
+    @Test fun `security check ignores xml namespaces but flags real cleartext`() {
+        val issues = app.kiln.tools.securityIssues(mapOf(
+            "AndroidManifest.xml" to "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">",
+            "src/Api.kt" to "val base = \"http://api.example.com\"",
+        ), emptyList())
+        assertEquals(1, issues.count { "cleartext" in it })
+        assertTrue(issues.any { it.startsWith("src/Api.kt:1") })
+    }
 }

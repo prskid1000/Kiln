@@ -37,6 +37,8 @@ class ProjectState(val project: Project) {
     internal var job: Job? = null
     // Rule proposals the user saved or dismissed (activity ids).
     val decidedRules = MutableStateFlow<Set<Int>>(emptySet())
+    // Text to put in the composer (an element picked in the preview).
+    val draft = MutableStateFlow<String?>(null)
     // Read often during composition (every build-progress update): parse kiln.json only when it changed.
     @Volatile private var metaCache: Pair<Long, app.kiln.build.ProjectMeta?> = -1L to null
     private fun meta(): app.kiln.build.ProjectMeta? {
