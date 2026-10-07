@@ -185,6 +185,23 @@ class CoreTest {
         assertEquals(null, f("the large circular water drop button"))
     }
 
+    @Test fun `lint catches dollar-dot templates and unlabeled icon buttons`() {
+        val dir = Files.createTempDirectory("kiln").toFile()
+        File(dir, "src").mkdirs()
+        File(dir, "src/A.kt").writeText("""
+            val a = "Total: ${'$'}items.size"
+            val ok1 = "Total: ${'$'}{items.size}"
+            val ok2 = "Saved ${'$'}name.txt"
+            val ok3 = "Price ${'$'}price"
+            fun Row() { IconButton(onClick = {}) { Icon(Icons.Rounded.Delete, contentDescription = null) } }
+            fun Row2() { IconButton(onClick = {}) { Icon(Icons.Rounded.Delete, contentDescription = "Delete milk") } }
+        """.trimIndent())
+        val d = app.kiln.build.Lint.run(app.kiln.build.Project(dir))
+        assertEquals(2, d.size)
+        assertTrue(d[0].message.contains("\${items.size}") && d[0].line == 1)
+        assertTrue(d[1].message.contains("contentDescription") && d[1].line == 5)
+    }
+
     @Test fun `openai responses converts calls and outputs`() {
         val a = OpenAIResponsesAdapter(Profile("oa", "OA", Protocol.OPENAI_RESPONSES, "https://api.openai.com", caps = Caps()), "k")
         val body = a.buildBody(ModelRequest("gpt", "sys", transcript(), listOf(tool)))

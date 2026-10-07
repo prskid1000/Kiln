@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DataObject
 import androidx.compose.material.icons.rounded.Delete
@@ -79,12 +80,35 @@ fun FilesTab(vm: KilnVM, ps: ProjectState) {
     var open by remember { mutableStateOf<Open?>(null) }
     val o = open
     if (o != null) { Editor(vm, ps, o) { open = null }; return }
+    var uploads by remember { mutableIntStateOf(0) }
+    var dest by remember { mutableStateOf("assets") }
+    var menu by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val picker = rememberAttachmentPicker({ vm.message.value = it }) { picked ->
+        scope.launch {
+            val msg = withContext(Dispatchers.IO) { upload(ps, dest, picked) }
+            vm.message.value = msg; uploads++
+        }
+    }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             KChip("Source", root == 0) { root = 0 }
             KChip("App data", root == 1) { root = 1 }
+            Spacer(Modifier.weight(1f))
+            Box {
+                IconBtn(Icons.Rounded.Upload, "Upload", tint = N.accent) { menu = true }
+                androidx.compose.material3.DropdownMenu(menu, { menu = false }, containerColor = N.surfaceHi) {
+                    val targets = if (root == 0) listOf("assets" to "Into assets/", "res/drawable" to "Into res/drawable/ (images)", "res/raw" to "Into res/raw/")
+                                  else listOf("data:files" to "Into the app's files/")
+                    targets.forEach { (d, label) ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(label, style = T.body) },
+                            onClick = { menu = false; dest = d; picker.file() })
+                    }
+                }
+            }
         }
-        if (root == 0) SourceList(ps) { open = it } else DataList(vm, ps) { open = it }
+        if (root == 0) SourceList(ps, uploads) { open = it } else DataList(vm, ps, uploads) { open = it }
     }
 }
 
@@ -97,12 +121,12 @@ private fun iconFor(path: String): ImageVector = when (path.substringAfterLast('
 }
 
 @Composable
-private fun SourceList(ps: ProjectState, onOpen: (Open) -> Unit) {
+private fun SourceList(ps: ProjectState, uploads: Int, onOpen: (Open) -> Unit) {
     val loop by ps.loop.collectAsStateWithLifecycle()
     // Re-list whenever the agent finishes a step.
     val feed = loop?.feed?.collectAsStateWithLifecycle()?.value
     val tick = feed?.count { it.status != app.kiln.agent.Activity.Status.RUNNING } ?: 0
-    val files = remember(ps.project, tick) { ps.project.files().map { ps.project.rel(it) to it }.sortedBy { it.first } }
+    val files = remember(ps.project, tick, uploads) { ps.project.files().map { ps.project.rel(it) to it }.sortedBy { it.first } }
     // Folders as section headers; the package path is collapsed so Kotlin files don't drown in it.
     val pkgDir = "src/" + ps.pkg.replace('.', '/') + "/"
     val groups = files.groupBy { (rel, _) -> rel.removePrefix(pkgDir).let { r -> if (rel.startsWith(pkgDir)) "src" + (r.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "/$it" }) else rel.substringBeforeLast('/', "") } }
@@ -144,7 +168,7 @@ private fun FileRow(icon: ImageVector, name: String, meta: String, trailing: (@C
 }
 
 @Composable
-private fun DataList(vm: KilnVM, ps: ProjectState, onOpen: (Open) -> Unit) {
+private fun DataList(vm: KilnVM, ps: ProjectState, uploads: Int, onOpen: (Open) -> Unit) {
     val warden by vm.warden.collectAsStateWithLifecycle()
     val installed by vm.installed.collectAsStateWithLifecycle()
     var files by remember { mutableStateOf<Result<List<Device.DataFile>>?>(null) }
@@ -152,7 +176,7 @@ private fun DataList(vm: KilnVM, ps: ProjectState, onOpen: (Open) -> Unit) {
     val scope = rememberCoroutineScope()
     val ready = warden == Warden.Status.READY
     val isInstalled = ps.pkg in installed
-    LaunchedEffect(ready, isInstalled, tick) {
+    LaunchedEffect(ready, isInstalled, tick, uploads) {
         files = if (ready && isInstalled) withContext(Dispatchers.IO) { Graph.device.dataFiles(ps.pkg) } else null
     }
     when {
@@ -244,4 +268,28 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, onClose: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Copies picked files into the project (assets/, res/drawable/, res/raw/) or into the installed
+ * app's private files/ (through Warden). Android resource names must be lowercase [a-z0-9_].
+ */
+private suspend fun upload(ps: ProjectState, dest: String, files: List<app.kiln.agent.Attachment>): String {
+    var n = 0; val notes = mutableListOf<String>()
+    for (f in files) {
+        val ext = f.name.substringAfterLast('.', "").lowercase()
+        val base = f.name.substringBeforeLast('.')
+        val name = if (dest.startsWith("res/")) base.lowercase().replace(Regex("[^a-z0-9_]+"), "_").trim('_')
+            .let { if (it.firstOrNull()?.isLetter() == true) it else "f_$it" } + (if (ext.isEmpty()) "" else ".$ext")
+            else f.name.replace('/', '_').replace('\\', '_')
+        if (dest == "res/drawable" && ext !in setOf("png", "jpg", "jpeg", "webp", "xml", "gif")) { notes += "${f.name}: not an image"; continue }
+        if (dest == "data:files") {
+            if (Graph.device.writeData(ps.pkg, "files/$name", f.bytes).ok) n++ else notes += "${f.name}: write failed"
+        } else {
+            val out = ps.project.resolve("$dest/$name")
+            out.parentFile?.mkdirs(); out.writeBytes(f.bytes); n++
+        }
+    }
+    val where = if (dest == "data:files") "the app's files/" else "$dest/"
+    return "Uploaded $n file${if (n == 1) "" else "s"} to $where" + (if (notes.isEmpty()) "" else " — " + notes.joinToString())
 }

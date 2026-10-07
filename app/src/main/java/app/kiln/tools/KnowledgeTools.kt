@@ -59,6 +59,43 @@ class ClassIndex(private val toolchain: Toolchain) {
     }
     }
 
+    /**
+     * For each "unresolved reference 'X'" in a failed build, the real classes named X on the
+     * classpath — so a missing or wrong import is fixed in one step instead of guessed at (a
+     * model once dropped KeyboardOptions as "not in the kit" after importing it from the wrong
+     * package).
+     */
+    fun importHints(build: app.kiln.build.BuildResult): String {
+        if (build.ok) return ""
+        val names = build.errors.mapNotNull { Regex("unresolved reference '([A-Za-z_][A-Za-z0-9_]*)'").find(it.message)?.groupValues?.get(1) }
+            .filter { it.first().isUpperCase() }.distinct().take(12)
+        if (names.isEmpty()) return ""
+        ensure()
+        val rank = listOf("app.kiln.kit.", "androidx.compose.", "androidx.", "kotlinx.", "kotlin.", "android.", "java.")
+        val lines = names.mapNotNull { n ->
+            val hits = where.keys.filter { '$' !in it && it.substringAfterLast('.') == n }
+                .sortedBy { fq -> rank.indexOfFirst { fq.startsWith(it) }.let { if (it < 0) 99 else it } }.take(3)
+            if (hits.isEmpty()) null else "  $n → " + hits.joinToString(" or ") { "import $it" }
+        }
+        return if (lines.isEmpty()) "" else "\nImport hints (these classes exist on the classpath):\n" + lines.joinToString("\n") + "\n"
+    }
+
+    /**
+     * The one class a bare [name] can sensibly mean, or null when there is none or it's ambiguous.
+     * Only app-facing namespaces count, and the first group (kit, Compose, AndroidX, …) that has
+     * candidates must have exactly one.
+     */
+    fun uniqueClass(name: String): String? {
+        ensure()
+        val groups = listOf("app.kiln.kit.", "androidx.compose.", "androidx.", "kotlinx.", "kotlin.", "android.")
+        val all = where.keys.filter { '$' !in it && it.substringAfterLast('.') == name && !it.contains(".internal.") }
+        for (g in groups) {
+            val hits = all.filter { it.startsWith(g) }
+            if (hits.isNotEmpty()) return hits.singleOrNull()
+        }
+        return null
+    }
+
     fun search(query: String, limit: Int = 40): List<String> {
         ensure()
         val q = query.lowercase()

@@ -215,7 +215,8 @@ private fun NewAppCard(enabled: Boolean, onCreate: (label: String, prompt: Strin
 private fun suggestName(prompt: String): String {
     val stop = setOf("a", "an", "the", "app", "application", "simple", "small", "basic", "make", "build", "create", "me", "i", "want",
         "for", "to", "that", "which", "with", "my", "please", "android", "of", "and", "where", "can", "you")
-    return prompt.split(Regex("[^A-Za-z0-9]+")).asSequence().filter { it.isNotBlank() }
+    // "A shopping list: add items…" → the subject is before the first clause break.
+    return prompt.split(Regex("[:;,.!?(—–-]")).first().split(Regex("[^A-Za-z0-9]+")).asSequence().filter { it.isNotBlank() }
         .dropWhile { it.lowercase() in stop }.takeWhile { it.lowercase() !in setOf("with", "that", "which", "where", "for", "and", "to") }
         .take(3).joinToString(" ") { it.lowercase().replaceFirstChar(Char::uppercase) }
 }

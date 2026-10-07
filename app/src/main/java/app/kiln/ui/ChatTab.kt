@@ -38,6 +38,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Build
@@ -150,7 +152,7 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
         }
         if (l != null) Prompts(l)
         Composer(running, hint = if (feed.isEmpty()) "Describe what to build…" else "Ask for a change…",
-            onSend = { vm.send(ps.project.name, it) }, onStop = { vm.stop(ps.project.name) })
+            onSend = { t, files -> vm.send(ps.project.name, t, files) }, onStop = { vm.stop(ps.project.name) })
     }
 }
 
@@ -203,8 +205,13 @@ private fun ChatList(loop: AgentLoop, feed: List<Activity>, running: Boolean) {
 @Composable
 private fun Message(a: Activity) {
     when (a.kind) {
-        Activity.Kind.USER -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Text(a.text, style = T.body.copy(color = N.accent100),
+        Activity.Kind.USER -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Attached photos above the bubble, files as chips; tap a photo to view it full screen.
+            if (a.images.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { a.images.forEach { Screenshot(it, Modifier.heightIn(max = 160.dp)) } }
+            if (a.files.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                a.files.forEach { AttachmentChip(it, null) }
+            }
+            if (a.text.isNotBlank()) Text(a.text, style = T.body.copy(color = N.accent100),
                 modifier = Modifier.widthIn(max = 320.dp)
                     .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp))
                     .background(N.accent800).padding(horizontal = 14.dp, vertical = 10.dp))
@@ -270,6 +277,9 @@ private fun PlanCard(todos: List<app.kiln.tools.SessionState.Todo>) {
 }
 
 private fun Int.sp_() = androidx.compose.ui.unit.TextUnit(this.toFloat(), androidx.compose.ui.unit.TextUnitType.Sp)
+
+/** Tools whose "error" is a finding (compile errors, a crash found), not a broken step. */
+private val REPORTING_TOOLS = setOf("check", "build", "run_app", "last_crash")
 
 /** Icon + one-line human title for a tool call. */
 private fun describe(a: Activity): Pair<ImageVector, String> {
@@ -387,7 +397,10 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
     }
     var open by remember { mutableStateOf(false) }
     val tools = items.filter { it.kind == Activity.Kind.TOOL }
-    val failed = tools.count { it.status == Activity.Status.FAILED }
+    // A check/build that reports compile errors did its job; only steps that broke count as failed.
+    val buildErrors = tools.count { it.status == Activity.Status.FAILED && it.tool in REPORTING_TOOLS }
+    val failed = tools.count { it.status == Activity.Status.FAILED } - buildErrors
+    val stopped = tools.count { it.status == Activity.Status.STOPPED }
     val current = items.lastOrNull { it.status == Activity.Status.RUNNING }
     val secs = items.sumOf { it.ms } / 1000.0
     val shot = items.lastOrNull { it.images.isNotEmpty() }?.images?.firstOrNull()
@@ -402,14 +415,16 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
                 Text(current.progress.ifBlank { "$title…" }, style = T.bodySmall.copy(color = N.textLabel), maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             } else {
-                Icon(if (failed > 0) Icons.Rounded.ErrorOutline else Icons.Rounded.CheckCircle, null,
-                    tint = if (failed > 0) N.warn else N.ok.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
+                Icon(if (failed + buildErrors > 0) Icons.Rounded.ErrorOutline else Icons.Rounded.CheckCircle, null,
+                    tint = if (failed + buildErrors > 0) N.warn else N.ok.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(10.dp))
                 val n = tools.size
                 Text(buildString {
                     append(if (n == 0) "Thought" else "$n step${if (n == 1) "" else "s"}")
                     if (secs >= 0.1) append(" · %.1fs".format(secs))
+                    if (buildErrors > 0) append(" · build had errors")
                     if (failed > 0) append(" · $failed failed")
+                    if (stopped > 0) append(" · stopped")
                 }, style = T.bodySmall.copy(color = N.textMuted))
             }
             Spacer(Modifier.width(4.dp))
@@ -429,7 +444,8 @@ private fun StepRow(a: Activity) {
     var open by remember { mutableStateOf(false) }
     val (icon, title) = describe(a)
     val color = when (a.status) {
-        Activity.Status.FAILED -> N.danger; Activity.Status.DENIED -> N.warn; else -> N.textLabel
+        Activity.Status.FAILED -> if (a.tool in REPORTING_TOOLS) N.warn else N.danger
+        Activity.Status.DENIED -> N.warn; else -> N.textLabel
     }
     Row(Modifier.fillMaxWidth()) {
         // Timeline rail.
@@ -508,8 +524,11 @@ private fun Prompts(loop: AgentLoop) {
 }
 
 @Composable
-private fun Composer(running: Boolean, hint: String, onSend: (String) -> Unit, onStop: () -> Unit) {
+private fun Composer(running: Boolean, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
     var text by remember { mutableStateOf("") }
+    val files = remember { androidx.compose.runtime.mutableStateListOf<app.kiln.agent.Attachment>() }
+    val pick = rememberAttachmentPicker { files += it }
+    var menu by remember { mutableStateOf(false) }
     var started by remember { mutableLongStateOf(0L) }
     var elapsed by remember { mutableLongStateOf(0L) }
     LaunchedEffect(running) {
@@ -518,17 +537,32 @@ private fun Composer(running: Boolean, hint: String, onSend: (String) -> Unit, o
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp, top = 4.dp)) {
         if (running) Text("Working · ${elapsed / 60}:${"%02d".format(elapsed % 60)}", style = T.label.copy(color = N.accent2),
             modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
+        if (files.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            files.forEach { f -> AttachmentChip(f.name, f.bytes.takeIf { f.mime.startsWith("image/") }) { files.remove(f) } }
+        }
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(N.surface)
-            .border(1.dp, if (text.isNotEmpty()) N.accent.copy(alpha = 0.5f) else N.cardRing, RoundedCornerShape(26.dp))
-            .padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.Bottom) {
+            .border(1.dp, if (text.isNotEmpty() || files.isNotEmpty()) N.accent.copy(alpha = 0.5f) else N.cardRing, RoundedCornerShape(26.dp))
+            .padding(start = 4.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.Bottom) {
+            Box {
+                IconBtn(Icons.Rounded.AttachFile, "Attach") { menu = true }
+                androidx.compose.material3.DropdownMenu(menu, { menu = false }, containerColor = N.surfaceHi) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Photo", style = T.body) },
+                        leadingIcon = { Icon(Icons.Rounded.Image, null, tint = N.textLabel) }, onClick = { menu = false; pick.photo() })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("File", style = T.body) },
+                        leadingIcon = { Icon(Icons.Rounded.Description, null, tint = N.textLabel) }, onClick = { menu = false; pick.file() })
+                }
+            }
             Box(Modifier.weight(1f).padding(vertical = 10.dp)) {
                 if (text.isEmpty()) Text(hint, style = T.body.copy(color = N.textMuted))
                 BasicTextField(text, { text = it }, textStyle = T.body, cursorBrush = SolidColor(N.accent),
                     modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).fieldLabel("Message"))
             }
             Spacer(Modifier.width(8.dp))
-            if (running && text.isBlank()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, onClick = onStop)
-            else FilledIconBtn(Icons.Rounded.ArrowUpward, "Send", enabled = text.isNotBlank() && !running) { onSend(text.trim()); text = "" }
+            if (running && text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, onClick = onStop)
+            else FilledIconBtn(Icons.Rounded.ArrowUpward, "Send", enabled = (text.isNotBlank() || files.isNotEmpty()) && !running) {
+                onSend(text.trim(), files.toList()); text = ""; files.clear()
+            }
         }
     }
 }

@@ -2,6 +2,8 @@ package app.kiln
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.kiln.agent.Attachment
+import app.kiln.agent.Attachments
 import app.kiln.build.Project
 import app.kiln.core.parseJson
 import app.kiln.device.Warden
@@ -34,6 +36,28 @@ class ToolsOnDeviceTest {
 
     private data class Case(val tool: String, val input: String, val expectError: Boolean = false, val expect: String? = null,
                             val images: Boolean = false)
+
+    /** Chat attachments: images become image blocks, text inlines, binaries are noted — all saved in the project. */
+    @Test fun attachmentsBecomeBlocks() {
+        Graph.init(app)
+        assumeTrue("toolchain installed", Graph.toolchain.state.value is Toolchain.State.Ready)
+        File(Graph.paths.projects, "attachtest").deleteRecursively()
+        val p = Project.create(Graph.paths.projects, "attachtest", "Attach Test", File(Graph.toolchain.templates(), "compose"))
+        val png = java.io.ByteArrayOutputStream().also {
+            android.graphics.Bitmap.createBitmap(40, 30, android.graphics.Bitmap.Config.ARGB_8888).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }.toByteArray()
+        val blocks = Attachments.blocks(p, listOf(
+            Attachment("mock.png", "image/png", png),
+            Attachment("data.csv", "text/csv", "name,qty\nmilk,2\n".toByteArray()),
+            Attachment("font.ttf", "font/ttf", ByteArray(2048) { (it % 7).toByte() }),
+        )).map { it as JsonObject }
+        println("ATTACH ${blocks.map { it["type"] }}")
+        assertTrue(blocks[0]["type"].toString() == "\"image\"")
+        assertTrue(blocks[1].toString().contains("milk,2") && blocks[1].toString().contains("attachments/data.csv"))
+        assertTrue(blocks[2].toString().contains("binary file saved") && blocks[2].toString().contains("attachments/font.ttf"))
+        assertTrue(File(p.dir, "attachments/mock.png").isFile && File(p.dir, "attachments/font.ttf").length() == 2048L)
+        p.dir.deleteRecursively()
+    }
 
     @Test fun everyToolWorks() = runBlocking {
         Graph.init(app)
@@ -99,6 +123,15 @@ class ToolsOnDeviceTest {
             Case("web_fetch", """{"url":"https://example.com","max_chars":2000}""", expect = "Example Domain"),
             Case("web_fetch", """{"url":"http://example.com"}""", expectError = true),
             Case("check", "{}", expect = "BUILD OK"),
+            // A stale import (old package) and a missing one are fixed by Kiln itself — the model once
+            // gave up on KeyboardOptions as "not in the kit" after importing it from the wrong package.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.ui.text.input.KeyboardOptions\n\nval k = KeyboardOptions(keyboardType = KeyboardType.Number)\n"}"""),
+            Case("check", "{}", expect = "auto-fixed imports"),
+            Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.foundation.text.KeyboardOptions"),
+            // Ambiguous or unknown names are not guessed: the error stays, with hints.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nval z = NoSuchThingAnywhere()\n"}"""),
+            Case("check", "{}", expectError = true, expect = "NoSuchThingAnywhere"),
+            Case("delete", """{"path":"$src/Bad.kt"}"""),
             Case("clean", "{}"),
             Case("build", "{}", expect = "BUILD OK"),
         )
@@ -146,6 +179,9 @@ class ToolsOnDeviceTest {
         val covered = (files + dev).map { it.tool }.toSet()
         val skipped = tools.keys - covered - setOf("subagent", "read_output") - tools.keys.filter { '.' in it || it.startsWith("mcp_") }.toSet()
         println("TOOLTEST tools=${tools.size} covered=${covered.size} device=$device uncovered=$skipped")
+        // Leave nothing behind: the project, its sessions and the installed app.
+        if (device) Graph.device.uninstall(p.meta().`package`)
+        p.dir.deleteRecursively()
         if (device) assertTrue("not exercised: $skipped", skipped.isEmpty())
         assertTrue("${failures.size} tool calls misbehaved:\n" + failures.joinToString("\n"), failures.isEmpty())
     }

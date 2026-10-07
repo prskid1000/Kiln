@@ -78,8 +78,8 @@ class Kiln(
     private fun builtins(): List<Tool> = listOf(
         ListDirTool(), GlobTool(), GrepTool(), ReadFileTool(), WriteFileTool(), EditFileTool(), MultiEditTool(),
         MoveTool(), DeleteTool(), ReadOutputTool(),
-        ProjectInfoTool(), SetAppMetaTool(), CheckTool(builds), BuildTool(builds), CleanTool(builds),
-        InstallTool(warden, device), RunAppTool(builds, warden, device), LaunchTool(warden, device),
+        ProjectInfoTool(), SetAppMetaTool(), CheckTool(builds, classIndex), BuildTool(builds, classIndex), CleanTool(builds),
+        InstallTool(warden, device), RunAppTool(builds, warden, device, classIndex), LaunchTool(warden, device),
         StopAppTool(warden, device), ClearDataTool(warden, device), GrantPermissionTool(warden, device),
         LogcatTool(warden, device), LastCrashTool(warden, device), ScreenshotTool(warden, device),
         UiTreeTool(warden, device), TapTool(warden, device), TypeTool(warden, device), SwipeTool(warden, device),

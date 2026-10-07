@@ -22,7 +22,7 @@ private fun JsonObject.req(k: String) = str(k) ?: throw IllegalArgumentException
 fun BuildResult.report(maxItems: Int = 40): String = buildString {
     appendLine(if (ok) "BUILD OK in ${totalMs} ms" else "BUILD FAILED (${errors.size} error${if (errors.size == 1) "" else "s"})")
     appendLine("steps: " + steps.joinToString(", ") { "${it.step}${if (it.skipped) " (cached)" else " ${it.ms}ms"}" })
-    (errors + warnings).take(maxItems).forEach { d ->
+    (errors + warnings.sortedBy { if (it.tool == "kiln-lint") 0 else 1 }).take(maxItems).forEach { d ->
         val where = listOfNotNull(d.file, d.line?.toString(), d.col?.toString()).joinToString(":")
         appendLine("${d.severity.uppercase()} [${d.tool}] ${if (where.isNotBlank()) "$where " else ""}${d.message}")
         d.source?.let { appendLine("    > $it") }
@@ -67,29 +67,69 @@ class SetAppMetaTool : Tool {
     }
 }
 
-class CheckTool(private val builds: BuildEngine) : Tool {
+/**
+ * Build, and if it fails only because classes are unresolved, fix the imports Kiln can be sure
+ * of and build again. Stale imports (a class that moved package, e.g. KeyboardOptions) are
+ * rewritten in place; missing ones are added. Ambiguous or unknown names are left alone and
+ * reported with hints. Returns the result and a note of what was changed.
+ */
+suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: ToolContext, checkOnly: Boolean): Pair<BuildResult, String> {
+    var r = builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) }
+    fun linted(b: BuildResult) = b.copy(diagnostics = b.diagnostics + app.kiln.build.Lint.run(ctx.project))
+    if (r.ok) return linted(r) to ""
+    val unresolved = Regex("unresolved reference '([A-Z][A-Za-z0-9_]*)'")
+    val fixes = linkedSetOf<String>()
+    for (e in r.errors) {
+        val name = unresolved.find(e.message)?.groupValues?.get(1) ?: continue
+        val path = e.file ?: continue
+        val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
+        if (!f.isFile || f.extension != "kt") continue
+        val fq = index.uniqueClass(name) ?: continue
+        val text = f.readText()
+        val stale = Regex("(?m)^import\\s+[\\w.]+\\.$name\\s*$")
+        val fixed = when {
+            Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text) -> continue
+            stale.containsMatchIn(text) -> text.replace(stale, "import $fq")
+            else -> {
+                val lastImport = Regex("(?m)^import .*$").findAll(text).lastOrNull()
+                val pkg = Regex("(?m)^package .*$").find(text)
+                val at = lastImport?.range?.last ?: pkg?.range?.last ?: -1
+                if (at < 0) "import $fq\n$text" else text.substring(0, at + 1) + (if (lastImport == null) "\n" else "") + "\nimport $fq" + text.substring(at + 1)
+            }
+        }
+        f.writeText(fixed)
+        fixes += "${ctx.project.rel(f)}: import $fq"
+    }
+    if (fixes.isEmpty()) return linted(r) to ""
+    ctx.progress("fixed imports, rebuilding")
+    r = linted(builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) })
+    return r to "Kiln auto-fixed imports (re-read these files before editing them):\n" + fixes.joinToString("\n") { "  $it" } + "\n"
+}
+
+class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) : Tool {
     override val name = "check"
     override val description = "Compile only (resources + Kotlin), no packaging — the fast way to see errors after an edit. Returns structured diagnostics: SEVERITY [tool] file:line:col message, then the source line."
     override val schema = schema { }
     override val traits = setOf(Trait.READ_ONLY, Trait.LONG_RUNNING)
     override val timeoutMs = 600_000L
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val r = builds.build(ctx.project, checkOnly = true) { ctx.progress(it) }
+        val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = true)
         ctx.state.lastBuild = r
-        return ToolResult(r.report(), isError = !r.ok, summary = if (r.ok) "check OK" else "${r.errors.size} errors")
+        return ToolResult(fixed + r.report() + index.importHints(r), isError = !r.ok,
+            summary = if (r.ok) (if (fixed.isEmpty()) "check OK" else "check OK · auto-fixed imports") else "${r.errors.size} errors")
     }
 }
 
-class BuildTool(private val builds: BuildEngine) : Tool {
+class BuildTool(private val builds: BuildEngine, private val index: ClassIndex) : Tool {
     override val name = "build"
     override val description = "Build the signed APK. Unchanged steps are cached. Returns diagnostics on failure; on success, the APK path and timings."
     override val schema = schema { }
     override val traits = setOf(Trait.LONG_RUNNING)
     override val timeoutMs = 900_000L
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val r = builds.build(ctx.project) { ctx.progress(it) }
+        val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        return ToolResult(r.report() + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
+        return ToolResult(fixed + r.report() + index.importHints(r) + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
             isError = !r.ok, summary = if (r.ok) "build OK ${r.totalMs}ms" else "${r.errors.size} errors")
     }
 }
@@ -140,16 +180,16 @@ class InstallTool(w: Warden, d: Device) : DeviceTool(w, d) {
     }
 }
 
-class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device) : DeviceTool(w, d) {
+class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device, private val index: ClassIndex) : DeviceTool(w, d) {
     override val name = "run_app"
     override val description = "The verify loop in one call: build → install → launch → wait → report crash (if any), new error/warning log lines, a screenshot and the on-screen UI tree. Use after every meaningful change."
     override val schema = schema { int("wait_ms", "How long to let the app run before checking (1000–10000).", required = false) }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.LONG_RUNNING, Trait.RETURNS_IMAGE)
     override val timeoutMs = 900_000L
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        val r = builds.build(ctx.project) { ctx.progress(it) }
+        val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        if (!r.ok) return ToolResult(r.report(), isError = true, summary = "${r.errors.size} build errors")
+        if (!r.ok) return ToolResult(fixed + r.report() + index.importHints(r), isError = true, summary = "${r.errors.size} build errors")
         val pkg = pkg(ctx)
         ctx.progress("install")
         val inst = device.install(File(r.apk!!))
@@ -166,6 +206,9 @@ class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device) : Device
         val tree = if (alive) device.uiTree() else emptyList()
         val text = buildString {
             appendLine("build OK ${r.totalMs}ms · installed · ${if (alive) "running" else "NOT RUNNING"}")
+            if (fixed.isNotEmpty()) append(fixed)
+            // Bugs the compiler accepts (e.g. "$items.size") — the screenshot alone won't make them obvious.
+            r.warnings.filter { it.tool == "kiln-lint" }.take(10).forEach { appendLine("WARNING [kiln-lint] ${it.file}:${it.line} ${it.message}") }
             if (crash != null) { appendLine("CRASH:"); appendLine(crash) }
             if (logs.isNotBlank()) { appendLine("log (W and above since launch):"); appendLine(logs.lines().takeLast(40).joinToString("\n")) }
             if (tree.isNotEmpty()) { appendLine("screen:"); appendLine(treeText(tree).lines().take(80).joinToString("\n")) }

@@ -51,9 +51,11 @@ data class Activity(
     val progress: String = "",
     val images: List<ByteArray> = emptyList(),
     val ms: Long = 0,
+    /** Names of non-image files attached to a USER message. */
+    val files: List<String> = emptyList(),
 ) {
     enum class Kind { USER, ASSISTANT, THINKING, TOOL, NOTICE, ERROR }
-    enum class Status { RUNNING, DONE, FAILED, DENIED }
+    enum class Status { RUNNING, DONE, FAILED, DENIED, STOPPED }
 }
 
 data class ApprovalRequest(val tool: String, val input: String, val answer: CompletableDeferred<Pair<Boolean, Boolean>>) // (allow, forSession)
@@ -83,6 +85,8 @@ class AgentLoop(
     val todos = MutableStateFlow<List<SessionState.Todo>>(emptyList())
 
     private val state = SessionState()
+    /** How often this request pushed back on ending with a broken build (see the stop guard in [loop]). */
+    private var stopGuards = 0
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
 
@@ -104,14 +108,23 @@ class AgentLoop(
         for (m in session.messages) for (b in m.content) {
             val o = b as? JsonObject ?: continue
             when (o.str("type")) {
-                "text" -> if (m.role == "user") { if (!o.str("text").orEmpty().startsWith("<system-reminder>")) next(Activity.Kind.USER, o.str("text") ?: "") }
-                          else if (m.role == "assistant") next(Activity.Kind.ASSISTANT, o.str("text") ?: "")
+                "text" -> if (m.role == "user") {
+                              val t = o.str("text").orEmpty()
+                              // Attachments ride on the user's bubble as chips, not as giant text.
+                              val att = Attachments.nameOf(t)
+                              if (att != null) attachToLastUser(files = listOf(att))
+                              else if (!t.startsWith("<system-reminder>")) next(Activity.Kind.USER, t)
+                          } else if (m.role == "assistant") next(Activity.Kind.ASSISTANT, o.str("text") ?: "")
+                "image" -> if (m.role == "user") (o["source"] as? JsonObject)?.str("data")?.let {
+                    attachToLastUser(images = listOf(java.util.Base64.getDecoder().decode(it)))
+                }
                 "tool_use" -> {
                     val r = results[o.str("id")]
                     val err = r?.get("is_error")?.toString() == "true"
-                    val text = (r?.get("content") as? JsonArray)?.firstOrNull()?.let { (it as? JsonObject)?.str("text") } ?: ""
+                    val text = r?.get("content").let { c -> (c as? JsonPrimitive)?.content
+                        ?: (c as? JsonArray)?.firstOrNull()?.let { (it as? JsonObject)?.str("text") } } ?: ""
                     add(Activity(ids.incrementAndGet(), Activity.Kind.TOOL, tool = o.str("name"), input = o["input"]?.compact(),
-                        status = if (err) Activity.Status.FAILED else Activity.Status.DONE, summary = text.lineSequence().firstOrNull()?.take(140) ?: ""))
+                        status = if (text == "interrupted by the user") Activity.Status.STOPPED else if (err) Activity.Status.FAILED else Activity.Status.DONE, summary = text.lineSequence().firstOrNull()?.take(140) ?: ""))
                 }
             }
         }
@@ -119,15 +132,29 @@ class AgentLoop(
 
     // ------------------------------------------------------------ turn
 
-    suspend fun send(userText: String) {
+    /** Images / file names on the newest USER bubble (an attachment arrives after its message text). */
+    private fun attachToLastUser(images: List<ByteArray> = emptyList(), files: List<String> = emptyList()) {
+        val last = _feed.value.lastOrNull { it.kind == Activity.Kind.USER }
+        if (last == null) next(Activity.Kind.USER, "").let { id -> update(id) { it.copy(images = images, files = files) } }
+        else update(last.id) { it.copy(images = it.images + images, files = it.files + files) }
+    }
+
+    suspend fun send(userText: String, attachments: List<Attachment> = emptyList()) {
         if (running.value) return
         running.value = true
+        stopGuards = 0
         try {
-            next(Activity.Kind.USER, userText)
-            session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to userText)))))
-            if (session.meta.title.isBlank()) session.updateMeta { it.copy(title = userText.take(60)) }
+            val id = next(Activity.Kind.USER, userText)
+            val extra = Attachments.blocks(project, attachments)
+            update(id) { it.copy(files = attachments.filterNot { a -> a.mime.startsWith("image/") }.map { a -> a.name },
+                images = attachments.filter { a -> a.mime.startsWith("image/") }.map { a -> a.bytes }) }
+            val blocks = listOfNotNull(userText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra
+            session.append(Msg("user", arrOf(blocks)))
+            val title = userText.ifBlank { attachments.joinToString { it.name } }
+            if (session.meta.title.isBlank()) session.updateMeta { it.copy(title = title.take(60)) }
             loop()
         } catch (e: CancellationException) {
+            _feed.value = _feed.value.map { if (it.status == Activity.Status.RUNNING) it.copy(status = Activity.Status.STOPPED) else it }
             next(Activity.Kind.NOTICE, "Stopped.")
             closeDanglingToolUses()
             throw e
@@ -158,6 +185,18 @@ class AgentLoop(
             if (uses.isEmpty()) {
                 if (turn.second.stop == Stop.MAX_TOKENS) {
                     session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "Your reply was cut off at the output limit. Continue from where you stopped.")))))
+                    continue
+                }
+                // Stop guard: ending the turn while the project doesn't build is almost always a
+                // mistake (a local model once "heard" a stop nobody sent). Push back, twice at most.
+                val lb = state.lastBuild
+                if (lb != null && !lb.ok && stopGuards < 2) {
+                    stopGuards++
+                    next(Activity.Kind.NOTICE, "The build is still failing — asking the agent to keep going.")
+                    session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
+                        "<system-reminder>Nobody asked you to stop. The project does not build: the last check had " +
+                        "${lb.errors.size} error(s). Fix them (see the import hints in that result), run check again, " +
+                        "then continue with the task. Only stop if you truly cannot fix it — and then say why.</system-reminder>")))))
                     continue
                 }
                 return

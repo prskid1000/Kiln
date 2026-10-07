@@ -126,8 +126,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         s.loop.value = Graph.kiln.openSession(s.project, id)
     }
 
-    fun send(name: String, text: String) {
-        if (text.isBlank()) return
+    fun send(name: String, text: String, attachments: List<app.kiln.agent.Attachment> = emptyList()) {
+        if (text.isBlank() && attachments.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             if (Graph.toolchain.state.value !is Toolchain.State.Ready) { message.value = "Install the toolchain first (Settings)"; return@launch }
             val s = state(name)
@@ -137,7 +137,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java))
             s.job = viewModelScope.launch(Dispatchers.IO) {
-                try { l.send(text) } finally {
+                try { l.send(text, attachments) } finally {
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
                     if (synchronized(states) { states.values.none { it.job?.isActive == true && it !== s } })
                         ctx.stopService(Intent(ctx, RunService::class.java))
