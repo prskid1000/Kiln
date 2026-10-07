@@ -42,7 +42,7 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -286,7 +286,7 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                 }
             }
         }
-        PillTabs(listOf(Icons.Rounded.ChatBubbleOutline to "Chat", Icons.Rounded.Folder to "Files", Icons.Rounded.ReceiptLong to "Logs"),
+        PillTabs(listOf(Icons.Rounded.ChatBubbleOutline to "Chat", Icons.Rounded.Folder to "Files", Icons.AutoMirrored.Rounded.ReceiptLong to "Logs"),
             tab, Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { tab = it }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {

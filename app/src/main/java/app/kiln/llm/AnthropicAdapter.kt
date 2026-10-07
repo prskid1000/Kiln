@@ -171,9 +171,9 @@ class AnthropicAdapter(
             .filterNotNull()
         if (blocks.isEmpty()) return null
         return when (m.role) {
-            "system" -> if (caps.midSystem) obj("role" to "system", "content" to blocks.joinToString("\n") { (it as JsonObject).str("text") ?: "" })
+            "system" -> if (caps.midSystem) obj("role" to "system", "content" to blocks.joinToString("\n") { it.str("text") ?: "" })
                         else obj("role" to "user", "content" to arrOf(listOf(obj("type" to "text",
-                            "text" to "<system-reminder>\n" + blocks.joinToString("\n") { (it as JsonObject).str("text") ?: "" } + "\n</system-reminder>"))))
+                            "text" to "<system-reminder>\n" + blocks.joinToString("\n") { it.str("text") ?: "" } + "\n</system-reminder>"))))
             else -> obj("role" to m.role, "content" to JsonArray(blocks))
         }
     }

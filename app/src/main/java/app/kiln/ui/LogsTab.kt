@@ -24,7 +24,7 @@ import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -95,8 +95,8 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
         }
     }
 
-    if (!ready) { EmptyState(Icons.Rounded.ReceiptLong, "Warden isn't connected", "Logs are read from the device through Warden."); return }
-    if (!isInstalled) { EmptyState(Icons.Rounded.ReceiptLong, "Not installed yet", "Run the app to see its logs here."); return }
+    if (!ready) { EmptyState(Icons.AutoMirrored.Rounded.ReceiptLong, "Warden isn't connected", "Logs are read from the device through Warden."); return }
+    if (!isInstalled) { EmptyState(Icons.AutoMirrored.Rounded.ReceiptLong, "Not installed yet", "Run the app to see its logs here."); return }
 
     Column(Modifier.fillMaxSize()) {
         // Search + actions
@@ -144,7 +144,7 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
         }
         val list = rememberLazyListState()
         LaunchedEffect(shown.size) { if (shown.isNotEmpty() && !list.canScrollForward) list.scrollToItem(shown.size - 1) }
-        if (shown.isEmpty()) EmptyState(Icons.Rounded.ReceiptLong, if (paused) "Paused" else "No log lines yet",
+        if (shown.isEmpty()) EmptyState(Icons.AutoMirrored.Rounded.ReceiptLong, if (paused) "Paused" else "No log lines yet",
             if (since != null) "Cleared — new lines will appear as the app logs." else "Open the app and interact with it.")
         else Box(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
             LazyColumn(state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp)) {

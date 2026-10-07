@@ -53,11 +53,11 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.MenuBook
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Psychology
-import androidx.compose.material.icons.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Terminal
@@ -303,8 +303,8 @@ private fun describe(a: Activity): Pair<ImageVector, String> {
         "stop_app" -> Icons.Rounded.Stop to "Stopped the app"
         "clear_data" -> Icons.Rounded.PhoneAndroid to "Cleared app data"
         "grant_permission" -> Icons.Rounded.PhoneAndroid to "Granted ${arg("permission") ?: "a permission"}"
-        "logcat" -> Icons.Rounded.ReceiptLong to "Read logs"
-        "last_crash" -> Icons.Rounded.ReceiptLong to "Checked for crashes"
+        "logcat" -> Icons.AutoMirrored.Rounded.ReceiptLong to "Read logs"
+        "last_crash" -> Icons.AutoMirrored.Rounded.ReceiptLong to "Checked for crashes"
         "screenshot" -> Icons.Rounded.PhoneAndroid to "Took a screenshot"
         "ui_tree" -> Icons.Rounded.PhoneAndroid to "Inspected the screen"
         "tap" -> Icons.Rounded.TouchApp to "Tapped ${arg("target") ?: ""}".trim()
@@ -313,8 +313,8 @@ private fun describe(a: Activity): Pair<ImageVector, String> {
         "press_key" -> Icons.Rounded.TouchApp to "Pressed ${arg("key") ?: "a key"}"
         "wait_for" -> Icons.Rounded.TouchApp to "Waited for ${arg("target") ?: "the screen"}"
         "shell", "dumpsys" -> Icons.Rounded.Terminal to (arg("command")?.take(48)?.let { "Ran $it" } ?: "Ran a command")
-        "sdk_lookup" -> Icons.Rounded.MenuBook to "Looked up ${arg("query") ?: arg("name") ?: "the SDK"}"
-        "kit_docs" -> Icons.Rounded.MenuBook to "Read the kit docs"
+        "sdk_lookup" -> Icons.AutoMirrored.Rounded.MenuBook to "Looked up ${arg("query") ?: arg("name") ?: "the SDK"}"
+        "kit_docs" -> Icons.AutoMirrored.Rounded.MenuBook to "Read the kit docs"
         "web_fetch" -> Icons.Rounded.Language to "Fetched ${arg("url")?.removePrefix("https://")?.take(40) ?: "a page"}"
         "todo" -> Icons.Rounded.Checklist to "Updated the plan"
         "subagent" -> Icons.Rounded.AutoAwesome to "Delegated a task"
