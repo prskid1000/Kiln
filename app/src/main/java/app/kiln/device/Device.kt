@@ -32,8 +32,17 @@ class Device(private val warden: Warden) {
     /** Silent install by streaming the APK into `cmd package install -S`. */
     suspend fun install(apk: java.io.File): ExecResult {
         val bytes = apk.readBytes()
-        return warden.exec(listOf("cmd", "package", "install", "-r", "-t", "-S", bytes.size.toString()), stdin = bytes,
+        suspend fun push() = warden.exec(listOf("cmd", "package", "install", "-r", "-t", "-S", bytes.size.toString()), stdin = bytes,
             timeoutMs = 300_000)
+        val r = push()
+        // A project recreated under an old name has a new signing key: Android refuses the update.
+        // For Kiln's own apps the fix is a clean reinstall (the old copy's data goes with it).
+        if (!r.ok && "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in r.all) {
+            val pkg = Regex("package (kiln\\.app\\.[a-z0-9_]+)").find(r.all)?.groupValues?.get(1) ?: return r
+            uninstall(pkg)
+            return push().let { it.copy(out = it.out + "\n(reinstalled: the signing key changed, so the old copy and its data were removed)") }
+        }
+        return r
     }
 
     suspend fun uninstall(pkg: String): ExecResult { guard(pkg); return warden.exec(listOf("pm", "uninstall", pkg)) }
@@ -190,6 +199,13 @@ class Device(private val warden: Warden) {
     /** `input text` needs spaces as %s and shell metacharacters escaped. */
     suspend fun type(text: String) = warden.exec(listOf("input", "text", text.replace(" ", "%s")
         .replace(Regex("""([\\'"`$&|;<>()*?!#~\[\]{}])"""), "\\\\$1")))
+    /** Package of the activity in front right now, or null if it can't be told. */
+    suspend fun foregroundPackage(): String? {
+        val out = warden.exec(listOf("dumpsys", "activity", "activities")).out
+        val line = out.lineSequence().firstOrNull { "topResumedActivity" in it || "mResumedActivity" in it } ?: return null
+        return Regex("""\s([a-zA-Z0-9_.]+)/""").find(line)?.groupValues?.get(1)
+    }
+
     suspend fun screenSize(): Pair<Int, Int> {
         val m = Regex("""(\d+)x(\d+)""").findAll(warden.exec(listOf("wm", "size")).out).lastOrNull() ?: return 1080 to 2400
         return m.groupValues[1].toInt() to m.groupValues[2].toInt()

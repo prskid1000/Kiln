@@ -157,11 +157,29 @@ class ToolRegistry(private val builtins: List<Tool>) {
             .sortedBy { it.name }
     }
 
-    /** Strict only when every property is required — what strict schemas demand. */
+    /**
+     * Tool schemas mark optional fields honestly (the harness accepts them missing). Strict mode
+     * wants every property listed in `required`, so for it optional fields become required but
+     * nullable — the documented strict-schema form — and the harness treats null as absent.
+     */
     fun specs(tools: List<Tool>): List<ToolSpec> = tools.map { t ->
-        val props = (t.schema["properties"] as? JsonObject)?.keys ?: emptySet()
-        val req = (t.schema["required"] as? JsonArray)?.map { (it as JsonPrimitive).content }?.toSet() ?: emptySet()
-        ToolSpec(t.name, t.description, t.schema, strict = props == req && t.schema["additionalProperties"]?.toString() == "false")
+        if (t.schema["additionalProperties"]?.toString() != "false") ToolSpec(t.name, t.description, t.schema, strict = false)
+        else ToolSpec(t.name, t.description, strictForm(t.schema), strict = true)
+    }
+
+    private fun strictForm(schema: JsonObject): JsonObject {
+        val props = schema["properties"] as? JsonObject ?: return schema
+        val req = (schema["required"] as? JsonArray)?.map { (it as JsonPrimitive).content }?.toSet() ?: emptySet()
+        val out = props.mapValues { (k, v) ->
+            var p = v as JsonObject
+            // Nested object items (todo items, multi_edit edits) get the same treatment.
+            (p["items"] as? JsonObject)?.takeIf { it["properties"] != null }?.let { p = JsonObject(p + ("items" to strictForm(it))) }
+            val type = p["type"] as? JsonPrimitive
+            if (k in req || type == null) p
+            else JsonObject(p + ("type" to JsonArray(listOf(type, JsonPrimitive("null"))))
+                + listOfNotNull((p["enum"] as? JsonArray)?.let { "enum" to JsonArray(it + kotlinx.serialization.json.JsonNull) }))
+        }
+        return JsonObject(schema + ("properties" to JsonObject(out)) + ("required" to JsonArray(props.keys.map { JsonPrimitive(it) })))
     }
 
     /** Default policy from traits; per-tool overrides win (SPEC §4.3). */

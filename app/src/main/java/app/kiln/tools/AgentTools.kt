@@ -26,7 +26,7 @@ class TodoTool : Tool {
 class AskUserTool : Tool {
     override val name = "ask_user"
     override val description = "Ask the user a question when a decision is genuinely theirs (e.g. which of two designs). Give 2–4 short options; they may also answer freely. Don't ask what you can decide sensibly yourself."
-    override val schema = schema { str("question", "The question."); strList("options", "2–4 short options.") }
+    override val schema = schema { str("question", "The question."); strList("options", "2–4 short options.", required = false) }
     override val traits = setOf(Trait.READ_ONLY)
     override val timeoutMs = 24 * 3_600_000L
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -65,7 +65,7 @@ class CheckpointTool : Tool {
 class RestoreTool : Tool {
     override val name = "restore"
     override val description = "Restore the project's files from a checkpoint (a safety checkpoint of the current state is taken first). With an empty id, lists checkpoints."
-    override val schema = schema { str("id", "Checkpoint id, or empty to list.") }
+    override val schema = schema { str("id", "Checkpoint id, or empty to list.", required = false) }
     override val traits = setOf(Trait.DESTRUCTIVE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val all = CheckpointTool.dir(ctx).listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.substringBefore('-').toIntOrNull() ?: 0 } ?: emptyList()
@@ -83,7 +83,7 @@ class RestoreTool : Tool {
 class MemoryTool : Tool {
     override val name = "project_memory"
     override val description = "The project's long-term notes (.kiln/memory.md), shown to you at the start of every session: decisions, conventions, known issues, what the user wants. read returns it; write replaces it — keep it short and current."
-    override val schema = schema { str("action", "read or write.", enum = listOf("read", "write")); str("content", "New content for write; empty for read.") }
+    override val schema = schema { str("action", "read or write.", enum = listOf("read", "write")); str("content", "New content for write; empty for read.", required = false) }
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val f = ctx.project.memoryFile

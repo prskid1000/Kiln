@@ -46,9 +46,9 @@ class SetAppMetaTool : Tool {
     override val name = "set_app_meta"
     override val description = "Change the app's label, version or runtime permissions (kiln.json). Permissions are names like CAMERA or android.permission.CAMERA. The package name is fixed."
     override val schema = schema {
-        str("label", "App name shown on the launcher; empty to keep.")
-        str("version_name", "e.g. 1.1; empty to keep.")
-        strList("permissions", "The complete permission list (replaces the current one).")
+        str("label", "App name shown on the launcher; empty to keep.", required = false)
+        str("version_name", "e.g. 1.1; empty to keep.", required = false)
+        strList("permissions", "The complete permission list (replaces the current one).", required = false)
     }
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -109,9 +109,18 @@ abstract class DeviceTool(protected val warden: Warden, protected val device: De
     final override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         if (warden.status() != Warden.Status.READY)
             return ToolResult.error("Warden is ${warden.status().name.lowercase().replace('_', ' ')} — device tools need it (start Warden and grant Kiln).")
+        // Input goes to whatever is on screen. Only let it reach the project's own app, never
+        // another app (a stray tap once pressed Warden's Stop button).
+        if (inputTool) {
+            val front = device.foregroundPackage()
+            if (front != null && front != pkg(ctx))
+                return ToolResult.error("${pkg(ctx)} is not in front ($front is) — launch it first with launch or run_app.")
+        }
         return exec(ctx, input)
     }
     abstract suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult
+    /** Sends input events (tap, type, swipe, key): allowed only while the project's app is in front. */
+    protected open val inputTool: Boolean = false
 
     protected fun treeText(nodes: List<UiNode>): String = nodes.joinToString("\n") { n ->
         val flags = listOfNotNull(if (n.clickable) "click" else null, if (n.scrollable) "scroll" else null,
@@ -134,7 +143,7 @@ class InstallTool(w: Warden, d: Device) : DeviceTool(w, d) {
 class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device) : DeviceTool(w, d) {
     override val name = "run_app"
     override val description = "The verify loop in one call: build → install → launch → wait → report crash (if any), new error/warning log lines, a screenshot and the on-screen UI tree. Use after every meaningful change."
-    override val schema = schema { int("wait_ms", "How long to let the app run before checking (1000–10000).") }
+    override val schema = schema { int("wait_ms", "How long to let the app run before checking (1000–10000).", required = false) }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.LONG_RUNNING, Trait.RETURNS_IMAGE)
     override val timeoutMs = 900_000L
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -206,18 +215,18 @@ class GrantPermissionTool(w: Warden, d: Device) : DeviceTool(w, d) {
 
 class LogcatTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val name = "logcat"
-    override val description = "App log lines. since_last=true returns only lines since the previous logcat/launch (the usual case). level: V D I W E."
+    override val description = "App log lines. since_last=true returns only lines since the previous logcat/launch (the usual case). level: verbose | debug | info | warn | error."
     override val schema = schema {
-        bool("since_last", "Only new lines since the last check.")
-        str("level", "Minimum level.", enum = listOf("V", "D", "I", "W", "E"))
-        str("grep", "Only lines matching this regex; empty for all.")
+        bool("since_last", "Only new lines since the last check.", required = false)
+        str("level", "Minimum level.", enum = listOf("verbose", "debug", "info", "warn", "error", "V", "D", "I", "W", "E"), required = false)
+        str("grep", "Only lines matching this regex; empty for all.", required = false)
     }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.READ_ONLY)
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val pkg = pkg(ctx)
         val since = if (input["since_last"]?.toString() == "true") ctx.state.logMarkers[pkg] else null
         val next = device.logMarker()
-        var text = device.logcat(pkg, since, input.str("level") ?: "V", max = 2000)
+        var text = device.logcat(pkg, since, (input.str("level") ?: "V").take(1).uppercase(), max = 2000)
         input.str("grep")?.takeIf { it.isNotBlank() }?.let { g -> val re = Regex(g); text = text.lines().filter { re.containsMatchIn(it) }.joinToString("\n") }
         ctx.state.logMarkers[pkg] = next
         return ToolResult.ok(ctx.spill(text.ifBlank { "(no lines)" }), "${text.lines().count { it.isNotBlank() }} lines")
@@ -262,13 +271,14 @@ class UiTreeTool(w: Warden, d: Device) : DeviceTool(w, d) {
 }
 
 class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
+    override val inputTool = true
     override val name = "tap"
     override val description = "Tap an element by its visible text, content description or resource id (preferred — copy the label " +
         "from ui_tree, e.g. Add 250ml), or at x,y in screen pixels (ui_tree coordinates, not screenshot pixels)."
     override val schema = schema {
-        str("target", "Label to tap, as ui_tree shows it; empty to use x,y.")
-        int("x", "Screen-pixel X when target is empty (0 otherwise).")
-        int("y", "Screen-pixel Y when target is empty (0 otherwise).")
+        str("target", "Label to tap, as ui_tree shows it; empty to use x,y.", required = false)
+        int("x", "Screen-pixel X when target is empty (0 otherwise).", required = false)
+        int("y", "Screen-pixel Y when target is empty (0 otherwise).", required = false)
     }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         // "640, 1427" in target is a coordinate, not a label.
@@ -288,6 +298,7 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
 }
 
 class TypeTool(w: Warden, d: Device) : DeviceTool(w, d) {
+    override val inputTool = true
     override val name = "type_text"
     override val description = "Type text into the focused field (tap the field first)."
     override val schema = schema { str("text", "Text to type.") }
@@ -295,6 +306,7 @@ class TypeTool(w: Warden, d: Device) : DeviceTool(w, d) {
 }
 
 class SwipeTool(w: Warden, d: Device) : DeviceTool(w, d) {
+    override val inputTool = true
     override val name = "swipe"
     override val description = "Swipe/scroll the screen: direction up | down | left | right (content moves the other way, like a finger)."
     override val schema = schema { str("direction", "Finger direction.", enum = listOf("up", "down", "left", "right")) }
@@ -310,6 +322,7 @@ class SwipeTool(w: Warden, d: Device) : DeviceTool(w, d) {
 }
 
 class KeyTool(w: Warden, d: Device) : DeviceTool(w, d) {
+    override val inputTool = true
     override val name = "press_key"
     override val description = "Press a key: BACK, HOME, ENTER, TAB, DEL, APP_SWITCH."
     override val schema = schema { str("key", "Key name.", enum = listOf("BACK", "HOME", "ENTER", "TAB", "DEL", "APP_SWITCH")) }
@@ -319,7 +332,7 @@ class KeyTool(w: Warden, d: Device) : DeviceTool(w, d) {
 class WaitForTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val name = "wait_for"
     override val description = "Wait until text (or a description/id) appears on screen, up to timeout_ms. Returns whether it appeared."
-    override val schema = schema { str("target", "Text to wait for."); int("timeout_ms", "Max wait (500–20000).") }
+    override val schema = schema { str("target", "Text to wait for."); int("timeout_ms", "Max wait (500–20000).", required = false) }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val end = System.currentTimeMillis() + (input.int("timeout_ms") ?: 5000).coerceIn(500, 20_000)
         while (System.currentTimeMillis() < end) {

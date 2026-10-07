@@ -16,6 +16,7 @@ import app.kiln.llm.ProviderException
 import app.kiln.llm.Providers
 import app.kiln.llm.Stop
 import app.kiln.llm.Usage
+import app.kiln.tools.validateInput
 import app.kiln.tools.Policy
 import app.kiln.tools.SessionState
 import app.kiln.tools.Tool
@@ -315,35 +316,7 @@ class AgentLoop(
     }
 
     /** Client-side schema check: required keys present, no unknown keys, basic types. */
-    private fun validate(tool: Tool, input: JsonObject): String? {
-        val props = tool.schema["properties"] as? JsonObject ?: return null
-        val required = (tool.schema["required"] as? JsonArray)?.map { (it as JsonPrimitive).content } ?: emptyList()
-        val missing = required.filter { it !in input }
-        if (missing.isNotEmpty()) return "missing required input: ${missing.joinToString()}"
-        val unknown = input.keys.filter { it !in props }
-        if (unknown.isNotEmpty() && tool.schema["additionalProperties"]?.toString() == "false") return "unknown input: ${unknown.joinToString()}"
-        // Providers without strict tool schemas (local models, most OpenAI-compatible proxies) can send
-        // any value; check enums and primitive types so a bad call fails loudly instead of misbehaving.
-        for ((k, v) in input) {
-            val spec = props[k] as? JsonObject ?: continue
-            if (v is kotlinx.serialization.json.JsonNull && k !in required) continue
-            val prim = v as? JsonPrimitive
-            (spec["enum"] as? JsonArray)?.map { (it as JsonPrimitive).content }?.let { allowed ->
-                if (prim == null || prim.content !in allowed) return "$k must be one of ${allowed.joinToString { "\"$it\"" }}, got ${v}"
-            }
-            val ok = when ((spec["type"] as? JsonPrimitive)?.content) {
-                "string" -> prim?.isString == true
-                "integer" -> prim != null && !prim.isString && prim.content.toLongOrNull() != null
-                "number" -> prim != null && !prim.isString && prim.content.toDoubleOrNull() != null
-                "boolean" -> prim != null && !prim.isString && prim.content in setOf("true", "false")
-                "array" -> v is JsonArray
-                "object" -> v is JsonObject
-                else -> true
-            }
-            if (!ok) return "$k must be a ${(spec["type"] as JsonPrimitive).content}, got $v"
-        }
-        return null
-    }
+    private fun validate(tool: Tool, input: JsonObject): String? = validateInput(tool, input)
 
     /** After a cancel or crash mid-tools, every tool_use must still get a tool_result (history stays valid). */
     private fun closeDanglingToolUses() {

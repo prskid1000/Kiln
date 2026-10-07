@@ -1,5 +1,6 @@
 package app.kiln.tools
 
+import kotlinx.serialization.json.JsonPrimitive
 import app.kiln.build.BuildResult
 import app.kiln.build.Project
 import app.kiln.core.arrOf
@@ -88,3 +89,42 @@ fun schema(block: SchemaBuilder.() -> Unit): JsonObject = SchemaBuilder().apply(
 
 /** "1 file", "3 files" — tool summaries are shown to people. */
 fun plural(n: Int, one: String, many: String = one + "s") = "$n ${if (n == 1) one else many}"
+
+/** What the harness checks before running a tool: required fields, unknown fields, enums, primitive types. */
+fun validateInput(tool: Tool, input: JsonObject): String? = validateAgainst(tool.schema, input, "")
+
+private fun validateAgainst(schema: JsonObject, input: JsonObject, at: String): String? {
+    val props = schema["properties"] as? JsonObject ?: return null
+    val required = (schema["required"] as? JsonArray)?.map { (it as JsonPrimitive).content } ?: emptyList()
+    val missing = required.filter { it !in input }
+    if (missing.isNotEmpty()) return "missing required input: ${missing.joinToString { at + it }}"
+    val unknown = input.keys.filter { it !in props }
+    if (unknown.isNotEmpty() && schema["additionalProperties"]?.toString() == "false") return "unknown input: ${unknown.joinToString()}"
+    // Providers without strict tool schemas (local models, most OpenAI-compatible proxies) can send
+    // any value; check enums and primitive types so a bad call fails loudly instead of misbehaving.
+    for ((k, v) in input) {
+        val spec = props[k] as? JsonObject ?: continue
+        if (v is kotlinx.serialization.json.JsonNull && k !in required) continue
+        val prim = v as? JsonPrimitive
+        (spec["enum"] as? JsonArray)?.map { (it as JsonPrimitive).content }?.let { allowed ->
+            if (prim == null || prim.content !in allowed) return "$at$k must be one of ${allowed.joinToString { "\"$it\"" }}, got ${v}"
+        }
+        val ok = when ((spec["type"] as? JsonPrimitive)?.content) {
+            "string" -> prim?.isString == true
+            "integer" -> prim != null && !prim.isString && prim.content.toLongOrNull() != null
+            "number" -> prim != null && !prim.isString && prim.content.toDoubleOrNull() != null
+            "boolean" -> prim != null && !prim.isString && prim.content in setOf("true", "false")
+            "array" -> v is JsonArray
+            "object" -> v is JsonObject
+            else -> true
+        }
+        if (!ok) return "$at$k must be a ${(spec["type"] as JsonPrimitive).content}, got $v"
+        // Arrays of objects (todo items, multi_edit edits): check each element too.
+        val item = spec["items"] as? JsonObject
+        if (v is JsonArray && item?.get("properties") != null) v.forEachIndexed { i, e ->
+            if (e !is JsonObject) return "$at$k[$i] must be an object"
+            validateAgainst(item, e, "$at$k[$i].")?.let { return it }
+        }
+    }
+    return null
+}

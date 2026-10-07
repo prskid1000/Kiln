@@ -11,7 +11,7 @@ private fun JsonObject.req(k: String) = str(k) ?: throw IllegalArgumentException
 class ListDirTool : Tool {
     override val name = "list_dir"
     override val description = "List files under a directory of the project (recursive, skips build/ and .kiln/). Returns relative paths with sizes."
-    override val schema = schema { str("path", "Directory relative to the project root; \"\" for the root.") }
+    override val schema = schema { str("path", "Directory relative to the project root; \"\" for the root.", required = false) }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val dir = ctx.project.resolve(input.str("path") ?: "")
@@ -39,8 +39,8 @@ class GrepTool : Tool {
     override val description = "Search project files with a regular expression. Returns file:line: text, with optional context lines. Use before editing to find every place that needs changing."
     override val schema = schema {
         str("pattern", "Regular expression (Kotlin/Java syntax).")
-        str("glob", "Only files matching this glob, e.g. \"src/**/*.kt\". Empty for all.")
-        int("context", "Lines of context around each hit (0–5).")
+        str("glob", "Only files matching this glob, e.g. \"src/**/*.kt\". Empty for all.", required = false)
+        int("context", "Lines of context around each hit (0–5).", required = false)
     }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -70,8 +70,8 @@ class ReadFileTool : Tool {
     override val description = "Read a project file with line numbers. Read a file before editing it — edit_file refuses edits to files you haven't read (or that changed since)."
     override val schema = schema {
         str("path", "File relative to the project root.")
-        int("offset", "First line (1-based); 1 for the start.")
-        int("limit", "Max lines; 0 for up to 2000.")
+        int("offset", "First line (1-based); 1 for the start.", required = false)
+        int("limit", "Max lines; 0 for up to 2000.", required = false)
     }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -114,7 +114,7 @@ class EditFileTool : Tool {
         str("path", "File relative to the project root.")
         str("old_text", "Exact existing text, including indentation.")
         str("new_text", "Replacement text.")
-        bool("replace_all", "Replace every occurrence instead of exactly one.")
+        bool("replace_all", "Replace every occurrence instead of exactly one.", required = false)
     }
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -200,9 +200,9 @@ class ReadOutputTool : Tool {
     override val description = "Read the full text of a tool output that was cut short (outputs say \"saved as out-…\"). Optionally only lines matching a regex."
     override val schema = schema {
         str("id", "The output id, e.g. out-12.")
-        int("offset", "First line (1-based).")
-        int("limit", "Max lines; 0 for 400.")
-        str("grep", "Only lines matching this regex; empty for all.")
+        int("offset", "First line (1-based).", required = false)
+        int("limit", "Max lines; 0 for 400.", required = false)
+        str("grep", "Only lines matching this regex; empty for all.", required = false)
     }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
