@@ -34,6 +34,10 @@ class ProjectState(val project: Project) {
     val sessions = MutableStateFlow<List<SessionMeta>>(emptyList())
     /** Non-null while Run is in progress: "Building…", "Installing…", "Launching…". */
     val runStep = MutableStateFlow<String?>(null)
+    /** True until the project's last chat has been opened (so the chat doesn't flash its empty state). */
+    val loading = MutableStateFlow(true)
+    /** Stop was tapped and the run is winding down. */
+    val stopping = MutableStateFlow(false)
     internal var job: Job? = null
     // Rule proposals the user saved or dismissed (activity ids).
     val decidedRules = MutableStateFlow<Set<Int>>(emptySet())
@@ -80,6 +84,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                             ?.let { runCatching { Graph.kiln.openSession(s.project, it.id) }.getOrNull() }
                         // A run may have started a new chat meanwhile: never replace it with the old one.
                         if (s.loop.value == null) s.loop.value = last
+                        s.loading.value = false
                     }
                 }
             }
@@ -113,6 +118,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                     val last = l.feed.value.lastOrNull { it.kind == app.kiln.agent.Activity.Kind.ASSISTANT }?.text ?: ""
                     app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
+                    s.stopping.value = false
                     if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
                     onFinish()
                 }
@@ -164,6 +170,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteProject(name: String) = viewModelScope.launch(Dispatchers.IO) {
+        // Gone from the list at once; the uninstall and file removal below can take a few seconds.
+        projects.value = projects.value.filter { it.project.name != name }
         val s = synchronized(states) { states.remove(name) }
         s?.job?.cancel()
         val pkg = Project.packageFor(name)
@@ -203,7 +211,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun stop(name: String) { state(name).job?.cancel() }
+    // Cancelling waits for the model's stream to close, which can take a few seconds: say so at once.
+    fun stop(name: String) { state(name).let { it.stopping.value = true; it.job?.cancel() } }
 
     /** Build → install → launch, the same path the agent's run_app takes. */
     fun run(name: String) = runScope.launch {   // a build keeps going if the screen goes away
@@ -228,13 +237,17 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun uninstall(name: String) = viewModelScope.launch(Dispatchers.IO) {
-        val r = Graph.device.uninstall(state(name).pkg)
+        val s = state(name)
+        s.runStep.value = "Uninstalling…"   // the top bar's spinner
+        val r = try { Graph.device.uninstall(s.pkg) } finally { s.runStep.value = null }
         message.value = if (r.ok) "Uninstalled" else r.all.trim()
         refresh()
     }
 
     fun clearData(name: String) = viewModelScope.launch(Dispatchers.IO) {
-        val r = Graph.device.clearData(state(name).pkg)
+        val s = state(name)
+        s.runStep.value = "Clearing app data…"
+        val r = try { Graph.device.clearData(s.pkg) } finally { s.runStep.value = null }
         message.value = if (r.ok) "App data cleared" else r.all.trim()
     }
 

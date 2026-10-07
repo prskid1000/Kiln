@@ -85,6 +85,8 @@ class AgentLoop(
     private val _feed = MutableStateFlow<List<Activity>>(emptyList())
     val feed: StateFlow<List<Activity>> = _feed
     val running = MutableStateFlow(false)
+    /** When the current run began (for the elapsed time shown while it works). */
+    @Volatile var startedAt = 0L; private set
     val approval = MutableStateFlow<ApprovalRequest?>(null)
     val question = MutableStateFlow<Question?>(null)
     val usage = MutableStateFlow(session.meta.usage)
@@ -121,6 +123,12 @@ class AgentLoop(
     private fun update(id: Int, f: (Activity) -> Activity) { _feed.update { l -> l.map { if (it.id == id) f(it) else it } } }
 
     /** Rebuild the feed from a stored transcript (tool results matched to their calls). */
+    /** A run cut short: say so now, and again when this chat is reopened (it can be continued). */
+    private fun stoppedWith(text: String, error: Boolean = false) {
+        next(if (error) Activity.Kind.ERROR else Activity.Kind.NOTICE, text)
+        runCatching { session.updateMeta { it.copy(stopNotice = text, stopIsError = error) } }
+    }
+
     private fun replay() {
         val results = HashMap<String, JsonObject>()
         session.messages.filter { it.role == "user" }.forEach { m -> m.content.forEach { b ->
@@ -150,6 +158,11 @@ class AgentLoop(
                 }
             }
         }
+        val notice = session.meta.stopNotice
+        if (notice.isNotEmpty()) next(if (session.meta.stopIsError) Activity.Kind.ERROR else Activity.Kind.NOTICE, notice)
+        // A transcript that ends on the user's side (tool results, a message) was cut off mid-run:
+        // Kiln was closed, updated or killed while it worked.
+        else if (session.messages.lastOrNull()?.role == "user") next(Activity.Kind.NOTICE, "Interrupted — Kiln was closed while it worked.")
     }
 
     // ------------------------------------------------------------ turn
@@ -168,6 +181,8 @@ class AgentLoop(
     suspend fun send(userText: String, attachments: List<Attachment> = emptyList(), mode: Mode = Mode.BUILD, goal: String? = null) {
         // Atomic: a double-tap must not start two loops on one transcript.
         if (!running.compareAndSet(expect = false, update = true)) return
+        if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }
+        startedAt = System.currentTimeMillis()
         stopGuards = 0; goalChecks = 0
         this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
         // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
@@ -192,12 +207,12 @@ class AgentLoop(
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")?.trim()
         } catch (e: CancellationException) {
             _feed.value = _feed.value.map { if (it.status == Activity.Status.RUNNING) it.copy(status = Activity.Status.STOPPED) else it }
-            next(Activity.Kind.NOTICE, "Stopped.")
+            stoppedWith("Stopped.")
             closeDanglingToolUses()
             throw e
         } catch (e: Throwable) {
             Log.e("Kiln", "agent loop", e)
-            next(Activity.Kind.ERROR, e.message ?: e.toString())
+            stoppedWith(e.message ?: e.toString(), error = true)
             closeDanglingToolUses()
         } finally {
             running.value = false
@@ -208,7 +223,7 @@ class AgentLoop(
         val cfg = settings.value.merged(project.dir)
         var steps = 0
         while (true) {
-            if (++steps > cfg.maxSteps) { next(Activity.Kind.NOTICE, "Stopped after ${cfg.maxSteps} steps (limit in Settings)."); return }
+            if (++steps > cfg.maxSteps) { stoppedWith("Stopped after ${cfg.maxSteps} steps (limit in Settings)."); return }
             if (cost.value >= cfg.sessionUsd) { next(Activity.Kind.NOTICE, "Session spending cap reached (\$${"%.2f".format(cfg.sessionUsd)})."); return }
             if (settings.spentToday() >= cfg.dailyUsd) { next(Activity.Kind.NOTICE, "Daily spending cap reached (\$${"%.2f".format(cfg.dailyUsd)})."); return }
 
@@ -330,7 +345,7 @@ class AgentLoop(
             }
             if (spec != chain.last()) next(Activity.Kind.NOTICE, "${profile.label} failed (${lastError?.message?.take(100)}); falling back.")
         }
-        next(Activity.Kind.ERROR, "Model call failed: ${lastError?.message ?: "no usable model"}")
+        stoppedWith("Model call failed: ${lastError?.message ?: "no usable model"}", error = true)
         return null
     }
 
@@ -503,13 +518,21 @@ class AgentLoop(
         suspend fun headless(
             project: Project, sessionsRoot: File, providers: Providers, registry: ToolRegistry, tools: List<Tool>,
             settings: SettingsStore, systemPrompt: String, task: String, role: String,
+            /** The answer must contain this; if the helper stops without it, it is told to finish (twice at most). */
+            finished: Regex? = null, unfinished: String = "",
         ): Triple<String, Usage, Double> {
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
             val loop = AgentLoop(project, s, providers, registry, tools, settings, role)
-            loop.send(task)
-            val text = s.messages.lastOrNull { it.role == "assistant" }?.content
+            fun answer() = s.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")
-            return Triple(text ?: "(no answer)", loop.usage.value, loop.cost.value)
+            loop.send(task)
+            // A model may end its turn on "Let me check…" without doing it.
+            var nudges = 0
+            while (finished != null && nudges < 2 && answer()?.let { finished.containsMatchIn(it) } != true) {
+                nudges++
+                loop.send(unfinished)
+            }
+            return Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
         }
     }
 }

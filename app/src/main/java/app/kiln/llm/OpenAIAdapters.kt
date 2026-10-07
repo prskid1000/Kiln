@@ -47,12 +47,12 @@ abstract class OpenAIBase(protected val profile: Profile, private val apiKey: St
     }
 
     /** Server-sent events: yields (event, data) pairs until [DONE] or EOF. */
-    protected suspend fun sse(r: Response, each: (String?, String) -> Unit) {
+    /** Server-sent events. Stop cancels the HTTP call, which makes the read below throw. */
+    protected fun sse(r: Response, each: (String?, String) -> Unit) {
         val src = r.body.source()
         var event: String? = null
         val data = StringBuilder()
         while (true) {
-            currentCoroutineContext().ensureActive()
             val line = src.readUtf8Line() ?: break
             when {
                 line.isEmpty() -> {
@@ -175,7 +175,12 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
         return out
     }
 
-    override suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn = withContext(Dispatchers.IO) {
+    override suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn {
+        // Stop cancels the HTTP call at once, even before the first byte (see abandonable).
+        val callRef = java.util.concurrent.atomic.AtomicReference<okhttp3.Call?>()
+        val events = onEvent
+        return abandonable(onAbandon = { callRef.get()?.cancel() }) { abandoned ->
+        val onEvent: (ModelEvent) -> Unit = { if (!abandoned()) events(it) }
         val text = StringBuilder(); val thinking = StringBuilder()
         data class Call(var id: String = "", var name: String = "", val args: StringBuilder = StringBuilder())
         val calls = sortedMapOf<Int, Call>()
@@ -187,7 +192,7 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
         fun emit(t: String, think: Boolean) {
             if (think) { thinking.append(t); onEvent(ModelEvent.Thinking(t)) } else { text.append(t); onEvent(ModelEvent.Text(t)) }
         }
-        http.newCall(request("/chat/completions", buildBody(req))).execute().use { r ->
+        http.newCall(request("/chat/completions", buildBody(req))).also { callRef.set(it) }.execute().use { r ->
             check(r)
             sse(r) { _, data ->
                 val j = parseJson(data) as? JsonObject ?: return@sse
@@ -228,6 +233,7 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
         }
         val stop = if (calls.isNotEmpty()) Stop.TOOL_USE else stopFrom(finish)
         ModelTurn(JsonArray(blocks), stop, usage)
+    }
     }
 }
 
@@ -286,12 +292,17 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
         return out
     }
 
-    override suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn = withContext(Dispatchers.IO) {
+    override suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn {
+        // Stop cancels the HTTP call at once, even before the first byte (see abandonable).
+        val callRef = java.util.concurrent.atomic.AtomicReference<okhttp3.Call?>()
+        val events = onEvent
+        return abandonable(onAbandon = { callRef.get()?.cancel() }) { abandoned ->
+        val onEvent: (ModelEvent) -> Unit = { if (!abandoned()) events(it) }
         var final: JsonObject? = null
         var incomplete: String? = null
         val tags = ThinkTags()   // proxies for local models may inline <think>…</think> here too
         val emit: (String, Boolean) -> Unit = { t, think -> onEvent(if (think) ModelEvent.Thinking(t) else ModelEvent.Text(t)) }
-        http.newCall(request("/responses", buildBody(req))).execute().use { r ->
+        http.newCall(request("/responses", buildBody(req))).also { callRef.set(it) }.execute().use { r ->
             check(r)
             sse(r) { event, data ->
                 val j = parseJson(data) as? JsonObject ?: return@sse
@@ -341,6 +352,7 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
             output = (u?.get("output_tokens") as? JsonPrimitive)?.content?.toLongOrNull() ?: 0, cacheRead = cached)
         val stop = when { calls > 0 -> Stop.TOOL_USE; incomplete == "max_output_tokens" -> Stop.MAX_TOKENS; incomplete == "content_filter" -> Stop.REFUSAL; else -> Stop.END_TURN }
         ModelTurn(splitThinkTags(JsonArray(blocks)), stop, usage, providerState = obj("items" to items))
+    }
     }
 }
 

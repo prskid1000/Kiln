@@ -258,8 +258,17 @@ private fun McpCard() {
                 Graph.settings.update { it.copy(mcpServe = !it.mcpServe) }; s = Graph.settings.value
                 if (s.mcpServe) McpServer.start(s.mcpPort) else McpServer.stop()
             }
-            Spacer(Modifier.width(8.dp)); Text(status, style = T.monoSmall)
+            if (s.mcpServe) {
+                Spacer(Modifier.width(8.dp))
+                val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                KButton("Copy setup command") {
+                    // Claude Code: one line that registers this phone with its token.
+                    clip.setText(androidx.compose.ui.text.AnnotatedString("claude mcp add --transport http kiln ${McpServer.url} " +
+                        "--header \"Authorization: Bearer ${McpServer.token}\""))
+                }
+            }
         }
+        Text(status, style = T.monoSmall)
         Text("CONNECTED SERVERS (tools appear in new chats)", style = T.overline)
         s.mcpServers.forEach { m ->
             Row(verticalAlignment = Alignment.CenterVertically) {

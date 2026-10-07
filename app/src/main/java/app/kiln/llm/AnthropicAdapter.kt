@@ -53,7 +53,13 @@ class AnthropicAdapter(
         timeout(Duration.ofMinutes(15))
     }.build()
 
-    override suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn = withContext(Dispatchers.IO) {
+    override suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn {
+        val open = java.util.concurrent.atomic.AtomicReference<AutoCloseable?>()
+        return abandonable(onAbandon = { open.get()?.close() }) { abandoned -> streamBlocking(req, abandoned, open) { if (!abandoned()) onEvent(it) } }
+    }
+
+    private fun streamBlocking(req: ModelRequest, abandoned: () -> Boolean, open: java.util.concurrent.atomic.AtomicReference<AutoCloseable?>,
+                               onEvent: (ModelEvent) -> Unit): ModelTurn {
         Http.checkUrl(profile.baseUrl)
         val (body, betas) = buildBody(req)
         val params = MessageCreateParams.builder()
@@ -65,15 +71,15 @@ class AnthropicAdapter(
         // inline <think>…</think> as plain text; route it to thinking like chat/completions does.
         val tags = ThinkTags()
         try {
-            val job = coroutineContext[kotlinx.coroutines.Job]
             client.beta().messages().createStreaming(params).use { stream ->
-                // Stop must stop the stream: closing it unblocks the read; each event re-checks.
-                val closer = job?.invokeOnCompletion { if (it != null) runCatching { stream.close() } }
-                try { stream.stream().forEach { ev ->
-                    if (job?.isActive == false) throw kotlinx.coroutines.CancellationException("stopped")
+                // Stop closes the stream (see abandonable), which unblocks the read; each event re-checks.
+                open.set(stream)
+                if (abandoned()) throw kotlinx.coroutines.CancellationException("stopped")
+                stream.stream().forEach { ev ->
+                    if (abandoned()) throw kotlinx.coroutines.CancellationException("stopped")
                     acc.accumulate(ev)
                     emit(parseJson(mapper.writeValueAsString(ev)) as JsonObject, tags, onEvent)
-                } } finally { closer?.dispose() }
+                }
             }
             tags.flush { t, think -> onEvent(if (think) ModelEvent.Thinking(t) else ModelEvent.Text(t)) }
         } catch (e: RateLimitException) {
@@ -98,7 +104,7 @@ class AnthropicAdapter(
             else -> Stop.OTHER
         }
         val refusal = (msg["stop_details"] as? JsonObject)?.let { d -> listOfNotNull(d.str("category"), d.str("explanation")).joinToString(": ") }
-        ModelTurn(content, stop, usage, refusal = refusal)
+        return ModelTurn(content, stop, usage, refusal = refusal)
     }
 
     private fun emit(ev: JsonObject, tags: ThinkTags, onEvent: (ModelEvent) -> Unit) {

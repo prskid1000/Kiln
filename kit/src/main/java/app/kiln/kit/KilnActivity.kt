@@ -20,6 +20,7 @@ abstract class KilnActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         KilnCrash.install(this)
+        KilnInspector.install(this)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent { KilnTheme { Content() } }

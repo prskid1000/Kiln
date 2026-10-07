@@ -16,6 +16,10 @@ data class SessionMeta(
     val systemPrompt: String = "",
     val usage: Usage = Usage(),
     val costUsd: Double = 0.0,
+    /** Why the last run stopped early ("Stopped after 80 steps…"), shown again when the chat reopens. */
+    val stopNotice: String = "",
+    /** That stop was an error (a failed model call, a crash in the loop), not a limit or the user. */
+    val stopIsError: Boolean = false,
 )
 
 /**

@@ -313,7 +313,9 @@ class UiTreeTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.READ_ONLY)
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val nodes = device.uiTree(pkg(ctx))
-        return ToolResult.ok(ctx.spill(treeText(nodes).ifBlank { "(empty screen)" }), plural(nodes.size, "element"))
+        val empty = if (device.testDisplay != null) "(nothing readable on screen — if the app was built before this version of Kiln, " +
+            "run_app rebuilds it with the kit that reports its screen)" else "(empty screen)"
+        return ToolResult.ok(ctx.spill(treeText(nodes).ifBlank { empty }), plural(nodes.size, "element"))
     }
 }
 

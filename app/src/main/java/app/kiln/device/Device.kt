@@ -191,22 +191,40 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
      * test display never returns another app's tree.
      */
     suspend fun uiTree(expect: String? = null): List<UiNode> {
+        // The hidden display: the app reports its own tree (the kit's inspector, in every
+        // development build). uiautomator only sees the focused display, and focusing this one
+        // would take input focus from the user's screen. Retry briefly while a just-launched
+        // activity resumes.
+        if (testDisplay != null) {
+            val pkg = expect ?: foregroundPackage() ?: return emptyList()
+            for (attempt in 0 until 6) {
+                inspect(pkg)?.let { xml -> parseTree(xml).takeIf { it.isNotEmpty() }?.let { return it } }
+                kotlinx.coroutines.delay(300)
+            }
+            return emptyList()
+        }
+        // The user's screen: uiautomator. Remove the previous dump first so a failed dump can't
+        // return the last screen's tree; retry briefly while the screen settles.
         val path = "/data/local/tmp/kiln-ui.xml"
-        val display = testDisplay?.let { " --display ${it.id()}" } ?: ""
-        // Remove the previous dump first: when a fresh display isn't ready, uiautomator writes
-        // nothing and we'd read the last screen's tree. Retry briefly while it settles.
         var xml = ""
         for (attempt in 0 until 6) {
-            val r = warden.exec(listOf("sh", "-c", "rm -f $path; uiautomator dump$display $path >/dev/null 2>&1; cat $path 2>/dev/null"), timeoutMs = 30_000)
+            val r = warden.exec(listOf("sh", "-c", "rm -f $path; uiautomator dump $path >/dev/null 2>&1; cat $path 2>/dev/null"), timeoutMs = 30_000)
             xml = r.out.substring(r.out.indexOf('<').coerceAtLeast(0))
-            val ready = xml.startsWith("<") && "<node" in xml && (expect == null || "package=\"$expect\"" in xml)
-            if (ready) break
-            // Accessibility reports windows of the focused display only; a no-op key event gives
-            // the test display focus (the user's next touch takes it back).
-            testDisplay?.let { warden.exec(input("keyevent", "KEYCODE_UNKNOWN")) }
+            if (xml.startsWith("<") && "<node" in xml && (expect == null || "package=\"$expect\"" in xml)) break
             kotlinx.coroutines.delay(300)
         }
-        if (expect != null && testDisplay != null && "package=\"$expect\"" !in xml) return emptyList()
+        return parseTree(xml)
+    }
+
+    /** The app's own semantics tree via the kit's inspector, or null when the app isn't running. */
+    private suspend fun inspect(pkg: String): String? {
+        val r = warden.exec(listOf("am", "broadcast", "-a", "app.kiln.kit.UI_TREE", "-p", pkg), timeoutMs = 10_000)
+        if (!r.out.contains("result=1")) return null
+        val data = r.out.substringAfter("data=\"", "").substringBefore("\"")
+        return runCatching { String(java.util.Base64.getDecoder().decode(data)) }.getOrNull()?.takeIf { "<hierarchy" in it }
+    }
+
+    private fun parseTree(xml: String): List<UiNode> {
         if (!xml.startsWith("<")) return emptyList()
         val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.byteInputStream())
         val nodes = doc.getElementsByTagName("node")
@@ -232,12 +250,36 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
     /** Find a node by visible text / content description / resource id (case-insensitive contains). */
     fun find(nodes: List<UiNode>, target: String): UiNode? = findNode(nodes, target)
 
-    suspend fun tap(x: Int, y: Int) = warden.exec(input("tap", "$x", "$y"))
+    suspend fun tap(x: Int, y: Int) =
+        if (testDisplay != null) inApp("--es", "op", "tap", "--ei", "x", "$x", "--ei", "y", "$y")
+        else warden.exec(input("tap", "$x", "$y"))
     suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int = 300) =
-        warden.exec(input("swipe", "$x1", "$y1", "$x2", "$y2", "$ms"))
-    suspend fun key(key: String) = warden.exec(input("keyevent", key.uppercase().let { if (it.startsWith("KEYCODE_")) it else "KEYCODE_$it" }))
-    /** `input text` needs spaces as %s and shell metacharacters escaped. */
-    suspend fun type(text: String) = warden.exec(input("text", text.replace(" ", "%s")))
+        if (testDisplay != null) inApp("--es", "op", "swipe", "--ei", "x", "$x1", "--ei", "y", "$y1", "--ei", "x2", "$x2", "--ei", "y2", "$y2", "--ei", "ms", "$ms")
+        else warden.exec(input("swipe", "$x1", "$y1", "$x2", "$y2", "$ms"))
+    suspend fun key(key: String) = key.uppercase().let { if (it.startsWith("KEYCODE_")) it else "KEYCODE_$it" }.let { k ->
+        if (testDisplay != null) inApp("--es", "op", "key", "--es", "key", k) else warden.exec(input("keyevent", k))
+    }
+    /** `input text` needs spaces as %s; in the app, text goes into the focused field as is. */
+    suspend fun type(text: String) =
+        if (testDisplay != null) inApp("--es", "op", "text", "--es", "text", text)
+        else warden.exec(input("text", text.replace(" ", "%s")))
+
+    /**
+     * Input for the app on the hidden display, performed inside it by the kit's inspector.
+     * Input injected through the system (`input -d`) moves Android's focus to that display, so
+     * the user's own typing in Kiln would go to the app under test — and key events then queued
+     * for a window without focus make Android report Kiln as not responding.
+     */
+    private suspend fun inApp(vararg extras: String): ExecResult {
+        val pkg = foregroundPackage() ?: return ExecResult(1, "", "nothing is showing on the test display", 0)
+        val r = warden.exec(listOf("am", "broadcast", "-a", "app.kiln.kit.INPUT", "-p", pkg) + extras, timeoutMs = 15_000)
+        val data = r.out.substringAfter("data=\"", "").substringBefore("\"")
+        return when {
+            r.out.contains("result=1") -> ExecResult(0, data, "", r.ms)
+            r.out.contains("result=2") -> ExecResult(1, "", data.removePrefix("error: "), r.ms)
+            else -> ExecResult(1, "", "$pkg didn't answer — rebuild it so it has the current kit", r.ms)
+        }
+    }
     // Warden passes argv without a shell, so no escaping: backslashes would be typed literally.
     /** Package of the activity in front right now, or null if it can't be told. */
     suspend fun foregroundPackage(): String? {

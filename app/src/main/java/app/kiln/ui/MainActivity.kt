@@ -173,6 +173,8 @@ private fun App(vm: KilnVM) {
 
 @Composable
 private fun ProjectsScreen(vm: KilnVM, open: (String) -> Unit, settings: () -> Unit) {
+    // Coming back here (from a project, or after a run installed something): fresh install states.
+    LaunchedEffect(Unit) { vm.refresh() }
     val projects by vm.projects.collectAsStateWithLifecycle()
     val installed by vm.installed.collectAsStateWithLifecycle()
     val toolchain by vm.toolchain.collectAsStateWithLifecycle()
@@ -356,7 +358,8 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
     Column(Modifier.fillMaxSize()) {
-        KTopBar(ps.label, subtitle = runStep ?: if (running) "Working…" else ps.pkg, onBack = back,
+        val stopping by ps.stopping.collectAsStateWithLifecycle()
+        KTopBar(ps.label, subtitle = runStep ?: if (running) (if (stopping) "Stopping…" else "Working…") else ps.pkg, onBack = back,
             leading = { ProjectIcon(ps.project, ps.label, 34.dp) }) {
             if (runStep != null) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = N.accent, strokeWidth = 2.dp)

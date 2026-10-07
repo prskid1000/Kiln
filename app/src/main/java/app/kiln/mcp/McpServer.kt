@@ -63,15 +63,21 @@ object McpServer {
                 if ((b[0].toInt() and 0xff) == 100 && (b[1].toInt() and 0xff) in 64..127) return a
             }
         }
-        return InetAddress.getLoopbackAddress()
+        // No tailnet: this phone only (adb forward). 127.0.0.1, not getLoopbackAddress(), which can be ::1.
+        return InetAddress.getByName("127.0.0.1")
     }
+
+    /** The URL clients use, once started. */
+    @Volatile var url: String? = null; private set
 
     fun start(port: Int) {
         stop()
         val addr = bindAddress()
         val ss = runCatching { ServerSocket(port, 16, addr) }.getOrElse { status.value = "failed: ${it.message}"; return }
         socket = ss
-        status.value = "http://${addr.hostAddress}:$port/mcp · token ${token.take(6)}…"
+        url = "http://${addr.hostAddress}:$port/mcp"
+        status.value = if (addr.isLoopbackAddress) "$url — no tailnet: from a PC, run adb forward tcp:$port tcp:$port"
+            else "$url · token ${token.take(6)}…"
         job = scope.launch {
             while (isActive) {
                 val c = runCatching { ss.accept() }.getOrNull() ?: break

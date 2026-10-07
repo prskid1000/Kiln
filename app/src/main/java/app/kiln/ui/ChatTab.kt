@@ -149,7 +149,11 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
         val feed = l?.feed?.collectAsStateWithLifecycle()?.value ?: emptyList()
         val running = l?.running?.collectAsStateWithLifecycle()?.value ?: false
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (feed.isEmpty()) ChatEmpty(ps) { vm.send(ps.project.name, it) }
+            val loading by ps.loading.collectAsStateWithLifecycle()
+            if (l == null && loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(24.dp), color = N.accent, strokeWidth = 2.dp)
+            }
+            else if (feed.isEmpty()) ChatEmpty(ps) { vm.send(ps.project.name, it) }
             else ChatList(vm, ps, l!!, feed, running)
         }
         RuleProposals(vm, ps, feed)
@@ -168,7 +172,8 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
             KChip("Keep going until verified", untilVerified) { untilVerified = !untilVerified; if (untilVerified) planFirst = false }
             KChip("Try 3 ways", tryThree) { tryThree = !tryThree; if (tryThree) planFirst = false }
         }
-        Composer(running, ps.draft, hint = when {
+        val stopping by ps.stopping.collectAsStateWithLifecycle()
+        Composer(running, stopping, l?.startedAt ?: 0L, ps.draft, hint = when {
                 running -> "Add to what it's doing…"
                 planFirst -> "Describe the app — you'll get a plan first"
                 feed.isEmpty() -> "Describe what to build…"
@@ -213,6 +218,8 @@ private fun ChatList(vm: KilnVM, ps: ProjectState, loop: AgentLoop, feed: List<A
     // Follow the stream only while the user is at the bottom.
     // Follow the stream only while the reader is at the bottom; scrolling up to read must stick.
     val atEnd by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { !list.canScrollForward } }
+    // A chat opens at its latest message, not at the top of a long conversation.
+    LaunchedEffect(loop) { if (rows.isNotEmpty()) list.scrollToItem(rows.size - 1, Int.MAX_VALUE / 2) }
     LaunchedEffect(rows.size, feed.lastOrNull()?.text?.length, feed.lastOrNull()?.status) {
         if (rows.isNotEmpty() && atEnd) list.animateScrollToItem(rows.size - 1, Int.MAX_VALUE / 2)
     }
@@ -229,7 +236,8 @@ private fun ChatList(vm: KilnVM, ps: ProjectState, loop: AgentLoop, feed: List<A
                             TurnAction.FORK -> vm.fork(ps.project.name, r.a.msgIndex)
                             TurnAction.CHANGES -> review = r.a.msgIndex
                         }
-                    })
+                    }, onContinue = if (!running && r === rows.last() && (r.a.kind == Activity.Kind.ERROR || r.a.text.startsWith("Stopped") || r.a.text.startsWith("Interrupted")))
+                        { { vm.send(ps.project.name, "Continue where you left off.") } } else null)
                     is Steps_ -> StepGroup(r.items, live = running && r === rows.last())
                 }
             }
@@ -242,7 +250,7 @@ private enum class TurnAction { REWIND, FORK, CHANGES }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun Message(a: Activity, hasSnapshot: Boolean = false, onAction: ((TurnAction) -> Unit)? = null) {
+private fun Message(a: Activity, hasSnapshot: Boolean = false, onAction: ((TurnAction) -> Unit)? = null, onContinue: (() -> Unit)? = null) {
     when (a.kind) {
         Activity.Kind.USER -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             // Attached photos above the bubble, files as chips; tap a photo to view it full screen.
@@ -266,19 +274,20 @@ private fun Message(a: Activity, hasSnapshot: Boolean = false, onAction: ((TurnA
             }
         }
         Activity.Kind.ASSISTANT -> Markdown(a.text.trim(), Modifier.fillMaxWidth())
-        Activity.Kind.NOTICE -> Banner(Icons.Rounded.Warning, a.text, N.warn)
-        Activity.Kind.ERROR -> Banner(Icons.Rounded.ErrorOutline, a.text, N.danger)
+        Activity.Kind.NOTICE -> Banner(Icons.Rounded.Warning, a.text, N.warn, onContinue?.let { "Continue" to it })
+        Activity.Kind.ERROR -> Banner(Icons.Rounded.ErrorOutline, a.text, N.danger, onContinue?.let { "Retry" to it })
         else -> {}
     }
 }
 
 @Composable
-private fun Banner(icon: ImageVector, text: String, color: androidx.compose.ui.graphics.Color) {
+private fun Banner(icon: ImageVector, text: String, color: androidx.compose.ui.graphics.Color, action: Pair<String, () -> Unit>? = null) {
     Row(Modifier.fillMaxWidth().clip(N.shapeMd).background(color.copy(alpha = 0.10f)).border(1.dp, color.copy(alpha = 0.35f), N.shapeMd)
-        .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+        .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = if (action != null) Alignment.CenterVertically else Alignment.Top) {
         Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
-        Text(text, style = T.bodySmall.copy(color = color))
+        Text(text, style = T.bodySmall.copy(color = color), modifier = Modifier.weight(1f))
+        action?.let { (label, go) -> Spacer(Modifier.width(8.dp)); KButton(label, onClick = go) }
     }
 }
 
@@ -575,7 +584,7 @@ private fun Prompts(loop: AgentLoop) {
 }
 
 @Composable
-private fun Composer(running: Boolean, draft: kotlinx.coroutines.flow.MutableStateFlow<String?>, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
+private fun Composer(running: Boolean, stopping: Boolean, runStartedAt: Long, draft: kotlinx.coroutines.flow.MutableStateFlow<String?>, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
     var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }   // survives rotation and tab switches
     val files = remember { androidx.compose.runtime.mutableStateListOf<app.kiln.agent.Attachment>() }
     val pick = rememberAttachmentPicker { files += it }
@@ -592,10 +601,11 @@ private fun Composer(running: Boolean, draft: kotlinx.coroutines.flow.MutableSta
     var started by remember { mutableLongStateOf(0L) }
     var elapsed by remember { mutableLongStateOf(0L) }
     LaunchedEffect(running) {
-        if (running) { started = System.currentTimeMillis(); while (true) { elapsed = (System.currentTimeMillis() - started) / 1000; delay(1000) } }
+        // From the run's start, not this screen's: leaving and coming back keeps counting.
+        if (running) { started = runStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis(); while (true) { elapsed = (System.currentTimeMillis() - started) / 1000; delay(1000) } }
     }
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp, top = 4.dp)) {
-        if (running) Text("Working · ${elapsed / 60}:${"%02d".format(elapsed % 60)}", style = T.label.copy(color = N.accent2),
+        if (running) Text(if (stopping) "Stopping…" else "Working · ${elapsed / 60}:${"%02d".format(elapsed % 60)}", style = T.label.copy(color = N.accent2),
             modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
         if (files.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -619,7 +629,7 @@ private fun Composer(running: Boolean, draft: kotlinx.coroutines.flow.MutableSta
                     modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).fieldLabel("Message"))
             }
             Spacer(Modifier.width(8.dp))
-            if (running && text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, onClick = onStop)
+            if (running && text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, enabled = !stopping, onClick = onStop)
             else if (text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Mic, "Speak") {
                 runCatching {
                     voice.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
