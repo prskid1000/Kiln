@@ -7,6 +7,7 @@ import app.kiln.build.BuildEngine
 import app.kiln.core.Paths
 import app.kiln.device.Device
 import app.kiln.device.TestDisplay
+import app.kiln.tools.Skills
 import app.kiln.device.Warden
 import app.kiln.llm.Providers
 import app.kiln.llm.Secrets
@@ -50,6 +51,6 @@ object Graph {
         secrets = Secrets(app)
         providers = Providers(paths.files, secrets)
         settings = SettingsStore(paths.files)
-        kiln = Kiln(paths, toolchain, builds, warden, device, testDevice, providers, settings)
+        kiln = Kiln(paths, toolchain, builds, warden, device, testDevice, providers, settings, Skills(app))
     }
 }

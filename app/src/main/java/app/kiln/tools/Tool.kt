@@ -20,6 +20,8 @@ data class ToolResult(
     val images: List<ByteArray> = emptyList(),
     val isError: Boolean = false,
     val summary: String = text.lineSequence().firstOrNull()?.take(140) ?: "",
+    /** A recording (MP4 path) to show with the result, e.g. a QA run on the test display. */
+    val video: String? = null,
 ) {
     /** Anthropic-shaped tool_result content blocks. */
     fun blocks(): JsonArray = arrOf(listOf(obj("type" to "text", "text" to text.ifBlank { "(no output)" })) +

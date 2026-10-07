@@ -73,6 +73,7 @@ class Kiln(
     private val testDevice: Device,
     private val providers: Providers,
     val settings: SettingsStore,
+    val skills: app.kiln.tools.Skills,
 ) {
     private val classIndex = ClassIndex(toolchain)
 
@@ -90,6 +91,8 @@ class Kiln(
         UiTreeTool(warden, device), TapTool(warden, device), TypeTool(warden, device), SwipeTool(warden, device),
         KeyTool(warden, device), WaitForTool(warden, device), DumpsysTool(warden, device), ShellTool(warden, device),
         SdkLookupTool(classIndex), KitDocsTool(toolchain), WebFetchTool(),
+        app.kiln.tools.LoadSkillTool(skills), app.kiln.tools.ProposeRuleTool(), app.kiln.tools.SecurityCheckTool(),
+        app.kiln.tools.CompareScreenTool(warden, device), app.kiln.tools.UiCheckTool(warden, device),
         TodoTool(), AskUserTool(), CheckpointTool(), RestoreTool(), MemoryTool(),
         )
     }
@@ -107,13 +110,17 @@ class Kiln(
         // The subagent sees only read-only tools.
         // The subagent runs headless: nobody can answer its questions or approvals.
         val readOnly = tools.filter { Trait.READ_ONLY in it.traits && it.name != "ask_user" }
-        tools = (tools + SubagentTool(this, project, registry, readOnly)).sortedBy { it.name }
+        // QA: a fresh agent that can only look at and use the app (no editing, no building).
+        val qaTools = tools.filter { it.name in QA_TOOLS }
+        val agentDevice = if (settings.value.backgroundTesting) testDevice else device
+        val qa = app.kiln.tools.QaCheckTool({ criteria -> qaTask(project, registry, qaTools, criteria) }, agentDevice)
+        tools = (tools + SubagentTool(this, project, registry, readOnly) + qa).sortedBy { it.name }
         ToolRegistry.validateNames(tools)
         return registry to tools
     }
 
     fun systemPrompt(project: Project) =
-        SystemPrompt.build(project, toolchain.kitApi(), warden.status() == Warden.Status.READY)
+        SystemPrompt.build(project, toolchain.kitApi(), warden.status() == Warden.Status.READY, skills.index())
 
     suspend fun newSession(project: Project): AgentLoop {
         val s = Session.create(paths.sessions, project.name, systemPrompt(project))
@@ -126,6 +133,10 @@ class Kiln(
         val (reg, tools) = tools(project)
         return AgentLoop(project, s, providers, reg, tools, settings)
     }
+
+    suspend fun qaTask(project: Project, registry: ToolRegistry, tools: List<Tool>, criteria: String) =
+        AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings, QA_PROMPT,
+            "Done criteria:\n$criteria\n\nTest every criterion on the device now.", role = "subagent")
 
     suspend fun subTask(project: Project, registry: ToolRegistry, tools: List<Tool>, task: String) =
         AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings,
@@ -150,3 +161,13 @@ class SubagentTool(private val kiln: Kiln, private val project: Project, private
         return ToolResult.ok(ctx.spill(answer), "subagent: ${usage.output} tokens out")
     }
 }
+
+/** What the QA agent may use: look at and operate the app, read the code, never change it. */
+private val QA_TOOLS = setOf("launch", "screenshot", "ui_tree", "tap", "type_text", "swipe", "press_key", "wait_for",
+    "logcat", "last_crash", "ui_check", "read_file", "list_dir", "grep")
+
+private const val QA_PROMPT = "You are a strict QA tester for an Android app on this phone. You did not build it. " +
+    "Start with launch, then exercise the app to check each done criterion: tap by visible label, type, swipe, wait_for, " +
+    "and read the screen (ui_tree / screenshot). A criterion passes only if you observed it. Also note crashes (last_crash) " +
+    "and anything broken you see on the way. Reply with one line per criterion: PASS or FAIL — criterion — what you saw. " +
+    "End with exactly one line: VERDICT: PASS (every criterion passed) or VERDICT: FAIL."

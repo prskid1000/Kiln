@@ -250,6 +250,12 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
         return Regex("""\s([a-zA-Z0-9_.]+)/""").find(line)?.groupValues?.get(1)
     }
 
+    /** Screen density in dpi (the test display's, or the phone's). */
+    suspend fun density(): Int {
+        testDisplay?.let { it.id(); return it.densityDpi }
+        return Regex("""(\d+)""").findAll(warden.exec(listOf("wm", "density")).out).lastOrNull()?.value?.toIntOrNull() ?: 420
+    }
+
     suspend fun screenSize(): Pair<Int, Int> {
         testDisplay?.let { it.id(); return it.width to it.height }
         val m = Regex("""(\d+)x(\d+)""").findAll(warden.exec(listOf("wm", "size")).out).lastOrNull() ?: return 1080 to 2400

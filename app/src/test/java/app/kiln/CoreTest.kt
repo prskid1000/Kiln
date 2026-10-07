@@ -255,4 +255,28 @@ class CoreTest {
         assertTrue(input.any { (it as JsonObject).str("type") == "function_call_output" })
         assertEquals("sys", body.str("instructions"))
     }
+
+    @Test fun `turn snapshots review, restore and fork`() {
+        val tmp = Files.createTempDirectory("kiln").toFile()
+        val p = app.kiln.build.Project(File(tmp, "proj").apply { mkdirs() })
+        File(p.dir, "kiln.json").writeText("{}")
+        val a = File(p.src, "A.kt").apply { parentFile.mkdirs(); writeText("one") }
+        val s = app.kiln.agent.Session.create(File(tmp, "sessions"), "proj", "sys")
+        s.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "change it")))))
+        app.kiln.agent.Turns.snapshot(s, p, 0)
+        a.writeText("two"); File(p.src, "B.kt").writeText("new")
+        s.append(Msg("assistant", arrOf(listOf(obj("type" to "text", "text" to "done")))))
+        val ch = app.kiln.agent.Turns.changes(s, p, 0).associate { it.path to it.kind }
+        assertEquals(app.kiln.agent.Turns.Change.Kind.MODIFIED, ch["src/A.kt"])
+        assertEquals(app.kiln.agent.Turns.Change.Kind.ADDED, ch["src/B.kt"])
+        assertEquals("one", app.kiln.agent.Turns.before(s, 0, "src/A.kt"))
+        // Reverting one file leaves the other alone.
+        app.kiln.agent.Turns.restore(s, p, 0, listOf("src/B.kt"))
+        assertFalse(File(p.src, "B.kt").exists()); assertEquals("two", a.readText())
+        app.kiln.agent.Turns.restore(s, p, 0)
+        assertEquals("one", a.readText())
+        val f = app.kiln.agent.Turns.fork(s, File(tmp, "sessions"), 0)
+        assertEquals(0, f.messages.size); assertEquals(2, s.messages.size)
+        tmp.deleteRecursively()
+    }
 }

@@ -56,6 +56,10 @@ data class Activity(
     val ms: Long = 0,
     /** Names of non-image files attached to a USER message. */
     val files: List<String> = emptyList(),
+    /** MP4 recorded by the tool (QA runs), shown as a playable clip. */
+    val video: String? = null,
+    /** Transcript index of a USER message (for rewind / fork / change review); -1 if none. */
+    val msgIndex: Int = -1,
 ) {
     enum class Kind { USER, ASSISTANT, THINKING, TOOL, NOTICE, ERROR }
     enum class Status { RUNNING, DONE, FAILED, DENIED, STOPPED }
@@ -121,7 +125,7 @@ class AgentLoop(
         val results = HashMap<String, JsonObject>()
         session.messages.filter { it.role == "user" }.forEach { m -> m.content.forEach { b ->
             (b as? JsonObject)?.takeIf { it.str("type") == "tool_result" }?.let { results[it.str("tool_use_id") ?: ""] = it } } }
-        for (m in session.messages) for (b in m.content) {
+        for ((mi, m) in session.messages.withIndex()) for (b in m.content) {
             val o = b as? JsonObject ?: continue
             when (o.str("type")) {
                 "text" -> if (m.role == "user") {
@@ -129,7 +133,9 @@ class AgentLoop(
                               // Attachments ride on the user's bubble as chips, not as giant text.
                               val att = Attachments.nameOf(t)
                               if (att != null) attachToLastUser(files = listOf(att))
-                              else if (!t.startsWith("<system-reminder>")) next(Activity.Kind.USER, t)
+                              else if (t.startsWith(STEER_PREFIX)) next(Activity.Kind.USER, t.removePrefix(STEER_PREFIX))
+                              else if (!t.startsWith("<system-reminder>"))
+                                  next(Activity.Kind.USER, t).let { id -> update(id) { it.copy(msgIndex = mi) } }
                           } else if (m.role == "assistant") next(Activity.Kind.ASSISTANT, o.str("text") ?: "")
                 "image" -> if (m.role == "user") (o["source"] as? JsonObject)?.str("data")?.let {
                     attachToLastUser(images = listOf(java.util.Base64.getDecoder().decode(it)))
@@ -170,6 +176,7 @@ class AgentLoop(
             // Snapshot the sources before this turn: rewind and change review are keyed to it.
             runCatching { Turns.snapshot(session, project, session.messages.size) }
             val id = next(Activity.Kind.USER, userText)
+            update(id) { it.copy(msgIndex = session.messages.size) }
             val extra = Attachments.blocks(project, attachments)
             update(id) { it.copy(files = attachments.filterNot { a -> a.mime.startsWith("image/") }.map { a -> a.name },
                 images = attachments.filter { a -> a.mime.startsWith("image/") }.map { a -> a.bytes }) }
@@ -257,7 +264,7 @@ class AgentLoop(
     private fun drainSteering(): List<JsonObject>? {
         val out = generateSequence { steering.poll() }.toList()
         if (out.isEmpty()) return null
-        return out.map { obj("type" to "text", "text" to "[Message from the user while you were working] $it") }
+        return out.map { obj("type" to "text", "text" to STEER_PREFIX + it) }
     }
 
     /** Add a message to the running request; it reaches the model at its next step. */
@@ -419,7 +426,7 @@ class AgentLoop(
         val aid = next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
         val t0 = System.currentTimeMillis()
         fun result(r: ToolResult, status: Activity.Status): JsonObject {
-            update(aid) { it.copy(status = status, summary = r.summary, images = r.images, ms = System.currentTimeMillis() - t0, progress = "") }
+            update(aid) { it.copy(status = status, summary = r.summary, images = r.images, video = r.video, ms = System.currentTimeMillis() - t0, progress = "") }
             return obj("type" to "tool_result", "tool_use_id" to id, "content" to r.blocks(), "is_error" to if (r.isError) true else null)
         }
         val tool = byName[name] ?: return result(ToolResult.error("unknown tool $name"), Activity.Status.FAILED)
@@ -504,3 +511,6 @@ class AgentLoop(
         }
     }
 }
+
+/** Marks a message the user sent while the agent was working (delivered at its next step). */
+private const val STEER_PREFIX = "[Message from the user while you were working] "

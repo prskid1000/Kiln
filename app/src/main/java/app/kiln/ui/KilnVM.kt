@@ -35,6 +35,8 @@ class ProjectState(val project: Project) {
     /** Non-null while Run is in progress: "Building…", "Installing…", "Launching…". */
     val runStep = MutableStateFlow<String?>(null)
     internal var job: Job? = null
+    // Rule proposals the user saved or dismissed (activity ids).
+    val decidedRules = MutableStateFlow<Set<Int>>(emptySet())
     // Read often during composition (every build-progress update): parse kiln.json only when it changed.
     @Volatile private var metaCache: Pair<Long, app.kiln.build.ProjectMeta?> = -1L to null
     private fun meta(): app.kiln.build.ProjectMeta? {

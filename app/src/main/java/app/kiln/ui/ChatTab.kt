@@ -17,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -148,8 +149,9 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
         val running = l?.running?.collectAsStateWithLifecycle()?.value ?: false
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (feed.isEmpty()) ChatEmpty(ps) { vm.send(ps.project.name, it) }
-            else ChatList(l!!, feed, running)
+            else ChatList(vm, ps, l!!, feed, running)
         }
+        RuleProposals(vm, ps, feed)
         if (l != null) Prompts(l)
         if (l != null && !running) PlanReady(l) { criteria ->
             vm.send(ps.project.name, "Build the approved plan above. When it's built, verify every done criterion on the device.",
@@ -196,7 +198,10 @@ private fun ChatEmpty(ps: ProjectState, onPick: (String) -> Unit) {
 }
 
 @Composable
-private fun ChatList(loop: AgentLoop, feed: List<Activity>, running: Boolean) {
+private fun ChatList(vm: KilnVM, ps: ProjectState, loop: AgentLoop, feed: List<Activity>, running: Boolean) {
+    var review by remember { mutableStateOf<Int?>(null) }
+    val snapshots = remember(feed.size, running) { app.kiln.agent.Turns.indexes(loop.session).toSet() }
+    review?.let { ChangesSheet(vm, ps, it) { review = null } }
     val rows = remember(feed) { group(feed) }
     val todos by loop.todos.collectAsStateWithLifecycle()
     val list = rememberLazyListState()
@@ -213,7 +218,13 @@ private fun ChatList(loop: AgentLoop, feed: List<Activity>, running: Boolean) {
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(rows, key = { it.key }) { r ->
                 when (r) {
-                    is Msg_ -> Message(r.a)
+                    is Msg_ -> Message(r.a, r.a.msgIndex in snapshots, if (running || r.a.msgIndex < 0) null else { action ->
+                        when (action) {
+                            TurnAction.REWIND -> vm.rewind(ps.project.name, r.a.msgIndex)
+                            TurnAction.FORK -> vm.fork(ps.project.name, r.a.msgIndex)
+                            TurnAction.CHANGES -> review = r.a.msgIndex
+                        }
+                    })
                     is Steps_ -> StepGroup(r.items, live = running && r === rows.last())
                 }
             }
@@ -222,8 +233,11 @@ private fun ChatList(loop: AgentLoop, feed: List<Activity>, running: Boolean) {
     }
 }
 
+private enum class TurnAction { REWIND, FORK, CHANGES }
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun Message(a: Activity) {
+private fun Message(a: Activity, hasSnapshot: Boolean = false, onAction: ((TurnAction) -> Unit)? = null) {
     when (a.kind) {
         Activity.Kind.USER -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             // Attached photos above the bubble, files as chips; tap a photo to view it full screen.
@@ -231,10 +245,20 @@ private fun Message(a: Activity) {
             if (a.files.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 a.files.forEach { AttachmentChip(it, null) }
             }
-            if (a.text.isNotBlank()) Text(a.text, style = T.body.copy(color = N.accent100),
-                modifier = Modifier.widthIn(max = 320.dp)
-                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp))
-                    .background(N.accent800).padding(horizontal = 14.dp, vertical = 10.dp))
+            var menu by remember { mutableStateOf(false) }
+            if (a.text.isNotBlank()) Box {
+                Text(a.text, style = T.body.copy(color = N.accent100),
+                    modifier = Modifier.widthIn(max = 320.dp)
+                        .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp))
+                        .then(if (onAction != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier)
+                        .background(N.accent800).padding(horizontal = 14.dp, vertical = 10.dp))
+                if (onAction != null) androidx.compose.material3.DropdownMenu(menu, { menu = false }, containerColor = N.surface) {
+                    (if (hasSnapshot) listOf(TurnAction.CHANGES to "Changes in this turn", TurnAction.REWIND to "Rewind to here") else emptyList())
+                        .plus(TurnAction.FORK to "Fork chat from here").forEach { (act, label) ->
+                        androidx.compose.material3.DropdownMenuItem({ Text(label, style = T.body) }, { menu = false; onAction(act) })
+                    }
+                }
+            }
         }
         Activity.Kind.ASSISTANT -> Markdown(a.text.trim(), Modifier.fillMaxWidth())
         Activity.Kind.NOTICE -> Banner(Icons.Rounded.Warning, a.text, N.warn)
@@ -457,6 +481,7 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
             }
         }
         if (shot != null) Screenshot(shot, Modifier.padding(top = 8.dp))
+        items.lastOrNull { it.video != null }?.video?.let { QaVideo(it, Modifier.padding(top = 8.dp).fillMaxWidth()) }
     }
 }
 
