@@ -171,9 +171,12 @@ package → zipalign → **apksig** (per-project key in Android Keystore).
   dependents, re-dex only changed classes, reuse the resource table when
   resources didn't change.
 - **Bundled libraries:** a pinned set (AndroidX core/appcompat/lifecycle,
-  Material, Room, Coroutines; Compose in phase 2) pre-dexed and shipped as a
-  downloadable **toolchain pack** (versioned, sha256-checked — same downloader
-  pattern as On Device AI). No arbitrary Maven resolution in v1.
+  Material, Room, Coroutines; Compose in phase 2) pre-dexed and shipped **inside
+  the APK** as toolchain components (jdk, native, tools, kotlinc, sdk, kit,
+  templates; one APK flavour per ABI). On launch each component whose content
+  hash isn't installed is unpacked, verified file by file and moved into place;
+  the active toolchain is a set of links switched atomically, and old versions
+  are pruned. No import step, no network. No arbitrary Maven resolution in v1.
 - **16 KB-aligned** native libraries in output APKs; generated apps target the
   current SDK.
 - **Generated apps live in their own namespace** (`kiln.app.<name>`) so device
@@ -355,7 +358,7 @@ numbers improve.
 |---|---|
 | kotlinc too slow/heavy on device | Daemon, incremental; Java/ECJ path stays available |
 | Compose compiler plugin on ART | M5 is late on purpose; Views first |
-| Toolchain size (~150–250 MB) | Downloadable pack, not in the APK |
+| Toolchain size (~260 MB) | Bundled per ABI; an update unpacks only changed components |
 | Model invents APIs | `sdk_lookup` + compile errors fed back structured |
 | Runaway cost | Task budget, caps, caching, context editing, effort per phase |
 | Warden not running | Degraded mode with clear UI; tools hidden, not failing |

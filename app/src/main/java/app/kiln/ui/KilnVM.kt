@@ -75,7 +75,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             .let { if (it.firstOrNull()?.isLetter() == true) it else "app_$it" }.take(36).trimEnd('_').ifBlank { "app" }
     }
 
-    init { refresh(); autoImportPack() }
+    init { refresh() }
 
     private fun listProjects(): List<ProjectInfo> = Graph.paths.projects.listFiles()
         ?.filter { File(it, "kiln.json").isFile }
@@ -95,17 +95,9 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     }
 
     /** A pack zip dropped in the app's external files dir installs itself. */
-    fun autoImportPack() = viewModelScope.launch(Dispatchers.IO) {
-        // Not while one is installing (onResume fires again during a long import).
-        if (Graph.toolchain.state.value.let { it is Toolchain.State.Ready || it is Toolchain.State.Installing }) return@launch
-        val zip = Graph.toolchain.inboxPack() ?: return@launch
-        Graph.toolchain.install(zip.inputStream(), zip.length()).onSuccess { zip.delete(); message.value = "Toolchain $it installed" }
-            .onFailure { message.value = "Toolchain: ${it.message}" }
-    }
-
-    fun importPack(input: InputStream, size: Long) = viewModelScope.launch(Dispatchers.IO) {
-        Graph.toolchain.install(input, size).onSuccess { message.value = "Toolchain $it installed" }
-            .onFailure { message.value = "Import failed: ${it.message}" }
+    /** Set up or update the bundled toolchain (normally already done at app start; a retry after a failure). */
+    fun setupToolchain() = viewModelScope.launch(Dispatchers.IO) {
+        Graph.toolchain.syncBundled(Graph.app.assets).onFailure { message.value = "Toolchain: ${it.message}" }
     }
 
     fun state(name: String): ProjectState = synchronized(states) {

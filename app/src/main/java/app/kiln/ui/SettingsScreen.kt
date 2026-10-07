@@ -77,24 +77,20 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
 @Composable
 private fun ToolchainCard(vm: KilnVM) {
     val state by vm.toolchain.collectAsStateWithLifecycle()
-    val ctx = LocalContext.current
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            val size = ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
-            ctx.contentResolver.openInputStream(uri)?.let { vm.importPack(it, size) }
-        }
-    }
+    // Bundled with the app and set up on launch: nothing to import.
     Section("Toolchain") {
         when (val s = state) {
-            is Toolchain.State.Ready -> Text("Pack ${s.version} installed — JDK 21, Kotlin 2.4.20 (Compose), R8, aapt2, app kit.", style = T.bodySmall)
+            is Toolchain.State.Ready -> Text("Built in — JDK 21, Kotlin 2.4.20 (Compose), R8, aapt2, app kit. Set ${s.version}.", style = T.bodySmall)
             is Toolchain.State.Installing -> {
-                Text("Installing… ${s.step.take(60)}", style = T.bodySmall)
+                Text("${s.step}…", style = T.bodySmall)
                 LinearProgressIndicator(progress = { if (s.total > 0) s.done.toFloat() / s.total else 0f }, color = N.accent, modifier = Modifier.fillMaxWidth())
             }
-            is Toolchain.State.Failed -> Text("Import failed: ${s.message}", style = T.bodySmall.copy(color = N.danger))
-            Toolchain.State.Missing -> Text("Not installed. Import kiln-toolchain-*.zip (or drop it into Android/data/app.kiln/files/ and reopen Kiln).", style = T.bodySmall)
+            is Toolchain.State.Failed -> {
+                Text("Setup didn't finish: ${s.message}", style = T.bodySmall.copy(color = N.danger))
+                KButton("Try again", Tone.Accent) { vm.setupToolchain() }
+            }
+            Toolchain.State.Missing -> Text("Setting up…", style = T.bodySmall)
         }
-        KButton("Import pack…", Tone.Accent) { pick.launch(arrayOf("application/zip", "application/octet-stream")) }
     }
 }
 

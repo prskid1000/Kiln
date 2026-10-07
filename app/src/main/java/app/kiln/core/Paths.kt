@@ -17,8 +17,6 @@ class Paths(context: Context) {
     /** Scratch for the JVM (java.io.tmpdir) and builds. */
     val tmp = File(context.cacheDir, "tmp")
     val evals = File(files, "evals")
-    /** Drop-in folder adb (and the user) can write without permissions: a pack zip here is auto-imported. */
-    val inbox: File? = context.getExternalFilesDir(null)
 
     init { listOf(toolchainRoot, projects, sessions, spill, tmp, evals).forEach { it.mkdirs() } }
 }

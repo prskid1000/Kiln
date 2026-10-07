@@ -50,8 +50,16 @@ android {
         resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/versions/**", "META-INF/DEPENDENCIES",
             "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/INDEX.LIST")
     }
-    // The toolchain pack is large binaries; never compress it twice.
-    androidResources { noCompress += listOf("jar", "zip", "bin") }
+    // The toolchain components are already compressed (zip): store them, never compress twice.
+    androidResources { noCompress += listOf("jar", "zip", "bin", "kpk") }
+
+    // The toolchain ships inside the APK, so there's one build per ABI: its JDK, aapt2 and
+    // launcher are native. arm64 for phones, x86_64 for emulators and Chromebooks.
+    flavorDimensions += "abi"
+    productFlavors {
+        create("arm64") { dimension = "abi"; isDefault = true }
+        create("x86_64") { dimension = "abi" }
+    }
 }
 
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
@@ -83,4 +91,33 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+}
+
+/**
+ * Copies one ABI's toolchain components (toolchain/build_pack.py writes them to toolchain/out/components and components-x86_64)
+ * into the APK under assets/toolchain. Kiln installs or updates each on launch when its
+ * content hash changes.
+ */
+abstract class BundleToolchain : DefaultTask() {
+    @get:InputFiles @get:PathSensitive(PathSensitivity.NAME_ONLY) abstract val components: ConfigurableFileCollection
+    @get:OutputDirectory abstract val output: DirectoryProperty
+
+    @TaskAction fun copy() {
+        val out = output.get().asFile.resolve("toolchain")
+        out.deleteRecursively(); out.mkdirs()
+        val files = components.files.filter { it.extension == "kpk" }
+        if (files.isEmpty()) logger.warn("Kiln: no toolchain components bundled — run toolchain/build_pack.py; this APK can't build apps.")
+        files.forEach { it.copyTo(out.resolve(it.name)) }
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val abi = variant.productFlavors.first { it.first == "abi" }.second
+        val dir = rootProject.file("toolchain/out/" + if (abi == "x86_64") "components-x86_64" else "components")
+        val task = tasks.register<BundleToolchain>("bundleToolchain" + variant.name.replaceFirstChar { it.uppercase() }) {
+            components.from(fileTree(dir) { include("*.kpk") })
+        }
+        variant.sources.assets?.addGeneratedSourceDirectory(task, BundleToolchain::output)
+    }
 }

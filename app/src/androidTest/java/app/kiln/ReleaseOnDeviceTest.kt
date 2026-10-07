@@ -19,6 +19,8 @@ class ReleaseOnDeviceTest {
 
     @Test fun releaseApkAndBundle() = runBlocking<Unit> {
         Graph.init(ctx.applicationContext as android.app.Application)
+        // The toolchain comes with the APK; wait for it to be set up (instant when it already is).
+        kotlinx.coroutines.runBlocking { Graph.toolchain.syncBundled(Graph.app.assets) }
         assumeTrue("toolchain not installed", Graph.toolchain.state.value is Toolchain.State.Ready)
         val root = Graph.paths.projects
         File(root, "releasetest").deleteRecursively()
@@ -38,6 +40,8 @@ class ReleaseOnDeviceTest {
 
     @Test fun secretsReachTheCodeButNotTheProject() = runBlocking<Unit> {
         Graph.init(ctx.applicationContext as android.app.Application)
+        // The toolchain comes with the APK; wait for it to be set up (instant when it already is).
+        kotlinx.coroutines.runBlocking { Graph.toolchain.syncBundled(Graph.app.assets) }
         assumeTrue("toolchain not installed", Graph.toolchain.state.value is Toolchain.State.Ready)
         val root = Graph.paths.projects
         File(root, "secrettest").deleteRecursively()

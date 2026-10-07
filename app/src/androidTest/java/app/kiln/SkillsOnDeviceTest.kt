@@ -18,6 +18,8 @@ class SkillsOnDeviceTest {
 
     @Test fun everySkillCompiles() = runBlocking<Unit> {
         Graph.init(ctx.applicationContext as android.app.Application)
+        // The toolchain comes with the APK; wait for it to be set up (instant when it already is).
+        kotlinx.coroutines.runBlocking { Graph.toolchain.syncBundled(Graph.app.assets) }
         val tc = Graph.toolchain
         assumeTrue("toolchain not installed", tc.state.value is Toolchain.State.Ready)
         val root = Graph.paths.projects

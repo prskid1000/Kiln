@@ -20,6 +20,8 @@ class TestDisplayOnDeviceTest {
 
     @Test fun agentTestsOnHiddenDisplay() = runBlocking<Unit> {
         Graph.init(application)
+        // The toolchain comes with the APK; wait for it to be set up (instant when it already is).
+        kotlinx.coroutines.runBlocking { Graph.toolchain.syncBundled(Graph.app.assets) }
         val pkg = Graph.device.installedApps().let { a -> a.firstOrNull { it.contains("water") } ?: a.firstOrNull() }
         assumeTrue("needs an installed Kiln app", pkg != null)
         val dev = Device(Graph.warden, TestDisplay(application))

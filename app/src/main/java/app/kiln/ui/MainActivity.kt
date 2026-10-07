@@ -49,6 +49,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -126,7 +127,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        vm.refresh(); vm.autoImportPack()
+        vm.refresh()
     }
 }
 
@@ -178,11 +179,7 @@ private fun ProjectsScreen(vm: KilnVM, open: (String) -> Unit, settings: () -> U
     var deleting by remember { mutableStateOf<ProjectInfo?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { KTopBar("Kiln") { IconBtn(Icons.Rounded.Settings, "Settings", onClick = settings) } }
-        if (toolchain !is Toolchain.State.Ready) item {
-            SetupCard(Icons.Rounded.AutoAwesome, "Install the toolchain",
-                if (toolchain is Toolchain.State.Installing) "Installing…" else "Kiln builds apps on this phone with its own JDK, Kotlin and Compose. Import the toolchain pack once.",
-                "Open settings", settings)
-        }
+        if (toolchain !is Toolchain.State.Ready) item { ToolchainSetupCard(toolchain) { vm.setupToolchain() } }
         if (warden != Warden.Status.READY) item {
             SetupCard(Icons.Rounded.Link, "Connect Warden", when (warden) {
                 Warden.Status.NOT_GRANTED -> "Warden is running, but Kiln isn't allowed yet. Switch Kiln on in Warden's app list."
@@ -208,6 +205,31 @@ private fun ProjectsScreen(vm: KilnVM, open: (String) -> Unit, settings: () -> U
 
 @Composable
 private fun Overline(text: String, modifier: Modifier = Modifier) = app.kiln.ui.theme.Overline(text, modifier)
+
+/** First launch (or an update that changed the toolchain): unpacking what came with the app. */
+@Composable
+private fun ToolchainSetupCard(state: Toolchain.State, retry: () -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().vCard(N.shapeLg).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.AutoAwesome, null, tint = N.accent2, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(if (state is Toolchain.State.Failed) "Setup didn't finish" else "Setting up", style = T.subtitle)
+        }
+        when (state) {
+            is Toolchain.State.Failed -> {
+                Text(state.message, style = T.bodySmall.copy(color = N.danger))
+                KButton("Try again", Tone.Accent, onClick = retry)
+            }
+            is Toolchain.State.Installing -> {
+                Text("Unpacking the build tools that came with Kiln (JDK, Kotlin, Compose). This happens once per update and needs no network.", style = T.bodySmall)
+                LinearProgressIndicator(progress = { if (state.total > 0) state.done.toFloat() / state.total else 0f },
+                    color = N.accent, trackColor = N.bg, modifier = Modifier.fillMaxWidth())
+                Text("${state.step} · ${state.done / 1_048_576} of ${state.total / 1_048_576} MB", style = T.label)
+            }
+            else -> Text("Checking the build tools…", style = T.bodySmall)
+        }
+    }
+}
 
 @Composable
 private fun SetupCard(icon: ImageVector, title: String, body: String, action: String, onAction: () -> Unit) {

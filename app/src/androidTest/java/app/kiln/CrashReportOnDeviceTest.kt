@@ -20,8 +20,9 @@ class CrashReportOnDeviceTest {
 
     @Test fun crashBecomesNotification() = runBlocking<Unit> {
         Graph.init(ctx.applicationContext as android.app.Application)
+        // The toolchain comes with the APK; wait for it to be set up (instant when it already is).
+        kotlinx.coroutines.runBlocking { Graph.toolchain.syncBundled(Graph.app.assets) }
         // A freshly pushed pack (with the kit's crash hook) replaces the installed one.
-        Graph.toolchain.inboxPack()?.let { zip -> Graph.toolchain.install(zip.inputStream(), zip.length()).getOrThrow(); zip.delete() }
         assumeTrue("toolchain not installed", Graph.toolchain.state.value is Toolchain.State.Ready)
         assumeTrue("Warden not ready", Graph.warden.status() == Warden.Status.READY)
         val root = Graph.paths.projects

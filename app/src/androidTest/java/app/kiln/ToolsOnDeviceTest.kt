@@ -40,6 +40,8 @@ class ToolsOnDeviceTest {
     /** Chat attachments: images become image blocks, text inlines, binaries are noted — all saved in the project. */
     @Test fun attachmentsBecomeBlocks() {
         Graph.init(app)
+        // The toolchain comes with the APK; wait for it to be set up (instant when it already is).
+        kotlinx.coroutines.runBlocking { Graph.toolchain.syncBundled(Graph.app.assets) }
         assumeTrue("toolchain installed", Graph.toolchain.state.value is Toolchain.State.Ready)
         File(Graph.paths.projects, "attachtest").deleteRecursively()
         val p = Project.create(Graph.paths.projects, "attachtest", "Attach Test", File(Graph.toolchain.templates(), "compose"))
@@ -61,6 +63,8 @@ class ToolsOnDeviceTest {
 
     @Test fun everyToolWorks() = runBlocking {
         Graph.init(app)
+        // The toolchain comes with the APK; wait for it to be set up (instant when it already is).
+        kotlinx.coroutines.runBlocking { Graph.toolchain.syncBundled(Graph.app.assets) }
         assumeTrue("toolchain installed", Graph.toolchain.state.value is Toolchain.State.Ready)
         val root = Graph.paths.projects
         File(root, "tooltest").deleteRecursively()

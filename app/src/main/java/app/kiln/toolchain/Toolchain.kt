@@ -15,10 +15,10 @@ import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 
 /**
- * The on-device toolchain pack (see toolchain/build_pack.py): JDK, kotlinc,
- * R8, apksigner, aapt2, the app kit. Installed by unpacking a pack zip into
- * toolchain/<version>/, verifying every file's sha256, then switching
- * toolchain/current atomically. A half-installed pack is never used.
+ * The on-device toolchain (see toolchain/build_pack.py): JDK, kotlinc,
+ * R8, apksigner, aapt2, the app kit. Bundled in the APK as components and set up
+ * on launch ([syncBundled]): each verified file by file, moved into place whole,
+ * and switched in atomically. A half-installed component is never used.
  */
 class Toolchain(private val paths: Paths) {
 
@@ -39,7 +39,7 @@ class Toolchain(private val paths: Paths) {
         val dir = cur?.let { File(paths.toolchainRoot, it) }
         val ok = dir != null && File(dir, "VERSION.json").isFile
         lastReady = if (ok) dir else null
-        _state.value = if (ok) State.Ready(cur!!, dir!!) else State.Missing
+        _state.value = if (ok) State.Ready(dir!!.name, dir) else State.Missing
     }
 
     /** The installed toolchain stays usable while a new pack imports, and after one fails to. */
@@ -49,7 +49,7 @@ class Toolchain(private val paths: Paths) {
     /** Called before the active toolchain is swapped (the warm compiler JVM must not outlive its files). */
     var beforeSwitch: (suspend () -> Unit)? = null
     private val installLock = kotlinx.coroutines.sync.Mutex()
-    fun require(): File = dir ?: error("Toolchain not installed — open Settings → Toolchain and import the pack.")
+    fun require(): File = dir ?: error("The toolchain isn't set up yet — reopen Kiln to finish setting it up.")
 
     // ---- layout ----
     fun jdk(d: File = require()) = File(d, "jdk")
@@ -76,72 +76,109 @@ class Toolchain(private val paths: Paths) {
         "HOME" to paths.files.absolutePath,
     )
 
-    /** A pack zip dropped into the app's external files dir (adb push / file manager). */
-    fun inboxPack(): File? = paths.inbox?.listFiles { f -> f.name.startsWith("kiln-toolchain") && f.extension == "zip" }
-        ?.maxByOrNull { it.lastModified() }
-
-    suspend fun install(input: InputStream, totalBytes: Long): Result<String> = withContext(Dispatchers.IO) {
-        // Auto-import (on resume) and a manual import must not share the staging dir at once.
-        if (!installLock.tryLock()) return@withContext Result.failure(IllegalStateException("a toolchain import is already running"))
-        try { installLocked(input, totalBytes) } finally { installLock.unlock() }
+    /**
+     * Install or update the toolchain from the components bundled in the APK (the .kpk files in assets/toolchain,
+     * see toolchain/build_pack.py). A component is unpacked only when its content hash isn't
+     * installed yet — so an APK update installs exactly what changed, and an ordinary launch reads
+     * seven small headers and does nothing. Each component lands in c/<name>/<hash>/ through a
+     * staging dir and a rename; the active toolchain is a set of links to them, switched atomically.
+     */
+    suspend fun syncBundled(assets: android.content.res.AssetManager): Result<String> = withContext(Dispatchers.IO) {
+        if (!installLock.tryLock()) { installLock.lock(); installLock.unlock(); return@withContext Result.success(state.value.let { (it as? State.Ready)?.version ?: "" }) }
+        try { syncLocked(assets) } finally { installLock.unlock() }
     }
 
-    private suspend fun installLocked(input: InputStream, totalBytes: Long): Result<String> = withContext(Dispatchers.IO) {
-        val staging = File(paths.toolchainRoot, ".staging")
-        runCatching {
-            staging.apply { deleteRecursively(); mkdirs() }
-            var done = 0L
-            ZipInputStream(input.buffered(1 shl 16)).use { zin ->
-                val buf = ByteArray(1 shl 16)
-                while (true) {
-                    val e = zin.nextEntry ?: break
-                    val out = File(staging, e.name).canonicalFile
-                    require(out.path.startsWith(staging.canonicalPath + File.separator)) { "bad entry ${e.name}" }
-                    if (e.isDirectory) { out.mkdirs(); continue }
-                    out.parentFile?.mkdirs()
-                    out.outputStream().use { o ->
-                        while (true) {
-                            val n = zin.read(buf); if (n < 0) break
-                            o.write(buf, 0, n); done += n
-                        }
-                    }
-                    _state.value = State.Installing(done, totalBytes, e.name)
-                }
-            }
-            val meta = parseJson(File(staging, "VERSION.json").readText()) as JsonObject
-            val version = meta.str("version") ?: error("pack has no version")
-            // The JDK, aapt2 and launcher are native: a pack only runs on its own ABI.
-            val abi = meta.str("abi") ?: "arm64-v8a"
-            check(abi == android.os.Build.SUPPORTED_ABIS.first()) {
-                "this pack is for $abi; this device needs ${android.os.Build.SUPPORTED_ABIS.first()}"
-            }
-            val files = meta["files"] as JsonObject
-            var checked = 0
-            for ((rel, sha) in files) {
-                val f = File(staging, rel)
-                require(f.isFile) { "pack is missing $rel" }
-                require(sha256(f) == (sha as JsonPrimitive).content) { "checksum mismatch: $rel" }
-                checked++
-                _state.value = State.Installing(checked.toLong(), files.size.toLong(), "verify $rel")
-            }
-            beforeSwitch?.invoke()
-            // Reinstalling the active version: never delete the directory builds are using.
-            val target = File(paths.toolchainRoot, version).let { t ->
-                if (t.exists() && t == dir) File(paths.toolchainRoot, "$version-${System.currentTimeMillis()}") else t.also { it.deleteRecursively() }
-            }
-            check(staging.renameTo(target)) { "could not move pack into place" }
-            File(paths.toolchainRoot, "current.tmp").apply { writeText(target.name) }
-                .renameTo(File(paths.toolchainRoot, "current"))
-            paths.toolchainRoot.listFiles()?.filter { it.isDirectory && it != target && !it.name.startsWith(".") }
-                ?.forEach { it.deleteRecursively() }
-            refresh()
-            version
-        }.onFailure {
-            staging.deleteRecursively()
-            refresh()   // back to the installed toolchain, if there is one
-            if (_state.value !is State.Ready) _state.value = State.Failed(it.message ?: it.toString())
+    private class Bundled(val asset: String, val name: String, val hash: String, val abi: String, val size: Long, val files: Map<String, String>)
+
+    private fun readHeader(assets: android.content.res.AssetManager, asset: String): Bundled =
+        ZipInputStream(assets.open(asset).buffered(1 shl 16)).use { z ->
+            val e = z.nextEntry
+            require(e != null && e.name == "component.json") { "$asset has no component.json" }
+            val o = parseJson(z.readBytes().decodeToString()) as JsonObject
+            Bundled(asset, o.str("name")!!, o.str("payloadSha256")!!, o.str("abi") ?: "",
+                (o["size"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 0L,
+                (o["files"] as JsonObject).mapValues { (it.value as JsonPrimitive).content })
         }
+
+    private suspend fun syncLocked(assets: android.content.res.AssetManager): Result<String> = runCatching {
+        val bundled = (assets.list("toolchain") ?: emptyArray()).filter { it.endsWith(".kpk") }.sorted()
+            .map { readHeader(assets, "toolchain/$it") }
+        if (bundled.isEmpty()) {
+            // A build without components (toolchain not built): keep whatever is installed.
+            refresh(); return@runCatching (state.value as? State.Ready)?.version ?: error("this build of Kiln has no toolchain bundled")
+        }
+        val abi = android.os.Build.SUPPORTED_ABIS.first()
+        bundled.firstOrNull { it.abi != abi }?.let { error("this Kiln build is for ${it.abi}; this device needs $abi — install the $abi build") }
+
+        val store = File(paths.toolchainRoot, "c")
+        fun dirOf(b: Bundled) = File(store, "${b.name}/${b.hash}")
+        val missing = bundled.filter { !File(dirOf(it), "component.json").isFile }
+        val total = missing.sumOf { it.size }.coerceAtLeast(1)
+        var done = 0L
+        for (b in missing) {
+            val staging = File(store, ".staging-${b.name}").apply { deleteRecursively(); mkdirs() }
+            try {
+                ZipInputStream(assets.open(b.asset).buffered(1 shl 16)).use { z ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) {
+                        val e = z.nextEntry ?: break
+                        if (e.isDirectory || e.name == "component.json") continue
+                        val want = b.files[e.name] ?: error("${b.name}: unexpected file ${e.name}")
+                        val out = File(staging, e.name).canonicalFile
+                        require(out.path.startsWith(staging.canonicalPath + File.separator)) { "bad entry ${e.name}" }
+                        out.parentFile?.mkdirs()
+                        val md = MessageDigest.getInstance("SHA-256")
+                        out.outputStream().use { o ->
+                            while (true) { val n = z.read(buf); if (n < 0) break; o.write(buf, 0, n); md.update(buf, 0, n); done += n }
+                        }
+                        require(hex(md.digest()) == want) { "${b.name}: checksum mismatch in ${e.name}" }
+                        _state.value = State.Installing(done, total, "Setting up ${b.name}")
+                    }
+                }
+                val got = staging.walkTopDown().filter { it.isFile }.count()
+                require(got == b.files.size) { "${b.name}: ${b.files.size - got} files missing" }
+                // The header goes in last: a component dir with component.json is complete.
+                File(staging, "component.json").writeText("""{"name":"${b.name}","payloadSha256":"${b.hash}"}""")
+                val target = dirOf(b).apply { parentFile?.mkdirs(); deleteRecursively() }
+                check(staging.renameTo(target)) { "could not move ${b.name} into place" }
+            } finally { staging.deleteRecursively() }
+        }
+
+        // The active toolchain: one dir of links to the components, named by the set's hash.
+        val setId = hex(MessageDigest.getInstance("SHA-256").digest(bundled.joinToString("|") { "${it.name}=${it.hash}" }.toByteArray())).take(16)
+        val set = File(paths.toolchainRoot, "sets/$setId")
+        if (!File(set, "VERSION.json").isFile) {
+            val tmp = File(paths.toolchainRoot, "sets/.tmp-$setId").apply { deleteRecursively(); mkdirs() }
+            for (b in bundled) for (top in dirOf(b).listFiles().orEmpty().filter { it.isDirectory })
+                android.system.Os.symlink(top.path, File(tmp, top.name).path)
+            File(tmp, "VERSION.json").writeText("{\"version\":\"$setId\",\"abi\":\"$abi\",\"components\":{" +
+                bundled.joinToString(",") { "\"${it.name}\":\"${it.hash}\"" } + "}}")
+            set.deleteRecursively()
+            check(tmp.renameTo(set)) { "could not activate the toolchain" }
+        }
+        if ((state.value as? State.Ready)?.dir?.canonicalPath != set.canonicalPath) {
+            beforeSwitch?.invoke()
+            File(paths.toolchainRoot, "current.tmp").apply { writeText("sets/$setId") }.renameTo(File(paths.toolchainRoot, "current"))
+        }
+        refresh()
+        prune(setId, bundled.map { dirOf(it).canonicalPath }.toSet())
+        setId
+    }.onFailure {
+        refresh()   // the installed toolchain, if there is one, stays in use
+        if (_state.value !is State.Ready) _state.value = State.Failed(it.message ?: it.toString())
     }
+
+    /** Remove component versions and link sets the active toolchain doesn't use, and pre-component packs. */
+    private fun prune(activeSet: String, keep: Set<String>) {
+        val root = paths.toolchainRoot
+        File(root, "sets").listFiles()?.filter { it.name != activeSet }?.forEach { it.deleteRecursively() }
+        File(root, "c").listFiles()?.forEach { comp ->
+            comp.listFiles()?.filter { it.canonicalPath !in keep }?.forEach { it.deleteRecursively() }
+        }
+        root.listFiles()?.filter { it.name !in setOf("c", "sets", "current") }?.forEach { it.deleteRecursively() }
+    }
+
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
 
     private fun sha256(f: File): String {
         val md = MessageDigest.getInstance("SHA-256")

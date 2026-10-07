@@ -3,8 +3,12 @@
 Builds the Kiln toolchain pack: everything an on-device build needs, in one
 versioned zip that the app unpacks into its files dir.
 
-    python toolchain/build_pack.py            # -> toolchain/out/kiln-toolchain-<v>.zip (arm64 phones)
-    KILN_ARCH=x86_64 python toolchain/build_pack.py   # -> ...-<v>-x86_64.zip (emulators, Chromebooks)
+    python toolchain/build_pack.py                    # -> toolchain/out/components/*.kpk (arm64 phones)
+    KILN_ARCH=x86_64 python toolchain/build_pack.py   # -> toolchain/out/components-x86_64/ (emulators)
+
+The components are bundled into the Kiln APK (app/build.gradle.kts, one flavour per ABI) and
+installed or updated on launch when their content hash changes. Rebuild one part with e.g.
+`python toolchain/build_pack.py kit` and reinstall the APK.
 
 Inputs are downloaded into toolchain/.cache (gitignored) and pinned below, so a
 pack is reproducible. Run `gradlew :kit:exportKit :toolserver:jar` first (the
@@ -12,7 +16,6 @@ script runs them itself if their outputs are missing).
 
 Layout of the pack (all paths relative to its root):
 
-    VERSION.json              version + sha256 of every file
     bin/kilnjava              JVM launcher (see launcher/kilnjava.c)
     bin/aapt2                 aapt2 (Termux PIE build; libs in lib/)
     lib/                      shared libraries for aapt2
@@ -294,7 +297,7 @@ def build_kit():
     argfile = stub / "srcs.txt"
     argfile.write_text("\n".join(str(s) for s in srcs))
     run([JDK / "bin" / "javac", "--release", "17", "-d", stub / "classes", f"@{argfile}"])
-    run([JDK / "bin" / "jar", "cf", cp / "kiln-kit-R.jar", "-C", stub / "classes", "."])
+    run([JDK / "bin" / "jar", "--create", "--date=2008-01-01T00:00:02Z", "--file", cp / "kiln-kit-R.jar", "-C", stub / "classes", "."])
 
     jars = sorted(cp.glob("*.jar"))
     dexout = work / "dex"
@@ -310,20 +313,52 @@ def build_templates():
     shutil.copytree(ROOT / "templates", PACK / "templates", dirs_exist_ok=True)
 
 
+# What the app installs and updates separately: each is one top-level part of the pack layout.
+COMPONENTS = {
+    "jdk": ["jdk"],
+    "native": ["bin", "lib"],
+    "tools": ["tools"],
+    "kotlinc": ["kotlinc"],
+    "sdk": ["sdk"],
+    "kit": ["kit"],
+    "templates": ["templates"],
+}
+
+
 def finish():
-    files = {}
-    for p in sorted(PACK.rglob("*")):
-        if p.is_file() and p.name != "VERSION.json":
-            files[p.relative_to(PACK).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
-    meta = {"version": VERSION, "abi": ABI, "kotlin": KOTLIN, "r8": R8, "files": files}
-    (PACK / "VERSION.json").write_text(json.dumps(meta, indent=1))
-    z = OUT / f"kiln-toolchain-{VERSION}{SUFFIX}.zip"
-    with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-        for p in sorted(PACK.rglob("*")):
-            if p.is_file():
-                zf.write(p, p.relative_to(PACK).as_posix(),
-                         compress_type=zipfile.ZIP_STORED if p.suffix in (".jar", ".zip") else zipfile.ZIP_DEFLATED)
-    log("pack:", z, f"{z.stat().st_size / 1e6:.1f} MB,", len(files), "files")
+    """Write one .kpk per component into out/components<suffix>/ (bundled into the APK's assets).
+
+    A .kpk is a zip whose first entry is component.json:
+        {"name", "abi", "payloadSha256", "files": {relpath: sha256}, "size"}
+    payloadSha256 = sha256 over "<relpath>\0<sha256>\n" for every file, sorted. The app installs a
+    component when that hash differs from what it has: a rebuild that changes anything is picked up,
+    with no version number to remember to bump."""
+    out = OUT / f"components{SUFFIX}"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    total = 0
+    for name, dirs in COMPONENTS.items():
+        files = {}
+        for d in dirs:
+            for p in sorted((PACK / d).rglob("*")):
+                if p.is_file():
+                    files[p.relative_to(PACK).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
+        if not files:
+            raise SystemExit(f"component {name} is empty — build it first")
+        payload = hashlib.sha256("".join(f"{r}\0{h}\n" for r, h in sorted(files.items())).encode()).hexdigest()
+        meta = {"name": name, "abi": ABI, "payloadSha256": payload, "files": files,
+                "size": sum((PACK / r).stat().st_size for r in files), "kotlin": KOTLIN, "r8": R8}
+        z = out / f"{name}.kpk"
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            zf.writestr(zipfile.ZipInfo("component.json", (2008, 1, 1, 0, 0, 0)), json.dumps(meta, indent=1))
+            for r in sorted(files):
+                info = zipfile.ZipInfo(r, (2008, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_STORED if r.endswith((".jar", ".zip")) else zipfile.ZIP_DEFLATED
+                info.external_attr = 0o755 << 16 if r.startswith("bin/") else 0o644 << 16
+                zf.writestr(info, (PACK / r).read_bytes())
+        total += z.stat().st_size
+        log(f"component {name}: {len(files)} files, {payload[:12]}, {z.stat().st_size / 1e6:.1f} MB")
+    log("components:", out, f"{total / 1e6:.1f} MB")
 
 
 def main():
