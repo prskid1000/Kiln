@@ -38,7 +38,9 @@ class ProjectInfoTool : Tool {
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val p = ctx.project
         return ToolResult.ok(KJPretty.encodeToString(ProjectMeta.serializer(), p.meta()) + "\n\nfiles:\n" +
-            p.files().joinToString("\n") { "  " + p.rel(it) })
+            p.files().joinToString("\n") { "  " + p.rel(it) } +
+            app.kiln.build.AppSecrets.names(p).takeIf { it.isNotEmpty() }
+                ?.let { "\n\nsecrets (read as AppSecrets.NAME; values are hidden): " + it.joinToString() }.orEmpty())
     }
 }
 

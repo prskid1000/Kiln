@@ -135,6 +135,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         s?.job?.cancel()
         val pkg = Project.packageFor(name)
         if (pkg in installed.value) Graph.device.uninstall(pkg)
+        // Its secrets go with it.
+        runCatching { val p = Project(File(Graph.paths.projects, name)); app.kiln.build.AppSecrets.names(p).forEach { Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, it), null) } }
         File(Graph.paths.projects, name).deleteRecursively()
         Session.list(Graph.paths.sessions, name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
         refresh()

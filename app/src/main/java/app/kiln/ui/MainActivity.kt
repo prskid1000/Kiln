@@ -63,6 +63,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.runtime.getValue
@@ -303,6 +304,7 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
     var history by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf(false) }
     var release by remember { mutableStateOf(false) }
+    var secrets by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val isInstalled = ps.pkg in installed
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -323,6 +325,9 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                     DropdownMenuItem(text = { Text("Release…", style = T.body) },
                         leadingIcon = { Icon(Icons.Rounded.RocketLaunch, null, tint = N.textLabel) }, enabled = !running,
                         onClick = { menu = false; release = true })
+                    DropdownMenuItem(text = { Text("Secrets", style = T.body) },
+                        leadingIcon = { Icon(Icons.Rounded.Key, null, tint = N.textLabel) },
+                        onClick = { menu = false; secrets = true })
                     DropdownMenuItem(text = { Text("Share chat", style = T.body) },
                         leadingIcon = { Icon(Icons.Rounded.Share, null, tint = N.textLabel) }, enabled = loop != null,
                         onClick = {
@@ -364,6 +369,7 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
         }
     }
 
+    if (secrets) SecretsSheet(vm, ps) { secrets = false }
     if (release) ReleaseSheet(vm, ps) { release = false }
     if (preview) PreviewSheet(vm, ps, onDismiss = { preview = false }) { picked -> ps.draft.value = picked; preview = false; tab = 0 }
     if (history) ModalBottomSheet({ history = false }, containerColor = N.surface) {

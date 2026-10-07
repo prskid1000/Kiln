@@ -13,6 +13,7 @@ import app.kiln.llm.Providers
 import app.kiln.llm.Secrets
 import app.kiln.toolchain.ToolHost
 import app.kiln.toolchain.Toolchain
+import app.kiln.build.AppSecrets
 
 class KilnApp : Application() {
     override fun onCreate() {
@@ -43,7 +44,7 @@ object Graph {
         paths = Paths(app)
         toolchain = Toolchain(paths)
         toolHost = ToolHost(paths, toolchain)
-        builds = BuildEngine(toolchain, toolHost)
+        builds = BuildEngine(toolchain, toolHost) { p, name -> secrets.get(AppSecrets.storeId(p, name)) }
         toolchain.beforeSwitch = { toolHost.shutdown() }
         warden = Warden(app)
         device = Device(warden)

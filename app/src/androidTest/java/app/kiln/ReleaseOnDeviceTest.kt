@@ -35,4 +35,28 @@ class ReleaseOnDeviceTest {
             assertTrue(Graph.builds.build(p).ok)
         } finally { p.dir.deleteRecursively() }
     }
+
+    @Test fun secretsReachTheCodeButNotTheProject() = runBlocking<Unit> {
+        Graph.init(ctx.applicationContext as android.app.Application)
+        assumeTrue("toolchain not installed", Graph.toolchain.state.value is Toolchain.State.Ready)
+        val root = Graph.paths.projects
+        File(root, "secrettest").deleteRecursively()
+        val p = Project.create(root, "secrettest", "Secret Test", File(Graph.toolchain.templates(), "compose"))
+        try {
+            val dir = File(p.src, p.meta().`package`.replace('.', '/'))
+            File(dir, "UsesSecret.kt").writeText("package " + p.meta().`package` + System.lineSeparator() +
+                "val keyLength = AppSecrets.WEATHER_KEY.length + AppSecrets.MAPS_KEY.length" + System.lineSeparator())
+            app.kiln.build.AppSecrets.setNames(p, listOf("WEATHER_KEY", "MAPS_KEY"))
+            Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, "WEATHER_KEY"), "sk-weather-123")
+            val r = Graph.builds.build(p)
+            println("SECRETS ok=${r.ok} warnings=${r.warnings.map { it.message }}")
+            assertTrue("build: ${r.diagnostics}", r.ok)
+            assertTrue(r.warnings.any { "MAPS_KEY" in it.message })
+            // The value is nowhere in the project's own files (only in the generated build source, encoded).
+            assertTrue(p.files().none { "sk-weather-123" in it.readText() })
+        } finally {
+            Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, "WEATHER_KEY"), null)
+            p.dir.deleteRecursively()
+        }
+    }
 }
