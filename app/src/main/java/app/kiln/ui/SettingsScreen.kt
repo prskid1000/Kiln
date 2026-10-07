@@ -191,7 +191,8 @@ private fun ProfileEditor(start: Profile, onDone: () -> Unit) {
                 scope.launch {
                     val model = current().models.firstOrNull() ?: ""
                     report = runCatching { withContext(Dispatchers.IO) { Graph.providers.probe(current(), model) } }.fold({ r ->
-                        p = current().copy(caps = r.caps, models = (current().models + r.models.take(30)).distinct())
+                        p = current().copy(caps = r.caps, models = (current().models + r.models.take(30)).distinct(),
+                            modelPrices = current().modelPrices + r.prices.filterKeys { k -> k in current().models || k in r.models.take(30) })
                         models = p.models.joinToString(", "); Graph.providers.save(p)
                         r.notes.joinToString("\n")
                     }, { "Probe failed: ${it.message}" })

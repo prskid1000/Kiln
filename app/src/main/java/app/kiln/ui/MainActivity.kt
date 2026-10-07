@@ -98,6 +98,9 @@ class MainActivity : ComponentActivity() {
         setContent { KilnTheme { App(vm) } }
     }
 
+    override fun onStart() { super.onStart(); app.kiln.agent.Attention.visible = true }
+    override fun onStop() { super.onStop(); app.kiln.agent.Attention.visible = false }
+
     override fun onResume() {
         super.onResume()
         vm.refresh(); vm.autoImportPack()

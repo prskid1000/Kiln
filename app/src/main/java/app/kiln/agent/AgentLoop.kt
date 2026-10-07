@@ -12,6 +12,7 @@ import app.kiln.llm.ModelRequest
 import app.kiln.llm.ModelTurn
 import app.kiln.llm.Msg
 import app.kiln.llm.Profile
+import app.kiln.llm.priceFor
 import app.kiln.llm.ProviderException
 import app.kiln.llm.Providers
 import app.kiln.llm.Stop
@@ -85,6 +86,18 @@ class AgentLoop(
     val usage = MutableStateFlow(session.meta.usage)
     val cost = MutableStateFlow(session.meta.costUsd)
     val todos = MutableStateFlow<List<SessionState.Todo>>(emptyList())
+    /** False once a model without a known price was used: the cost shown is then a lower bound. */
+    val costKnown = MutableStateFlow(true)
+
+    enum class Mode { BUILD, PLAN }
+    /** The latest plan from a Plan-mode request: the UI offers "Build this plan". */
+    val plan = MutableStateFlow<String?>(null)
+    /** Messages typed while the agent works, delivered at its next step instead of waiting for the end. */
+    private val steering = java.util.concurrent.ConcurrentLinkedQueue<String>()
+    private var mode = Mode.BUILD
+    /** Done criteria for a goal run: the turn may only end once a check says they're met. */
+    private var goal: String? = null
+    private var goalChecks = 0
 
     private val state = SessionState()
     /** How often this request pushed back on ending with a broken build (see the stop guard in [loop]). */
@@ -142,22 +155,34 @@ class AgentLoop(
         else update(last.id) { it.copy(images = it.images + images, files = it.files + files) }
     }
 
-    suspend fun send(userText: String, attachments: List<Attachment> = emptyList()) {
+    /**
+     * Run one user request. [mode] PLAN gives the model read-only tools and asks for a spec ending in
+     * done criteria; a [goal] (those criteria) keeps the turn going until a separate check says they're met.
+     */
+    suspend fun send(userText: String, attachments: List<Attachment> = emptyList(), mode: Mode = Mode.BUILD, goal: String? = null) {
         // Atomic: a double-tap must not start two loops on one transcript.
         if (!running.compareAndSet(expect = false, update = true)) return
-        stopGuards = 0
+        stopGuards = 0; goalChecks = 0
+        this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
         // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
         closeDanglingToolUses()
         try {
+            // Snapshot the sources before this turn: rewind and change review are keyed to it.
+            runCatching { Turns.snapshot(session, project, session.messages.size) }
             val id = next(Activity.Kind.USER, userText)
             val extra = Attachments.blocks(project, attachments)
             update(id) { it.copy(files = attachments.filterNot { a -> a.mime.startsWith("image/") }.map { a -> a.name },
                 images = attachments.filter { a -> a.mime.startsWith("image/") }.map { a -> a.bytes }) }
-            val blocks = listOfNotNull(userText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra
+            val blocks = listOfNotNull(userText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra +
+                listOfNotNull(if (mode == Mode.PLAN) obj("type" to "text", "text" to PLAN_REMINDER) else null) +
+                listOfNotNull(this.goal?.let { obj("type" to "text", "text" to "<system-reminder>This is a goal run. The turn ends only " +
+                    "when these done criteria are verified on the device:\n$it</system-reminder>") })
             session.append(Msg("user", arrOf(blocks)))
             val title = userText.ifBlank { attachments.joinToString { it.name } }
             if (session.meta.title.isBlank()) session.updateMeta { it.copy(title = title.take(60)) }
             loop()
+            if (mode == Mode.PLAN) plan.value = session.messages.lastOrNull { it.role == "assistant" }?.content
+                ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")?.trim()
         } catch (e: CancellationException) {
             _feed.value = _feed.value.map { if (it.status == Activity.Status.RUNNING) it.copy(status = Activity.Status.STOPPED) else it }
             next(Activity.Kind.NOTICE, "Stopped.")
@@ -204,11 +229,74 @@ class AgentLoop(
                         "then continue with the task. Only stop if you truly cannot fix it — and then say why.</system-reminder>")))))
                     continue
                 }
+                // Messages the user typed while the model was finishing: answer them, don't end.
+                drainSteering()?.let { session.append(Msg("user", arrOf(it))); continue }
+                // Goal run: a separate check decides whether the done criteria are actually met.
+                val g = goal
+                if (g != null && mode == Mode.BUILD && goalChecks < 4) {
+                    goalChecks++
+                    val (met, why) = checkGoal(g)
+                    if (!met) {
+                        next(Activity.Kind.NOTICE, "Goal not met yet — $why")
+                        session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
+                            "<system-reminder>The goal isn't met yet: $why\nKeep working until every done criterion is " +
+                            "verified on the device (run_app, ui_tree, tap, qa_check).</system-reminder>")))))
+                        continue
+                    }
+                    next(Activity.Kind.NOTICE, "Goal met ✓")
+                }
                 return
             }
             val results = runTools(uses, cfg, truncated = turn.second.stop == Stop.MAX_TOKENS)
-            session.append(Msg("user", JsonArray(results)))
+            // Queued user messages ride along with the tool results: the model sees them at its next step.
+            session.append(Msg("user", JsonArray(results + (drainSteering() ?: emptyList()))))
         }
+    }
+
+    /** User messages typed during the run, as text blocks (null when there are none). */
+    private fun drainSteering(): List<JsonObject>? {
+        val out = generateSequence { steering.poll() }.toList()
+        if (out.isEmpty()) return null
+        return out.map { obj("type" to "text", "text" to "[Message from the user while you were working] $it") }
+    }
+
+    /** Add a message to the running request; it reaches the model at its next step. */
+    fun steer(text: String) {
+        if (text.isBlank()) return
+        steering += text
+        next(Activity.Kind.USER, text)
+    }
+
+    /**
+     * Ask the model, in a separate small call without tools, whether the done criteria are met given
+     * what the agent last reported and the latest device evidence. A fresh judgement, not the
+     * builder grading its own work in the same breath.
+     */
+    private suspend fun checkGoal(criteria: String): Pair<Boolean, String> {
+        val binding = providers.roles["subagent"] ?: providers.roles[role] ?: return true to ""
+        val (profile, model) = providers.resolve("${binding.profile}:${binding.model}") ?: return true to ""
+        val evidence = session.messages.takeLast(8).joinToString("\n\n") { m ->
+            m.content.joinToString("\n") { b ->
+                val o = b as? JsonObject
+                when (o?.str("type")) {
+                    "text" -> o.str("text") ?: ""
+                    "tool_use" -> "[called ${o.str("name")}]"
+                    "tool_result" -> "[result] " + (o["content"].let { c -> (c as? JsonPrimitive)?.content
+                        ?: (c as? JsonArray)?.firstOrNull()?.let { (it as? JsonObject)?.str("text") } } ?: "").take(1500)
+                    else -> ""
+                }
+            }
+        }.takeLast(12_000)
+        val req = ModelRequest(model = model,
+            system = "You verify whether an Android app meets its done criteria, from the build/device evidence given. " +
+                "Be strict: unverified means not met. Answer with MET or NOT MET on the first line, then one short reason.",
+            messages = listOf(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "Done criteria:\n$criteria\n\nEvidence:\n$evidence"))))),
+            tools = emptyList(), maxTokens = 300, effort = "low")
+        val turn = runCatching { providers.adapter(profile).stream(req) {} }.getOrNull() ?: return true to "could not check"
+        val c = turn.usage.cost(profile.priceFor(model)); cost.value += c; settings.addSpend(c)
+        val text = turn.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }.joinToString("\n").trim()
+        val first = text.lineSequence().firstOrNull()?.uppercase() ?: ""
+        return (first.startsWith("MET") && !first.startsWith("NOT")) to text.lines().drop(1).joinToString(" ").ifBlank { text }.take(200)
     }
 
     /** One model call with streaming into the feed, retries, and the role's fallback chain. Returns (origin, turn). */
@@ -241,7 +329,8 @@ class AgentLoop(
 
     private suspend fun stream(adapter: Adapter, profile: Profile, model: String, cfg: Settings): Pair<String, ModelTurn> {
         val origin = "${profile.id}|$model"
-        val specs = registry.specs(tools)
+        // Plan mode: the model only sees tools that can't change anything.
+        val specs = registry.specs(if (mode == Mode.PLAN) tools.filter { Trait.READ_ONLY in it.traits } else tools)
         val req = ModelRequest(
             model = model, system = session.meta.systemPrompt,
             messages = ContextFit.fit(session.messages, session.meta.systemPrompt, profile.caps.contextWindow), tools = specs,
@@ -269,7 +358,8 @@ class AgentLoop(
         textId?.let { id -> update(id) { it.copy(status = Activity.Status.DONE) } }
         thinkId?.let { id -> update(id) { it.copy(status = Activity.Status.DONE) } }
         session.append(Msg("assistant", turn.content, origin = origin, providerState = turn.providerState))
-        val c = turn.usage.cost(profile.price)
+        val c = turn.usage.cost(profile.priceFor(model))
+        if (profile.priceFor(model) == null) costKnown.value = false
         usage.value = usage.value + turn.usage
         cost.value += c
         settings.addSpend(c)
@@ -336,6 +426,8 @@ class AgentLoop(
         if (input["_invalid_json"] != null || truncated && input.isEmpty())
             return result(ToolResult.error("your tool input was cut off or invalid JSON — send it again (smaller, if it was large)"), Activity.Status.FAILED)
         validate(tool, input)?.let { return result(ToolResult.error(it), Activity.Status.FAILED) }
+        if (mode == Mode.PLAN && Trait.READ_ONLY !in tool.traits)
+            return result(ToolResult.error("plan mode is read-only: put this change in the plan instead"), Activity.Status.DENIED)
 
         when (if (name in sessionAllowed) Policy.ALLOW else registry.policy(tool, cfg.approval)) {
             Policy.DENY -> return result(ToolResult.error("$name is disabled by policy"), Activity.Status.DENIED)
@@ -392,6 +484,13 @@ class AgentLoop(
 
     /** Run a self-contained sub-task on a fresh transcript and return its final text (subagent tool). */
     companion object {
+        /** Appended to a Plan-mode request: what a plan must contain (the last part feeds goal runs and QA). */
+        const val PLAN_REMINDER = "<system-reminder>PLAN MODE — change nothing. Investigate if useful (read files, " +
+            "sdk_lookup, kit_docs), then reply with a plan in Markdown: ## What it does (2–3 lines), ## Screens " +
+            "(each with its contents and actions), ## Data (what is stored, where), ## Done criteria (a checklist " +
+            "of observable behaviours on the device, e.g. \"tapping Add 250ml raises the total by 250\"). Reply with " +
+            "the plan only.</system-reminder>"
+
         suspend fun headless(
             project: Project, sessionsRoot: File, providers: Providers, registry: ToolRegistry, tools: List<Tool>,
             settings: SettingsStore, systemPrompt: String, task: String, role: String,

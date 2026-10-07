@@ -151,8 +151,27 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
             else ChatList(l!!, feed, running)
         }
         if (l != null) Prompts(l)
-        Composer(running, hint = if (feed.isEmpty()) "Describe what to build…" else "Ask for a change…",
-            onSend = { t, files -> vm.send(ps.project.name, t, files) }, onStop = { vm.stop(ps.project.name) })
+        if (l != null && !running) PlanReady(l) { criteria ->
+            vm.send(ps.project.name, "Build the approved plan above. When it's built, verify every done criterion on the device.",
+                goal = criteria)
+        }
+        var planFirst by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        var untilVerified by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        if (l != null) Spend(l)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KChip("Plan first", planFirst) { planFirst = !planFirst; if (planFirst) untilVerified = false }
+            KChip("Keep going until verified", untilVerified) { untilVerified = !untilVerified; if (untilVerified) planFirst = false }
+        }
+        Composer(running, hint = when {
+                running -> "Add to what it's doing…"
+                planFirst -> "Describe the app — you'll get a plan first"
+                feed.isEmpty() -> "Describe what to build…"
+                else -> "Ask for a change…" },
+            onSend = { t, files ->
+                vm.send(ps.project.name, t, files,
+                    mode = if (planFirst) app.kiln.agent.AgentLoop.Mode.PLAN else app.kiln.agent.AgentLoop.Mode.BUILD,
+                    goal = if (untilVerified) "The request below works on the device, verified with run_app / ui_tree / tap:\n$t" else null)
+            }, onStop = { vm.stop(ps.project.name) })
     }
 }
 
@@ -562,9 +581,42 @@ private fun Composer(running: Boolean, hint: String, onSend: (String, List<app.k
             }
             Spacer(Modifier.width(8.dp))
             if (running && text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, onClick = onStop)
-            else FilledIconBtn(Icons.Rounded.ArrowUpward, "Send", enabled = (text.isNotBlank() || files.isNotEmpty()) && !running) {
+            // While it works, sending steers the run (it reads the message at its next step).
+            else FilledIconBtn(Icons.Rounded.ArrowUpward, "Send", enabled = text.isNotBlank() || (files.isNotEmpty() && !running)) {
                 onSend(text.trim(), files.toList()); text = ""; files.clear()
             }
         }
     }
+}
+
+/** After a Plan-mode reply: build it as a goal run whose done criteria come from the plan. */
+@Composable
+private fun PlanReady(loop: AgentLoop, onBuild: (String) -> Unit) {
+    val plan by loop.plan.collectAsStateWithLifecycle()
+    val p = plan ?: return
+    val criteria = p.substringAfter("Done criteria", "").substringAfter('\n').trim().ifBlank { p.takeLast(1500) }
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().vCard(N.shapeLg, N.accent.copy(alpha = 0.5f))
+        .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.Checklist, null, tint = N.accent2, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Plan ready", style = T.subtitle)
+            Text("Build it and keep going until each done criterion is verified, or reply to change it.", style = T.label)
+        }
+        KButton("Build this plan", Tone.Accent) { loop.plan.value = null; onBuild(criteria) }
+    }
+}
+
+/** What this chat has cost, and how much of the prompt came from cache. */
+@Composable
+private fun Spend(loop: AgentLoop) {
+    val cost by loop.cost.collectAsStateWithLifecycle()
+    val usage by loop.usage.collectAsStateWithLifecycle()
+    val known by loop.costKnown.collectAsStateWithLifecycle()
+    val prompt = usage.input + usage.cacheRead + usage.cacheWrite
+    if (prompt == 0L) return
+    val cache = (usage.cacheRead * 100 / prompt).toInt()
+    Text((if (known) "$" + "%.3f".format(cost) else "cost unknown (no price for this model)") +
+        " · ${(prompt + usage.output) / 1000}k tokens · cache $cache%",
+        style = T.monoSmall, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
 }

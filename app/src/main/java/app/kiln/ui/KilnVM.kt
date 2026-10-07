@@ -63,6 +63,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         /** Agent runs in flight across all projects; the foreground service lives while > 0. */
         private val active = java.util.concurrent.atomic.AtomicInteger()
 
+        init { app.kiln.agent.Attention.loops = { name -> synchronized(states) { states[name] }?.loop?.value } }
+
         fun slug(label: String): String = label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
             .let { if (it.firstOrNull()?.isLetter() == true) it else "app_$it" }.take(36).trimEnd('_').ifBlank { "app" }
     }
@@ -147,8 +149,14 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         s.loop.value = Graph.kiln.openSession(s.project, id)
     }
 
-    fun send(name: String, text: String, attachments: List<app.kiln.agent.Attachment> = emptyList()) {
+    fun send(name: String, text: String, attachments: List<app.kiln.agent.Attachment> = emptyList(),
+             mode: app.kiln.agent.AgentLoop.Mode = app.kiln.agent.AgentLoop.Mode.BUILD, goal: String? = null) {
         if (text.isBlank() && attachments.isEmpty()) return
+        // While it works, a message steers the run (delivered at its next step) instead of being refused.
+        state(name).loop.value?.takeIf { it.running.value }?.let { l ->
+            if (attachments.isNotEmpty()) message.value = "Files can be attached once this run finishes"
+            l.steer(text); return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             if (Graph.toolchain.state.value !is Toolchain.State.Ready) { message.value = "Install the toolchain first (Settings)"; return@launch }
             val s = state(name)
@@ -162,7 +170,15 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             active.incrementAndGet()
             ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java))
             s.job = runScope.launch {
-                try { l.send(text, attachments) } finally {
+                // Kiln in the background: approvals and questions become actionable notifications.
+                val watch = launch {
+                    launch { l.approval.collect { a -> if (a != null) app.kiln.agent.Attention.approval(ctx, name, s.label, a.tool, a.input) else app.kiln.agent.Attention.clear(ctx, name) } }
+                    launch { l.question.collect { q -> if (q != null) app.kiln.agent.Attention.question(ctx, name, s.label, q.text) } }
+                }
+                try { l.send(text, attachments, mode, goal) } finally {
+                    watch.cancel()
+                    val last = l.feed.value.lastOrNull { it.kind == app.kiln.agent.Activity.Kind.ASSISTANT }?.text ?: ""
+                    app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
                     if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
                     refresh()

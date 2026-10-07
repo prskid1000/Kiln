@@ -49,6 +49,8 @@ data class Profile(
     val pinnedCertSha256: String? = null,
     /** $ per million tokens: input, output, cache read, cache write. 0 = free/local. */
     val price: Price? = null,
+    /** Per-model prices (e.g. from OpenRouter's /models); beats [price] for that model. */
+    val modelPrices: Map<String, Price> = emptyMap(),
 )
 
 @Serializable
@@ -117,4 +119,13 @@ class ProviderException(message: String, val retryable: Boolean, cause: Throwabl
 interface Adapter {
     suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn
     suspend fun listModels(): List<String> = emptyList()
+}
+
+/** The price for [model] on this profile: its own entry, else the profile price, else unknown (null). */
+fun Profile.priceFor(model: String): Price? = modelPrices[model] ?: price ?: if (isLocal()) Price(0.0, 0.0, 0.0, 0.0) else null
+
+/** A model on this phone, the PC over adb/loopback, or the tailnet costs nothing per token. */
+fun Profile.isLocal(): Boolean {
+    val host = runCatching { java.net.URI(baseUrl).host }.getOrNull() ?: return false
+    return host == "localhost" || host.startsWith("127.") || host.startsWith("100.") || host.endsWith(".ts.net")
 }

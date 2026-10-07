@@ -86,7 +86,21 @@ class Providers(dir: File, val secrets: Secrets) {
 
     // ---- capability probe (SPEC §8.4) ----
 
-    data class ProbeReport(val caps: Caps, val models: List<String>, val notes: List<String>)
+    data class ProbeReport(val caps: Caps, val models: List<String>, val notes: List<String>, val prices: Map<String, Price> = emptyMap())
+
+    /** model id → $/million tokens, from OpenRouter's public model list (prices there are $/token). */
+    private fun openRouterPrices(): Map<String, Price> {
+        val body = java.net.URL("https://openrouter.ai/api/v1/models").openStream().use { it.readBytes().decodeToString() }
+        val data = (app.kiln.core.parseJson(body) as JsonObject)["data"] as? kotlinx.serialization.json.JsonArray ?: return emptyMap()
+        return data.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val pr = o["pricing"] as? JsonObject ?: return@mapNotNull null
+            fun d(k: String) = (pr[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.times(1_000_000)
+            val inP = d("prompt") ?: return@mapNotNull null
+            val outP = d("completion") ?: return@mapNotNull null
+            o.str("id")!! to Price(inP, outP, d("input_cache_read") ?: inP * 0.1, d("input_cache_write") ?: inP * 1.25)
+        }.toMap()
+    }
 
     suspend fun probe(p: Profile, model: String): ProbeReport = withContext(Dispatchers.IO) {
         val notes = mutableListOf<String>()
@@ -127,7 +141,10 @@ class Providers(dir: File, val secrets: Secrets) {
             val cached = (r2?.usage?.cacheRead ?: 0) > 0 || (r1?.usage?.cacheWrite ?: 0) > 0
             caps = caps.copy(caching = cached); notes += "prompt caching: $cached"
         }
-        ProbeReport(caps, models, notes)
+        // OpenRouter publishes per-model prices: fill them in so costs (and caps) are real, not $0.
+        val prices = if ("openrouter.ai" in p.baseUrl) runCatching { openRouterPrices() }.getOrDefault(emptyMap()) else emptyMap()
+        if (prices.isNotEmpty()) notes += "prices: ${prices.size} models priced from OpenRouter"
+        ProbeReport(caps, models, notes, prices)
     }
 
     /** Fetch an On Device AI style `GET /certificate` and return (sha256, pem). */
