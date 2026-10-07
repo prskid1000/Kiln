@@ -323,4 +323,44 @@ class CoreTest {
         assertTrue(search.run(ctx, obj("query" to "weather")).text.contains("No tool matches"))
         tmp.deleteRecursively()
     }
+
+    @Test fun `attempts are hidden copies and keeping one restores the original package`() {
+        val root = Files.createTempDirectory("kiln").toFile()
+        val tpl = File(root, "tpl").apply { File(this, "src").mkdirs() }
+        File(tpl, "kiln.json").writeText("{\"package\":\"{{package}}\",\"label\":\"{{label}}\"}")
+        File(tpl, "src/Main.kt").writeText("package {{package}}" + System.lineSeparator() + "val v = 1")
+        val p = app.kiln.build.Project.create(root, "notes", "Notes", tpl)
+        val tries = app.kiln.agent.Attempts.create(root, p, 2, "make it blue")
+        assertEquals(listOf("notes_try1", "notes_try2"), tries.map { it.name })
+        assertTrue(app.kiln.agent.Attempts.isAttempt(tries[0].dir))
+        val src2 = File(tries[1].src, "kiln/app/notes_try2/Main.kt")
+        assertTrue(src2.readText().startsWith("package kiln.app.notes_try2"))
+        src2.writeText(src2.readText().replace("val v = 1", "val v = 2"))
+        File(tries[1].src, "kiln/app/notes_try2/Extra.kt").writeText("package kiln.app.notes_try2")
+        val cp = app.kiln.agent.Attempts.adopt(p, tries[1])
+        val main = File(p.src, "kiln/app/notes/Main.kt").readText()
+        assertTrue(main.startsWith("package kiln.app.notes") && "val v = 2" in main && "try2" !in main)
+        assertTrue(File(p.src, "kiln/app/notes/Extra.kt").isFile)
+        assertEquals("Notes", p.meta().label); assertEquals("kiln.app.notes", p.meta().`package`)
+        assertTrue(File(p.kilnDir, "checkpoints/$cp/src/kiln/app/notes/Main.kt").readText().contains("val v = 1"))
+        app.kiln.agent.Attempts.discard(root, "notes")
+        assertTrue(app.kiln.agent.Attempts.list(root, "notes").isEmpty())
+        root.deleteRecursively()
+    }
+
+    @Test fun `play billing is merged only into apps that ask for it`() {
+        val dir = Files.createTempDirectory("kiln").toFile()
+        val app = File(dir, "AndroidManifest.xml").apply { writeText("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"><application/></manifest>") }
+        val kit = File(dir, "kit.xml").apply { writeText("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">" +
+            "<uses-permission android:name=\"com.android.vending.BILLING\"/><uses-permission android:name=\"android.permission.INTERNET\"/>" +
+            "<queries><intent><action android:name=\"com.android.vending.billing.InAppBillingService.BIND\"/></intent></queries>" +
+            "<application><activity android:name=\"com.android.billingclient.api.ProxyBillingActivity\"/>" +
+            "<provider android:name=\"androidx.startup.InitializationProvider\"/></application></manifest>") }
+        val plain = ManifestMerger.merge(app, kit, ProjectMeta("kiln.app.a", "A"))
+        assertFalse("BILLING" in plain || "billingclient" in plain || "InAppBillingService" in plain)
+        assertTrue("INTERNET" in plain && "InitializationProvider" in plain && "app.kiln" in plain)
+        val paid = ManifestMerger.merge(app, kit, ProjectMeta("kiln.app.a", "A", permissions = listOf("com.android.vending.BILLING")))
+        assertTrue("ProxyBillingActivity" in paid && "InAppBillingService" in paid && "com.android.vending.BILLING" in paid)
+        dir.deleteRecursively()
+    }
 }

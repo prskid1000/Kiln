@@ -112,11 +112,13 @@ class Toolchain(private val paths: Paths) {
 
         val store = File(paths.toolchainRoot, "c")
         fun dirOf(b: Bundled) = File(store, "${b.name}/${b.hash}")
-        val missing = bundled.filter { !File(dirOf(it), "component.json").isFile }
+        // Installed means complete: the header and every file. Anything damaged is simply installed again.
+        fun complete(b: Bundled) = File(dirOf(b), "component.json").isFile && b.files.keys.all { File(dirOf(b), it).isFile }
+        val missing = bundled.filter { !complete(it) }
         val total = missing.sumOf { it.size }.coerceAtLeast(1)
         var done = 0L
         for (b in missing) {
-            val staging = File(store, ".staging-${b.name}").apply { deleteRecursively(); mkdirs() }
+            val staging = File(store, ".staging-${b.name}").apply { deleteTree(this); mkdirs() }
             try {
                 ZipInputStream(assets.open(b.asset).buffered(1 shl 16)).use { z ->
                     val buf = ByteArray(1 shl 16)
@@ -139,21 +141,21 @@ class Toolchain(private val paths: Paths) {
                 require(got == b.files.size) { "${b.name}: ${b.files.size - got} files missing" }
                 // The header goes in last: a component dir with component.json is complete.
                 File(staging, "component.json").writeText("""{"name":"${b.name}","payloadSha256":"${b.hash}"}""")
-                val target = dirOf(b).apply { parentFile?.mkdirs(); deleteRecursively() }
+                val target = dirOf(b).apply { parentFile?.mkdirs(); deleteTree(this) }
                 check(staging.renameTo(target)) { "could not move ${b.name} into place" }
-            } finally { staging.deleteRecursively() }
+            } finally { deleteTree(staging) }
         }
 
         // The active toolchain: one dir of links to the components, named by the set's hash.
         val setId = hex(MessageDigest.getInstance("SHA-256").digest(bundled.joinToString("|") { "${it.name}=${it.hash}" }.toByteArray())).take(16)
         val set = File(paths.toolchainRoot, "sets/$setId")
         if (!File(set, "VERSION.json").isFile) {
-            val tmp = File(paths.toolchainRoot, "sets/.tmp-$setId").apply { deleteRecursively(); mkdirs() }
+            val tmp = File(paths.toolchainRoot, "sets/.tmp-$setId").apply { deleteTree(this); mkdirs() }
             for (b in bundled) for (top in dirOf(b).listFiles().orEmpty().filter { it.isDirectory })
                 android.system.Os.symlink(top.path, File(tmp, top.name).path)
             File(tmp, "VERSION.json").writeText("{\"version\":\"$setId\",\"abi\":\"$abi\",\"components\":{" +
                 bundled.joinToString(",") { "\"${it.name}\":\"${it.hash}\"" } + "}}")
-            set.deleteRecursively()
+            deleteTree(set)
             check(tmp.renameTo(set)) { "could not activate the toolchain" }
         }
         if ((state.value as? State.Ready)?.dir?.canonicalPath != set.canonicalPath) {
@@ -171,11 +173,22 @@ class Toolchain(private val paths: Paths) {
     /** Remove component versions and link sets the active toolchain doesn't use, and pre-component packs. */
     private fun prune(activeSet: String, keep: Set<String>) {
         val root = paths.toolchainRoot
-        File(root, "sets").listFiles()?.filter { it.name != activeSet }?.forEach { it.deleteRecursively() }
+        File(root, "sets").listFiles()?.filter { it.name != activeSet }?.forEach { deleteTree(it) }
         File(root, "c").listFiles()?.forEach { comp ->
-            comp.listFiles()?.filter { it.canonicalPath !in keep }?.forEach { it.deleteRecursively() }
+            comp.listFiles()?.filter { it.canonicalPath !in keep }?.forEach { deleteTree(it) }
         }
-        root.listFiles()?.filter { it.name !in setOf("c", "sets", "current") }?.forEach { it.deleteRecursively() }
+        root.listFiles()?.filter { it.name !in setOf("c", "sets", "current") }?.forEach { deleteTree(it) }
+    }
+
+    /**
+     * Delete without following links. A set is links to shared components, and File.deleteRecursively
+     * follows them — pruning an old set that way empties the components the new set still uses.
+     */
+    private fun deleteTree(f: File) {
+        val path = f.toPath()
+        if (java.nio.file.Files.isSymbolicLink(path)) { java.nio.file.Files.deleteIfExists(path); return }
+        if (f.isDirectory) f.listFiles()?.forEach { deleteTree(it) }
+        f.delete()
     }
 
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }

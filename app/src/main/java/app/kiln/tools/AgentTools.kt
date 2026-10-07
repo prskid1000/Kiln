@@ -51,12 +51,14 @@ class CheckpointTool : Tool {
     }
 
     companion object {
-        fun dir(ctx: ToolContext) = File(ctx.project.kilnDir, "checkpoints").apply { mkdirs() }
-        fun snapshot(ctx: ToolContext, label: String): String {
-            val n = (dir(ctx).listFiles()?.mapNotNull { it.name.substringBefore('-').toIntOrNull() }?.maxOrNull() ?: 0) + 1
+        fun dir(ctx: ToolContext) = dir(ctx.project)
+        fun dir(project: app.kiln.build.Project) = File(project.kilnDir, "checkpoints").apply { mkdirs() }
+        fun snapshot(ctx: ToolContext, label: String): String = snapshot(ctx.project, label)
+        fun snapshot(project: app.kiln.build.Project, label: String): String {
+            val n = (dir(project).listFiles()?.mapNotNull { it.name.substringBefore('-').toIntOrNull() }?.maxOrNull() ?: 0) + 1
             val id = "$n-" + label.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(40)
-            val target = File(dir(ctx), id)
-            for (f in ctx.project.files()) { val out = File(target, ctx.project.rel(f)); out.parentFile?.mkdirs(); f.copyTo(out) }
+            val target = File(dir(project), id)
+            for (f in project.files()) { val out = File(target, project.rel(f)); out.parentFile?.mkdirs(); f.copyTo(out) }
             return id
         }
     }

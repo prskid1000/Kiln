@@ -69,6 +69,14 @@ class BuildOnDeviceTest {
         assertEquals(first, tc.syncBundled(Graph.app.assets).getOrThrow())
         assertTrue(File(templates, "component.json").isFile)
         assertTrue(File(tc.templates(), "compose").isDirectory)
+        // An update leaves an old set of links behind; pruning it must not touch the shared components.
+        val live = tc.dir!!
+        val stale = File(Graph.paths.toolchainRoot, "sets/stale").apply { mkdirs() }
+        live.listFiles()!!.filter { java.nio.file.Files.isSymbolicLink(it.toPath()) }
+            .forEach { android.system.Os.symlink(it.canonicalPath, File(stale, it.name).path) }
+        assertEquals(first, tc.syncBundled(Graph.app.assets).getOrThrow())
+        assertTrue("stale set pruned", !stale.exists())
+        assertTrue("components intact", tc.aapt2().isFile && tc.androidJar().isFile && tc.kitDex().isNotEmpty())
         println("SYNC root=${Graph.paths.toolchainRoot.list()!!.sorted()}")
         assertEquals(listOf("c", "current", "sets"), Graph.paths.toolchainRoot.list()!!.sorted())
     }

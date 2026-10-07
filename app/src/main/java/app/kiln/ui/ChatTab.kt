@@ -153,6 +153,7 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
             else ChatList(vm, ps, l!!, feed, running)
         }
         RuleProposals(vm, ps, feed)
+        AttemptsBar(vm, ps)
         if (l != null) Prompts(l)
         if (l != null && !running) PlanReady(l) { criteria ->
             vm.send(ps.project.name, "Build the approved plan above. When it's built, verify every done criterion on the device.",
@@ -160,10 +161,12 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
         }
         var planFirst by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         var untilVerified by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        var tryThree by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         if (l != null) Spend(l)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             KChip("Plan first", planFirst) { planFirst = !planFirst; if (planFirst) untilVerified = false }
             KChip("Keep going until verified", untilVerified) { untilVerified = !untilVerified; if (untilVerified) planFirst = false }
+            KChip("Try 3 ways", tryThree) { tryThree = !tryThree; if (tryThree) planFirst = false }
         }
         Composer(running, ps.draft, hint = when {
                 running -> "Add to what it's doing…"
@@ -171,6 +174,7 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
                 feed.isEmpty() -> "Describe what to build…"
                 else -> "Ask for a change…" },
             onSend = { t, files ->
+                if (tryThree && !running && t.isNotBlank()) { vm.bestOf(ps.project.name, t, 3); tryThree = false; return@Composer }
                 vm.send(ps.project.name, t, files,
                     mode = if (planFirst) app.kiln.agent.AgentLoop.Mode.PLAN else app.kiln.agent.AgentLoop.Mode.BUILD,
                     goal = if (untilVerified) "The request below works on the device, verified with run_app / ui_tree / tap:\n$t" else null)

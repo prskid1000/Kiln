@@ -8,6 +8,7 @@ import app.kiln.build.Project
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -18,7 +19,9 @@ import java.util.Calendar
 class ScheduleOnDeviceTest {
     private val inst = InstrumentationRegistry.getInstrumentation()
     private val ctx = inst.targetContext
-    private fun shell(cmd: String) = inst.uiAutomation.executeShellCommand(cmd).close()
+    // Through Warden, not UiAutomation: an instrumentation's UiAutomation connection stays open and
+    // blocks `uiautomator dump`, which the agent's ui_tree needs in the tests that run after this one.
+    private suspend fun shell(cmd: String) = Graph.warden.exec(cmd.split(" "))
 
     @Test fun alarmFiresAndSkipsWhenNotCharging() = runBlocking<Unit> {
         Graph.init(ctx.applicationContext as android.app.Application)
@@ -26,6 +29,7 @@ class ScheduleOnDeviceTest {
         val root = Graph.paths.projects
         File(root, "scheduletest").deleteRecursively()
         val p = Project.create(root, "scheduletest", "Schedule Test", File(Graph.toolchain.templates(), "compose"))
+        assumeTrue("Warden not ready", Graph.warden.status() == app.kiln.device.Warden.Status.READY)
         shell("dumpsys battery unplug")
         try {
             delay(1500)

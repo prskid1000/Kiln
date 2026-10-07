@@ -49,6 +49,8 @@ dependencies {
     api("com.squareup.okhttp3:okhttp:5.5.0")
     api("io.coil-kt.coil3:coil-compose:3.6.3")
     api("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
+    // In-app purchases (KBilling). Its permission and components are merged only into apps that opt in.
+    api("com.android.billingclient:billing-ktx:8.0.0")
 }
 
 // Everything the pack builder needs, resolved by Gradle: the kit's own AAR plus

@@ -127,7 +127,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     init { refresh() }
 
     private fun listProjects(): List<ProjectInfo> = Graph.paths.projects.listFiles()
-        ?.filter { File(it, "kiln.json").isFile }
+        ?.filter { File(it, "kiln.json").isFile && !app.kiln.agent.Attempts.isAttempt(it) }
         ?.map { d ->
             val p = Project(d)
             val meta = runCatching { p.meta() }.getOrNull()
@@ -170,6 +170,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         if (pkg in installed.value) Graph.device.uninstall(pkg)
         // Its secrets go with it.
         runCatching { val p = Project(File(Graph.paths.projects, name)); app.kiln.build.AppSecrets.names(p).forEach { Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, it), null) } }
+        app.kiln.agent.Attempts.list(Graph.paths.projects, name).forEach { runCatching { Graph.device.uninstall(it.meta().`package`) }; it.dir.deleteRecursively() }
         File(Graph.paths.projects, name).deleteRecursively()
         Session.list(Graph.paths.sessions, name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
         refresh()

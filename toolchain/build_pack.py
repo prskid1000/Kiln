@@ -205,7 +205,7 @@ TOOLS = "{http://schemas.android.com/tools}"
 def merge_manifests(manifests):
     """Merge library manifests: permissions + application components, deduped by
     android:name; same-named components merge their children (meta-data)."""
-    perms, decls, comps, order = {}, {}, {}, []
+    perms, decls, comps, order, queries = {}, {}, {}, [], []
     for text in manifests:
         root = ET.fromstring(text)
         for el in root.iter():
@@ -215,6 +215,11 @@ def merge_manifests(manifests):
             perms[p.get(A + "name")] = p
         for p in root.findall("permission"):
             decls[p.get(A + "name")] = p
+        # Package visibility a library needs (Play Billing binds to the Play Store).
+        for q in root.findall("queries"):
+            for child in q:
+                if ET.tostring(child) not in [ET.tostring(x) for x in queries]:
+                    queries.append(child)
         app = root.find("application")
         if app is None:
             continue
@@ -232,6 +237,10 @@ def merge_manifests(manifests):
     out = ET.Element("manifest")
     for p in list(decls.values()) + list(perms.values()):
         out.append(p)
+    if queries:
+        q = ET.SubElement(out, "queries")
+        for child in queries:
+            q.append(child)
     app = ET.SubElement(out, "application")
     for key in order:
         app.append(comps[key])

@@ -157,6 +157,20 @@ manifest already points at it). It is a 108×108 vector drawable:
 
 Coroutines: `rememberCoroutineScope()`, `LaunchedEffect`, `viewModelScope`.
 
+## Backend and payments
+
+| API | Purpose |
+|---|---|
+| `KSupabase(context, url, anonKey)` | Supabase: `signUp/signIn(email, password)`, `signOut()`, `userId: StateFlow<String?>` |
+| `db.table("t").select<T>("select=*&order=id.desc")` | rows (PostgREST query); also `insert(row)`, `update("id=eq.1", json)`, `delete("id=eq.1")` |
+| `KBilling(context, consumable = setOf(...))` | Play in-app purchases: `load(ids)`, `product(id)` (price), `buy(activity, id)`, `owned: StateFlow<Set<String>>`, `refresh()` |
+
+- Keys come from the app's Secrets (`AppSecrets.SUPABASE_ANON_KEY`), never from source. Only Supabase's anon
+  key belongs in an app; protect tables with Row Level Security.
+- Billing needs opting in: add the permission `com.android.vending.BILLING` with `set_app_meta`. Products
+  are created in Play Console, and purchases work only in builds installed from Play (internal testing).
+  Load the skills `supabase` / `billing` before using these.
+
 ## Rules
 
 1. Kotlin only, Compose only (no XML layouts, no Fragments, no AppCompat).
