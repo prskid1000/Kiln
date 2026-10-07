@@ -98,14 +98,15 @@ class Kiln(
     suspend fun tools(project: Project): Pair<ToolRegistry, List<Tool>> {
         val cfg = settings.value.merged(project.dir)
         val extra = mutableListOf<Tool>()
-        extra += CommandTool.load(listOf(File(paths.files, "tools.d"), File(project.kilnDir, "tools.d")), warden)
+        extra += CommandTool.load(listOf(File(paths.files, "tools.d")), warden) + CommandTool.load(listOf(File(project.kilnDir, "tools.d")), warden, trusted = false)
         for (srv in cfg.mcpServers.filter { it.enabled }) runCatching { extra += McpClient(srv).connect() }
         val base = builtins()
         val registry = ToolRegistry(base)
         val brokerReady = warden.status() == Warden.Status.READY
         var tools = registry.assemble(extra, cfg.disabledTools, brokerReady)
         // The subagent sees only read-only tools.
-        val readOnly = tools.filter { Trait.READ_ONLY in it.traits }
+        // The subagent runs headless: nobody can answer its questions or approvals.
+        val readOnly = tools.filter { Trait.READ_ONLY in it.traits && it.name != "ask_user" }
         tools = (tools + SubagentTool(this, project, registry, readOnly)).sortedBy { it.name }
         ToolRegistry.validateNames(tools)
         return registry to tools
@@ -144,7 +145,8 @@ class SubagentTool(private val kiln: Kiln, private val project: Project, private
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val task = input.str("task") ?: return ToolResult.error("missing task")
         ctx.progress("subagent working")
-        val (answer, usage) = kiln.subTask(project, registry, readOnly, task)
+        val (answer, usage, usd) = kiln.subTask(project, registry, readOnly, task)
+        ctx.addCost(usd)
         return ToolResult.ok(ctx.spill(answer), "subagent: ${usage.output} tokens out")
     }
 }

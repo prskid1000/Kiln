@@ -112,6 +112,8 @@ manifest already points at it). It is a 108×108 vector drawable:
 - Then one bold, simple glyph for what the app *does* (a drop for water, a
   check for todos, a flame for streaks…) drawn inside the centre safe zone
   x,y 30–78 — launchers crop to a circle or squircle, so keep it centred.
+  Make it big: the glyph should span most of that zone (about 40–48 units
+  wide), not a small mark in the middle.
 - Colours from the Nocturne palette only: `#9184D9` accent, `#A7A1DB`
   accent2, `#F5F4FF` accent100, `#423A6A` accent800, `#7FB69A` ok,
   `#D9C48A` warn, `#D98A8A` danger. Use 1–3 of them; no gradients, no text.

@@ -31,6 +31,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
@@ -87,6 +89,7 @@ class AgentLoop(
     private val state = SessionState()
     /** How often this request pushed back on ending with a broken build (see the stop guard in [loop]). */
     private var stopGuards = 0
+    private val approvalLock = kotlinx.coroutines.sync.Mutex()
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
 
@@ -94,11 +97,11 @@ class AgentLoop(
 
     // ------------------------------------------------------------ feed
 
-    private fun add(a: Activity): Int { _feed.value = _feed.value + a; return a.id }
+    private fun add(a: Activity): Int { _feed.update { it + a }; return a.id }
     private fun next(kind: Activity.Kind, text: String = "", tool: String? = null, input: String? = null,
                      status: Activity.Status = Activity.Status.DONE) =
         add(Activity(ids.incrementAndGet(), kind, text, tool, input, status))
-    private fun update(id: Int, f: (Activity) -> Activity) { _feed.value = _feed.value.map { if (it.id == id) f(it) else it } }
+    private fun update(id: Int, f: (Activity) -> Activity) { _feed.update { l -> l.map { if (it.id == id) f(it) else it } } }
 
     /** Rebuild the feed from a stored transcript (tool results matched to their calls). */
     private fun replay() {
@@ -140,9 +143,11 @@ class AgentLoop(
     }
 
     suspend fun send(userText: String, attachments: List<Attachment> = emptyList()) {
-        if (running.value) return
-        running.value = true
+        // Atomic: a double-tap must not start two loops on one transcript.
+        if (!running.compareAndSet(expect = false, update = true)) return
         stopGuards = 0
+        // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
+        closeDanglingToolUses()
         try {
             val id = next(Activity.Kind.USER, userText)
             val extra = Attachments.blocks(project, attachments)
@@ -215,17 +220,18 @@ class AgentLoop(
             val (profile, model) = providers.resolve(spec) ?: continue
             if (profile.caps.tools.not()) continue
             val adapter = providers.adapter(profile)
-            repeat(cfg.maxRetries + 1) { attempt ->
+            // Retry only what can succeed on retry; anything else moves on to the fallback model.
+            attempts@ for (attempt in 0..cfg.maxRetries) {
                 try {
                     return stream(adapter, profile, model, cfg)
                 } catch (e: CancellationException) { throw e
                 } catch (e: ProviderException) {
                     lastError = e
-                    if (!e.retryable) return@repeat
+                    if (!e.retryable || attempt == cfg.maxRetries) break@attempts
                     val wait = 2_000L * (1 shl attempt)
                     next(Activity.Kind.NOTICE, "${profile.label}: ${e.message?.take(120)} — retrying in ${wait / 1000}s")
                     delay(wait)
-                } catch (e: Throwable) { lastError = e; return@repeat }
+                } catch (e: Throwable) { lastError = e; break@attempts }
             }
             if (spec != chain.last()) next(Activity.Kind.NOTICE, "${profile.label} failed (${lastError?.message?.take(100)}); falling back.")
         }
@@ -237,7 +243,8 @@ class AgentLoop(
         val origin = "${profile.id}|$model"
         val specs = registry.specs(tools)
         val req = ModelRequest(
-            model = model, system = session.meta.systemPrompt, messages = session.messages, tools = specs,
+            model = model, system = session.meta.systemPrompt,
+            messages = ContextFit.fit(session.messages, session.meta.systemPrompt, profile.caps.contextWindow), tools = specs,
             maxTokens = minOf(profile.caps.maxOutput, 64_000),
             effort = if (role == "agent") cfg.effort else cfg.subagentEffort,
             taskBudgetTokens = cfg.taskBudgetTokens,
@@ -278,6 +285,10 @@ class AgentLoop(
         override val state = this@AgentLoop.state
         override val spillDir = session.spillDir
         override fun progress(line: String) = update(activityId) { it.copy(progress = line) }
+        override fun addCost(usd: Double) {
+            cost.value += usd
+            session.updateMeta { it.copy(costUsd = cost.value) }
+        }
         override suspend fun ask(question: String, options: List<String>): String {
             val q = Question(question, options, CompletableDeferred())
             this@AgentLoop.question.value = q
@@ -313,7 +324,8 @@ class AgentLoop(
     private suspend fun runOne(use: JsonObject, byName: Map<String, Tool>, cfg: Settings, truncated: Boolean): JsonObject {
         val id = use.str("id") ?: ""
         val name = use.str("name") ?: ""
-        val input = use["input"] as? JsonObject ?: obj()
+        // Strict schemas make optional fields nullable; null means "not given" for every tool (incl. MCP).
+        val input = (use["input"] as? JsonObject)?.let { o -> JsonObject(o.filterValues { it !is kotlinx.serialization.json.JsonNull }) } ?: obj()
         val aid = next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
         val t0 = System.currentTimeMillis()
         fun result(r: ToolResult, status: Activity.Status): JsonObject {
@@ -328,9 +340,13 @@ class AgentLoop(
         when (if (name in sessionAllowed) Policy.ALLOW else registry.policy(tool, cfg.approval)) {
             Policy.DENY -> return result(ToolResult.error("$name is disabled by policy"), Activity.Status.DENIED)
             Policy.ASK -> {
-                val req = ApprovalRequest(name, input.compact(), CompletableDeferred())
-                approval.value = req
-                val (ok, always) = try { req.answer.await() } finally { approval.value = null }
+                // One prompt at a time: parallel tools would otherwise overwrite each other's request.
+                val (ok, always) = approvalLock.withLock {
+                    if (name in sessionAllowed) return@withLock true to true
+                    val req = ApprovalRequest(name, input.compact(), CompletableDeferred())
+                    approval.value = req
+                    try { req.answer.await() } finally { approval.value = null }
+                }
                 if (!ok) return result(ToolResult.error("the user denied this $name call"), Activity.Status.DENIED)
                 if (always) sessionAllowed += name
             }
@@ -346,6 +362,10 @@ class AgentLoop(
         // Hooks: "postTool:<name>" → run those tools and append their output (SPEC §3).
         if (!r.isError) for (h in cfg.hooks["postTool:$name"].orEmpty()) {
             val ht = byName[h] ?: continue
+            // Hooks are calls too: they get no more rights than the model would.
+            if (registry.policy(ht, cfg.approval) != Policy.ALLOW && h !in sessionAllowed) {
+                r = r.copy(text = r.text + "\n\n[hook $h skipped: it needs approval]"); continue
+            }
             update(aid) { it.copy(progress = "hook: $h") }
             val hr = runCatching { withTimeout(ht.timeoutMs) { ht.run(ctx(aid), obj()) } }.getOrElse { ToolResult.error(it.message ?: "hook failed") }
             r = r.copy(text = r.text + "\n\n[hook $h]\n" + hr.text, images = r.images + hr.images)
@@ -375,13 +395,13 @@ class AgentLoop(
         suspend fun headless(
             project: Project, sessionsRoot: File, providers: Providers, registry: ToolRegistry, tools: List<Tool>,
             settings: SettingsStore, systemPrompt: String, task: String, role: String,
-        ): Pair<String, Usage> {
+        ): Triple<String, Usage, Double> {
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
             val loop = AgentLoop(project, s, providers, registry, tools, settings, role)
             loop.send(task)
             val text = s.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")
-            return (text ?: "(no answer)") to loop.usage.value
+            return Triple(text ?: "(no answer)", loop.usage.value, loop.cost.value)
         }
     }
 }

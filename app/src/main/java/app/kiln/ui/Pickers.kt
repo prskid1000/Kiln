@@ -63,7 +63,12 @@ fun rememberAttachmentPicker(onError: (String) -> Unit = {}, onPicked: (List<Att
                     if (c.moveToFirst()) { c.getString(0)?.let { name = it }; if (!c.isNull(1)) size = c.getLong(1) }
                 }
                 if (size > MAX_UPLOAD_BYTES) { withContext(Dispatchers.Main) { onError("$name is over 20 MB") }; return@mapNotNull null }
-                val bytes = runCatching { cr.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() ?: return@mapNotNull null
+                // Providers that report no size get the same 20 MB cap, enforced while reading.
+                val bytes = runCatching { cr.openInputStream(uri)?.use { s ->
+                    val buf = java.io.ByteArrayOutputStream(); val chunk = ByteArray(64 * 1024); var total = 0
+                    while (true) { val n = s.read(chunk); if (n < 0) break; total += n; if (total > MAX_UPLOAD_BYTES) return@use null; buf.write(chunk, 0, n) }
+                    buf.toByteArray()
+                } }.getOrNull() ?: run { withContext(Dispatchers.Main) { onError("$name could not be read, or is over 20 MB") }; return@mapNotNull null }
                 Attachment(name, cr.getType(uri) ?: "application/octet-stream", bytes)
             }
         }
@@ -85,7 +90,7 @@ fun AttachmentChip(name: String, image: ByteArray?, onRemove: (() -> Unit)? = nu
     val shape = RoundedCornerShape(12.dp)
     Row(Modifier.clip(shape).background(N.surfaceHi).border(1.dp, N.cardRingSm, shape).padding(start = 6.dp, end = if (onRemove != null) 0.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        val bmp = remember(image) { image?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
+        val bmp = image?.let { rememberDecoded(it, 96) }
         if (bmp != null) Image(bmp, null, contentScale = ContentScale.Crop, modifier = Modifier.padding(vertical = 6.dp).size(32.dp).clip(RoundedCornerShape(8.dp)))
         else Box(Modifier.padding(vertical = 6.dp).size(32.dp).clip(RoundedCornerShape(8.dp)).background(N.accent800.copy(alpha = 0.6f)),
             contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Description, null, tint = N.accent2, modifier = Modifier.size(18.dp)) }
@@ -93,4 +98,22 @@ fun AttachmentChip(name: String, image: ByteArray?, onRemove: (() -> Unit)? = nu
         Text(name, style = T.label.copy(color = N.text), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
         if (onRemove != null) IconBtn(Icons.Rounded.Close, "Remove $name", tint = N.textMuted, onClick = onRemove)
     }
+}
+
+/**
+ * [bytes] decoded off the main thread and downsampled to about [maxSide] px: a 12 MP photo as a
+ * 32 dp chip, or a screenshot in a long chat, must not be decoded at full size in composition.
+ */
+@Composable
+fun rememberDecoded(bytes: ByteArray, maxSide: Int): androidx.compose.ui.graphics.ImageBitmap? {
+    val state = androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, bytes, maxSide) {
+        value = withContext(Dispatchers.Default) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+        }
+    }
+    return state.value
 }

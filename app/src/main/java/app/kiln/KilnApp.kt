@@ -43,6 +43,7 @@ object Graph {
         toolchain = Toolchain(paths)
         toolHost = ToolHost(paths, toolchain)
         builds = BuildEngine(toolchain, toolHost)
+        toolchain.beforeSwitch = { toolHost.shutdown() }
         warden = Warden(app)
         device = Device(warden)
         testDevice = Device(warden, TestDisplay(app))

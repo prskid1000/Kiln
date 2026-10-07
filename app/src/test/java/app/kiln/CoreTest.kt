@@ -202,6 +202,51 @@ class CoreTest {
         assertTrue(d[1].message.contains("contentDescription") && d[1].line == 5)
     }
 
+    @Test fun `context fit clears old tool output, keeps recent turns and the stored transcript`() {
+        val big = "x".repeat(40_000)
+        val msgs = (0 until 12).flatMap { i -> listOf(
+            Msg("assistant", arrOf(listOf(obj("type" to "tool_use", "id" to "t$i", "name" to "read_file", "input" to obj())))),
+            Msg("user", arrOf(listOf(obj("type" to "tool_result", "tool_use_id" to "t$i", "content" to "line one\n$big")))),
+        ) }
+        val fitted = app.kiln.agent.ContextFit.fit(msgs, "sys", window = 64_000)
+        assertTrue(app.kiln.agent.ContextFit.estimateTokens(fitted, "sys") <= 64_000 * 0.7)
+        assertTrue(fitted.first { it.role == "user" }.content.toString().contains("[cleared to fit the context window] line one"))
+        assertTrue(fitted.last().content.toString().contains(big))          // recent output intact
+        assertTrue(msgs[1].content.toString().contains(big))                // transcript untouched
+        val small = msgs.take(2)
+        assertTrue(app.kiln.agent.ContextFit.fit(small, "sys", 64_000) === small)   // under budget: untouched
+    }
+
+    @Test fun `project config can tune effort but never approvals hooks or caps`() {
+        val dir = Files.createTempDirectory("kiln").toFile()
+        File(dir, ".kiln").mkdirs()
+        File(dir, ".kiln/config.json").writeText("""{"effort":"low","approval":{"shell":"allow"},"hooks":{"postTool:read_file":["shell"]},"dailyUsd":1e9,"sessionUsd":1e9}""")
+        val m = app.kiln.agent.Settings().merged(dir)
+        assertEquals("low", m.effort)
+        assertTrue(m.approval.isEmpty() && m.hooks.isEmpty())
+        assertEquals(app.kiln.agent.Settings().dailyUsd, m.dailyUsd, 0.0)
+    }
+
+    @Test fun `agent file writes cannot touch kiln state`() {
+        val dir = Files.createTempDirectory("kiln").toFile()
+        val p = app.kiln.build.Project(dir)
+        for (bad in listOf(".kiln/config.json", ".kiln/tools.d/x.json", ".kiln/signing.p12", ".kiln"))
+            assertTrue(bad, runCatching { p.resolveWritable(bad) }.isFailure)
+        assertTrue(runCatching { p.resolveWritable("src/A.kt") }.isSuccess)
+    }
+
+    @Test fun `edit counting is non-overlapping and cheap`() {
+        assertEquals(2, app.kiln.tools.occurrences("aaaa", "aa"))
+        assertEquals(0, app.kiln.tools.occurrences("abc", ""))
+        assertEquals(1, app.kiln.tools.occurrences("x".repeat(300_000) + "needle", "needle"))
+    }
+
+    @Test fun `new projects get distinct starter icons`() {
+        val icons = listOf("water", "shopping", "flashlight", "habits", "notes", "timer").map { app.kiln.build.DefaultIcon.xml(it) }
+        assertTrue(icons.toSet().size >= 5)
+        assertTrue(icons.all { "M0,0h108v108h-108z" in it && "<vector" in it })
+    }
+
     @Test fun `openai responses converts calls and outputs`() {
         val a = OpenAIResponsesAdapter(Profile("oa", "OA", Protocol.OPENAI_RESPONSES, "https://api.openai.com", caps = Caps()), "k")
         val body = a.buildBody(ModelRequest("gpt", "sys", transcript(), listOf(tool)))

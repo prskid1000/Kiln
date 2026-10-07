@@ -49,7 +49,7 @@ class AnthropicAdapter(
         }
         profile.headers.forEach { (k, v) -> putHeader(k, v) }
         profile.pinnedCertSha256?.let { val t = Http.pinnedTls(it); sslSocketFactory(t.factory); trustManager(t.trust); hostnameVerifier(t.hostnames) }
-        maxRetries(4)
+        maxRetries(0)   // the agent loop owns retries and fallbacks; two layers multiplied attempts
         timeout(Duration.ofMinutes(15))
     }.build()
 
@@ -65,11 +65,15 @@ class AnthropicAdapter(
         // inline <think>…</think> as plain text; route it to thinking like chat/completions does.
         val tags = ThinkTags()
         try {
+            val job = coroutineContext[kotlinx.coroutines.Job]
             client.beta().messages().createStreaming(params).use { stream ->
-                stream.stream().forEach { ev ->
+                // Stop must stop the stream: closing it unblocks the read; each event re-checks.
+                val closer = job?.invokeOnCompletion { if (it != null) runCatching { stream.close() } }
+                try { stream.stream().forEach { ev ->
+                    if (job?.isActive == false) throw kotlinx.coroutines.CancellationException("stopped")
                     acc.accumulate(ev)
                     emit(parseJson(mapper.writeValueAsString(ev)) as JsonObject, tags, onEvent)
-                }
+                } } finally { closer?.dispose() }
             }
             tags.flush { t, think -> onEvent(if (think) ModelEvent.Thinking(t) else ModelEvent.Text(t)) }
         } catch (e: RateLimitException) {

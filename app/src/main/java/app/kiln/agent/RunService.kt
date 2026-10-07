@@ -24,7 +24,10 @@ class RunService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null)
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Agent runs", NotificationManager.IMPORTANCE_LOW))
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(this, 0,
+            // Bring the existing screen forward; a second activity would open a second loop on the same chat.
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("Kiln is working")
@@ -32,7 +35,7 @@ class RunService : Service() {
             .setContentIntent(open).setOngoing(true).build()
         startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         if (wake == null) wake = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kiln:run").apply { acquire(60 * 60_000L) }
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kiln:run").apply { setReferenceCounted(false); acquire(4 * 60 * 60_000L) }   // released in onDestroy; 4 h guard
         return START_NOT_STICKY
     }
 

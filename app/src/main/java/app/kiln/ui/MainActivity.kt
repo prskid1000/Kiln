@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Settings
@@ -91,7 +92,8 @@ class MainActivity : ComponentActivity() {
     private val vm: KilnVM by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // Kiln is always dark: light system-bar icons regardless of the system theme.
+        enableEdgeToEdge(androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         setContent { KilnTheme { App(vm) } }
     }
@@ -107,14 +109,25 @@ private fun App(vm: KilnVM) {
     val backStack = rememberNavBackStack(ProjectsKey)
     val snack = remember { SnackbarHostState() }
     val message by vm.message.collectAsStateWithLifecycle()
+    // Android 13+: without this the "Kiln is working" notification (and the run's status) is hidden.
+    if (android.os.Build.VERSION.SDK_INT >= 33) {
+        val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        LaunchedEffect(Unit) {
+            if (ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                ask.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     LaunchedEffect(message) { message?.let { vm.message.value = null; snack.showSnackbar(it) } }
     Box(Modifier.fillMaxSize().background(N.bg).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
-        NavDisplay(backStack = backStack, onBack = { backStack.removeLastOrNull() }, entryProvider = entryProvider {
+        // Never pop the last entry: a fast double back-tap would empty the stack and crash NavDisplay.
+        val back = { if (backStack.size > 1) backStack.removeLastOrNull() }
+        NavDisplay(backStack = backStack, onBack = { back() }, entryProvider = entryProvider {
             entry<ProjectsKey> {
                 ProjectsScreen(vm, open = { backStack.add(ProjectKey(it)) }, settings = { backStack.add(SettingsKey) })
             }
-            entry<ProjectKey> { key -> ProjectScreen(vm, key.name, back = { backStack.removeLastOrNull() }) }
-            entry<SettingsKey> { SettingsScreen(vm) { backStack.removeLastOrNull() } }
+            entry<ProjectKey> { key -> ProjectScreen(vm, key.name, back = { back() }) }
+            entry<SettingsKey> { SettingsScreen(vm) { back() } }
         })
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 76.dp)) {
             Snackbar(it, containerColor = N.surfaceHi, contentColor = N.text, shape = N.shapeLg)
@@ -275,6 +288,15 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                 DropdownMenu(menu, { menu = false }, containerColor = N.surfaceHi) {
                     DropdownMenuItem(text = { Text("New chat", style = T.body) }, leadingIcon = { Icon(Icons.Rounded.Add, null, tint = N.textLabel) },
                         onClick = { menu = false; vm.newChat(name); tab = 0 })
+                    DropdownMenuItem(text = { Text("Redesign icon", style = T.body) },
+                        leadingIcon = { Icon(Icons.Rounded.Palette, null, tint = N.textLabel) },
+                        enabled = !running,
+                        onClick = {
+                            menu = false; tab = 0
+                            vm.send(name, "Design a new launcher icon for this app in res/drawable/ic_launcher.xml, following the " +
+                                "\"App icon\" rules in the kit docs: one bold glyph for what the app does, large in the safe zone, " +
+                                "Nocturne colours. Then build and install it. Change nothing else.")
+                        })
                     if (isInstalled) {
                         DropdownMenuItem(text = { Text("Clear app data", style = T.body) },
                             leadingIcon = { Icon(Icons.Rounded.CleaningServices, null, tint = N.textLabel) }, onClick = { menu = false; vm.clearData(name) })

@@ -182,9 +182,10 @@ private fun ChatList(loop: AgentLoop, feed: List<Activity>, running: Boolean) {
     val todos by loop.todos.collectAsStateWithLifecycle()
     val list = rememberLazyListState()
     // Follow the stream only while the user is at the bottom.
-    val atEnd = !list.canScrollForward
+    // Follow the stream only while the reader is at the bottom; scrolling up to read must stick.
+    val atEnd by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { !list.canScrollForward } }
     LaunchedEffect(rows.size, feed.lastOrNull()?.text?.length, feed.lastOrNull()?.status) {
-        if (rows.isNotEmpty() && (atEnd || running)) list.animateScrollToItem(rows.size - 1, Int.MAX_VALUE / 2)
+        if (rows.isNotEmpty() && atEnd) list.animateScrollToItem(rows.size - 1, Int.MAX_VALUE / 2)
     }
     Column(Modifier.fillMaxSize()) {
         if (todos.isNotEmpty()) PlanCard(todos)
@@ -370,10 +371,11 @@ private fun tail(s: String, n: Int): String {
 
 @Composable
 private fun BrainIcon(live: Boolean) {
+    // Only a live thought pulses: an infinite transition per finished card kept the frame clock running.
+    if (!live) { Icon(Icons.Rounded.Psychology, null, tint = N.accent2.copy(alpha = 0.75f), modifier = Modifier.size(16.dp)); return }
     val t = rememberInfiniteTransition(label = "brain")
     val s by t.animateFloat(0.86f, 1.12f, infiniteRepeatable(tween(750, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale")
-    Icon(Icons.Rounded.Psychology, null, tint = if (live) N.accent2 else N.accent2.copy(alpha = 0.75f),
-        modifier = Modifier.size(16.dp).graphicsLayer { if (live) { scaleX = s; scaleY = s } })
+    Icon(Icons.Rounded.Psychology, null, tint = N.accent2, modifier = Modifier.size(16.dp).graphicsLayer { scaleX = s; scaleY = s })
 }
 
 /** A label with a light sweeping across it. */
@@ -474,7 +476,7 @@ private fun StepRow(a: Activity) {
 
 @Composable
 private fun Screenshot(png: ByteArray, modifier: Modifier = Modifier) {
-    val bmp = remember(png) { BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap() } ?: return
+    val bmp = rememberDecoded(png, 900) ?: return
     var full by remember { mutableStateOf(false) }
     Image(bmp, "Screenshot", contentScale = ContentScale.Fit,
         modifier = modifier.heightIn(max = 260.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, N.cardRing, RoundedCornerShape(14.dp))
@@ -525,7 +527,7 @@ private fun Prompts(loop: AgentLoop) {
 
 @Composable
 private fun Composer(running: Boolean, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
-    var text by remember { mutableStateOf("") }
+    var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }   // survives rotation and tab switches
     val files = remember { androidx.compose.runtime.mutableStateListOf<app.kiln.agent.Attachment>() }
     val pick = rememberAttachmentPicker { files += it }
     var menu by remember { mutableStateOf(false) }

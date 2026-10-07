@@ -35,7 +35,7 @@ data class ToolResult(
 /** Mutable per-session state tools share (read stamps, log markers, todo list, last build). */
 class SessionState {
     /** path → lastModified seen by read_file; edit_file refuses stale edits. */
-    val readStamps = mutableMapOf<String, Long>()
+    val readStamps: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()   // parallel read_file calls
     /** package → logcat time marker of the last read. */
     val logMarkers = mutableMapOf<String, String>()
     var todos: List<Todo> = emptyList()
@@ -56,6 +56,8 @@ interface ToolContext {
     /** Text over [maxChars] is cut to head + tail and saved; the agent can fetch the rest with read_output. */
     fun spill(text: String, maxChars: Int = 24_000): String
     val spillDir: File
+    /** Spend made on this request's behalf (a subagent's model calls) — counts toward the chat's cap. */
+    fun addCost(usd: Double) {}
 }
 
 interface Tool {

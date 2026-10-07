@@ -16,7 +16,8 @@ class ListDirTool : Tool {
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val dir = ctx.project.resolve(input.str("path") ?: "")
         if (!dir.isDirectory) return ToolResult.error("not a directory: ${input.str("path")}")
-        val files = ctx.project.files().filter { it.path.startsWith(dir.path) }
+        // "src" must not also list "src2/…".
+        val files = ctx.project.files().filter { it.path == dir.path || it.path.startsWith(dir.path + java.io.File.separator) }
         if (files.isEmpty()) return ToolResult.ok("(empty)")
         return ToolResult.ok(files.joinToString("\n") { "${ctx.project.rel(it)}  (${it.length()} B)" }, plural(files.size, "file"))
     }
@@ -97,8 +98,7 @@ class WriteFileTool : Tool {
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val rel = input.req("path")
-        val f = ctx.project.resolve(rel)
-        require(!ctx.project.rel(f).startsWith(".kiln/signing")) { "signing files are managed by Kiln" }
+        val f = ctx.project.resolveWritable(rel)
         val existed = f.exists()
         f.parentFile?.mkdirs()
         f.writeText(input.req("content"))
@@ -118,20 +118,23 @@ class EditFileTool : Tool {
     }
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val f = ctx.project.resolve(input.req("path"))
+        val f = ctx.project.resolveWritable(input.req("path"))
         if (!f.isFile) return ToolResult.error("no such file: ${input.str("path")}")
         val rel = ctx.project.rel(f)
         val seen = ctx.state.readStamps[rel] ?: return ToolResult.error("read $rel with read_file before editing it")
         if (seen != f.lastModified()) return ToolResult.error("$rel changed since you read it — read it again")
-        val text = f.readText()
-        val old = input.req("old_text"); val new = input.str("new_text") ?: ""
-        val count = text.windowed(old.length, 1).count { it == old }.takeIf { old.isNotEmpty() } ?: 0
+        // Models write "\n"; a CRLF file is matched and saved in its own line endings.
+        val raw = f.readText(); val crlf = "\r\n" in raw
+        val text = if (crlf) raw.replace("\r\n", "\n") else raw
+        val old = input.req("old_text").replace("\r\n", "\n"); val new = (input.str("new_text") ?: "").replace("\r\n", "\n")
+        val count = occurrences(text, old)
         val all = input["replace_all"]?.toString() == "true"
         when {
             count == 0 -> return ToolResult.error("old_text not found in $rel (check whitespace/indentation; re-read the file)")
             count > 1 && !all -> return ToolResult.error("old_text matches $count places in $rel — add surrounding lines to make it unique, or set replace_all")
         }
-        f.writeText(if (all) text.replace(old, new) else text.replaceFirst(old, new))
+        val edited = if (all) text.replace(old, new) else text.replaceFirst(old, new)
+        f.writeText(if (crlf) edited.replace("\n", "\r\n") else edited)
         ctx.state.readStamps[rel] = f.lastModified()
         return ToolResult.ok("edited $rel (${if (all) count else 1} replacement${if (all && count > 1) "s" else ""})")
     }
@@ -146,20 +149,21 @@ class MultiEditTool : Tool {
     }
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val f = ctx.project.resolve(input.req("path"))
+        val f = ctx.project.resolveWritable(input.req("path"))
         val rel = ctx.project.rel(f)
         if (!f.isFile) return ToolResult.error("no such file: $rel")
         val seen = ctx.state.readStamps[rel] ?: return ToolResult.error("read $rel with read_file before editing it")
         if (seen != f.lastModified()) return ToolResult.error("$rel changed since you read it — read it again")
-        var text = f.readText()
+        val raw = f.readText(); val crlf = "\r\n" in raw
+        var text = if (crlf) raw.replace("\r\n", "\n") else raw
         input.a("edits")?.forEachIndexed { i, e ->
             val o = e as JsonObject
-            val old = o.req("old_text")
-            val n = text.split(old).size - 1
+            val old = o.req("old_text").replace("\r\n", "\n")
+            val n = occurrences(text, old)
             if (n != 1) return ToolResult.error("edit #${i + 1}: old_text matches $n places (must be exactly 1); nothing written")
-            text = text.replaceFirst(old, o.str("new_text") ?: "")
+            text = text.replaceFirst(old, (o.str("new_text") ?: "").replace("\r\n", "\n"))
         }
-        f.writeText(text)
+        f.writeText(if (crlf) text.replace("\n", "\r\n") else text)
         ctx.state.readStamps[rel] = f.lastModified()
         return ToolResult.ok("applied ${input.a("edits")?.size ?: 0} edits to $rel")
     }
@@ -171,7 +175,7 @@ class MoveTool : Tool {
     override val schema = schema { str("from", "Existing path."); str("to", "New path.") }
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val a = ctx.project.resolve(input.req("from")); val b = ctx.project.resolve(input.req("to"))
+        val a = ctx.project.resolveWritable(input.req("from")); val b = ctx.project.resolveWritable(input.req("to"))
         if (!a.exists()) return ToolResult.error("no such path: ${input.str("from")}")
         if (b.exists()) return ToolResult.error("destination exists: ${input.str("to")}")
         b.parentFile?.mkdirs()
@@ -186,7 +190,7 @@ class DeleteTool : Tool {
     override val schema = schema { str("path", "Path relative to the project root.") }
     override val traits = setOf(Trait.DESTRUCTIVE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val f = ctx.project.resolve(input.req("path"))
+        val f = ctx.project.resolveWritable(input.req("path"))
         require(f.canonicalPath != ctx.project.dir.canonicalPath) { "refusing to delete the project root" }
         require(ctx.project.rel(f) !in setOf("kiln.json", "AndroidManifest.xml")) { "kiln.json and AndroidManifest.xml are required" }
         if (!f.exists()) return ToolResult.error("no such path")
@@ -215,4 +219,12 @@ class ReadOutputTool : Tool {
         val n = (input.int("limit") ?: 0).let { if (it <= 0) 400 else it }
         return ToolResult.ok(lines.drop(from).take(n).joinToString("\n") { "%5d\t%s".format(it.first, it.second) })
     }
+}
+
+/** Non-overlapping occurrences of [needle] (what replace() will touch), without copying the text. */
+internal fun occurrences(text: String, needle: String): Int {
+    if (needle.isEmpty()) return 0
+    var n = 0; var at = text.indexOf(needle)
+    while (at >= 0) { n++; at = text.indexOf(needle, at + needle.length) }
+    return n
 }

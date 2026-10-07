@@ -31,7 +31,10 @@ data class Settings(
     fun merged(project: File?): Settings {
         val f = project?.let { File(it, ".kiln/config.json") }?.takeIf { it.isFile } ?: return this
         return runCatching {
-            val o = KJ.parseToJsonElement(f.readText()) as kotlinx.serialization.json.JsonObject
+            // Projects (and the agent, which can write project files) may tune effort and switch tools
+            // off — never approvals, hooks, MCP servers or spending caps.
+            val o = (KJ.parseToJsonElement(f.readText()) as kotlinx.serialization.json.JsonObject)
+                .filterKeys { it in PROJECT_OVERRIDABLE }.let { kotlinx.serialization.json.JsonObject(it) }
             val base = KJ.encodeToJsonElement(serializer(), this) as kotlinx.serialization.json.JsonObject
             KJ.decodeFromJsonElement(serializer(), kotlinx.serialization.json.JsonObject(base + o))
         }.getOrDefault(this)
@@ -60,3 +63,6 @@ class SettingsStore(private val dir: File) {
         spendFile.writeText(KJ.encodeToString(Spend.serializer(), Spend(LocalDate.now().toString(), spentToday() + usd)))
     }
 }
+
+/** Settings a project's .kiln/config.json may override. */
+private val PROJECT_OVERRIDABLE = setOf("effort", "subagentEffort", "disabledTools", "maxSteps")

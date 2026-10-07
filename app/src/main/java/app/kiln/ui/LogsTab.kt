@@ -1,5 +1,6 @@
 package app.kiln.ui
 
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -85,14 +86,18 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
     val ready = warden == Warden.Status.READY
     val isInstalled = ps.pkg in installed
 
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var polls by remember { mutableStateOf(0) }
     LaunchedEffect(ready, isInstalled, level, since, paused) {
         if (!ready || !isInstalled || paused) return@LaunchedEffect
-        while (true) {
+        // Poll only while Kiln is on screen: Warden calls every 1.5 s in the background drain the battery.
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) { while (true) {
             val raw = withContext(Dispatchers.IO) { runCatching { Graph.device.logcat(ps.pkg, since, level, 800) }.getOrDefault("") }
             lines = parseLog(raw)
             crash = withContext(Dispatchers.IO) { runCatching { Graph.device.lastCrash(ps.pkg, since) }.getOrNull() }
+            polls++
             delay(1500)
-        }
+        } }
     }
 
     if (!ready) { EmptyState(Icons.AutoMirrored.Rounded.ReceiptLong, "Warden isn't connected", "Logs are read from the device through Warden."); return }
@@ -143,12 +148,13 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
             if (query.isBlank()) lines else lines.filter { query.lowercase() in (it.tag + " " + it.msg).lowercase() }
         }
         val list = rememberLazyListState()
-        LaunchedEffect(shown.size) { if (shown.isNotEmpty() && !list.canScrollForward) list.scrollToItem(shown.size - 1) }
+        // Keyed on each poll, not the size: at the 800-line cap the size stops changing but lines don't.
+        LaunchedEffect(polls, query) { if (shown.isNotEmpty() && !list.canScrollForward) list.scrollToItem(shown.size - 1) }
         if (shown.isEmpty()) EmptyState(Icons.AutoMirrored.Rounded.ReceiptLong, if (paused) "Paused" else "No log lines yet",
             if (since != null) "Cleared — new lines will appear as the app logs." else "Open the app and interact with it.")
         else Box(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
             LazyColumn(state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                itemsIndexed(shown, key = { i, _ -> i }) { _, l ->
+                itemsIndexed(shown) { _, l ->
                     Text(buildAnnotatedString {
                         withStyle(SpanStyle(color = N.textMuted)) { append(l.time.padEnd(13)) }
                         withStyle(SpanStyle(color = levelColor(l.level))) { append("${l.level} ") }

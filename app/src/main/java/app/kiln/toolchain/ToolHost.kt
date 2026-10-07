@@ -65,13 +65,17 @@ class ToolHost(private val paths: Paths, private val toolchain: Toolchain) {
         val p = pb.start()
         val r = p.inputStream.bufferedReader()
         // Skip JVM warnings until the server says READY.
+        val boot = scope.launch { delay(120_000); p.destroyForcibly() }   // a JVM that never says READY
         while (true) {
-            val line = r.readLine() ?: error("tool server exited during start")
-            if (line.startsWith("READY")) break
+            val line = r.readLine() ?: run { boot.cancel(); error("tool server exited during start") }
+            if (line.startsWith("READY")) { boot.cancel(); break }
             Log.i("Kiln", "toolserver: $line")
         }
         proc = p; reader = r; writer = p.outputStream
     }
+
+    /** Stop the warm JVM once no tool is running (before the toolchain is swapped). */
+    suspend fun shutdown() = lock.withLock { stop() }
 
     fun stop() {
         proc?.let { p -> runCatching { writer?.close() }; if (!p.waitFor(2, TimeUnit.SECONDS)) p.destroyForcibly() }
@@ -79,10 +83,14 @@ class ToolHost(private val paths: Paths, private val toolchain: Toolchain) {
     }
 
     /** Run [tool] (kotlinc | javac | d8 | apksigner | ping) with absolute-path [args]. */
-    suspend fun run(tool: String, args: List<String>): ExecResult = lock.withLock {
+    suspend fun run(tool: String, args: List<String>, timeoutMs: Long = 10 * 60_000L): ExecResult = lock.withLock {
         withContext(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
             if (proc?.isAlive != true) { stop(); start() }
+            // readLine() can't be cancelled: a watchdog kills a stuck JVM (thrashing kotlinc), which
+            // ends the read with null → "tool server died", and the next call starts a fresh one.
+            val stuck = proc
+            val watchdog = scope.launch { delay(timeoutMs); stuck?.destroyForcibly() }
             val id = ids.incrementAndGet().toString()
             val payload = (listOf(id, tool) + args).joinToString("\u0000")
             val w = writer!!
@@ -97,6 +105,8 @@ class ToolHost(private val paths: Paths, private val toolchain: Toolchain) {
                 val out = if (parts.size > 3) String(Base64.getDecoder().decode(parts[3])) else ""
                 result = ExecResult(parts[2].toInt(), out, "", System.currentTimeMillis() - t0)
             }
+            watchdog.cancel()
+            if (System.currentTimeMillis() - t0 >= timeoutMs) result = ExecResult(-1, "", "$tool timed out after ${timeoutMs / 1000}s", timeoutMs, timedOut = true)
             scheduleIdleStop()
             result!!
         }

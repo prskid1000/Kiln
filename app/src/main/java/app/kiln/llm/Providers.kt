@@ -67,7 +67,11 @@ class Providers(dir: File, val secrets: Secrets) {
     fun key(id: String) = secrets.get("key-$id")
     fun setKey(id: String, key: String?) = secrets.put("key-$id", key)
 
-    fun adapter(p: Profile): Adapter = when (p.protocol) {
+    /** One adapter (HTTP client, connection pool) per profile + key, reused across steps. */
+    private val adapters = java.util.concurrent.ConcurrentHashMap<String, Adapter>()
+    fun adapter(p: Profile): Adapter = adapters.getOrPut("${p.hashCode()}:${key(p.id).hashCode()}") { newAdapter(p) }
+
+    private fun newAdapter(p: Profile): Adapter = when (p.protocol) {
         Protocol.ANTHROPIC -> AnthropicAdapter(p, key(p.id))
         Protocol.OPENAI_CHAT -> OpenAIChatAdapter(p, key(p.id))
         Protocol.OPENAI_RESPONSES -> OpenAIResponsesAdapter(p, key(p.id))

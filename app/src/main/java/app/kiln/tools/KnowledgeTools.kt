@@ -24,7 +24,7 @@ class ClassIndex(private val toolchain: Toolchain) {
     private var built: String? = null
     private val where = HashMap<String, File>(200_000)       // a.b.C → jar
 
-    private fun ensure() {
+    @Synchronized private fun ensure() {   // parallel sdk_lookup calls share one index
         val dir = toolchain.dir ?: error("toolchain not installed")
         if (built == dir.path) return
         where.clear()

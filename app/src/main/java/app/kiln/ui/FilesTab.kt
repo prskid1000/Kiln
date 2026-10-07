@@ -216,10 +216,19 @@ private fun looksBinary(b: ByteArray) = b.take(4096).any { it == 0.toByte() }
 
 /** Code editor: line-number gutter, no wrapping, save when dirty. */
 @Composable
-private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, onClose: () -> Unit) {
+private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
     var original by remember(o) { mutableStateOf<String?>(null) }
     var binary by remember(o) { mutableStateOf(false) }
     var text by remember(o) { mutableStateOf("") }
+    var confirmDiscard by remember { mutableStateOf(false) }
+    // System Back closes the editor (not the whole project), and never drops unsaved edits silently.
+    val onClose = { if (original != null && text != original) confirmDiscard = true else close() }
+    androidx.activity.compose.BackHandler { onClose() }
+    if (confirmDiscard) androidx.compose.material3.AlertDialog(onDismissRequest = { confirmDiscard = false }, containerColor = N.surface,
+        title = { Text("Discard changes?", style = T.cardTitle) },
+        text = { Text("Your edits to ${o.path.substringAfterLast('/')} haven't been saved.", style = T.bodySmall) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmDiscard = false; close() }) { Text("Discard", color = N.danger) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing", color = N.textLabel) } })
     val scope = rememberCoroutineScope()
     LaunchedEffect(o) {
         val bytes = withContext(Dispatchers.IO) {

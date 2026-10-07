@@ -37,10 +37,18 @@ class Toolchain(private val paths: Paths) {
     fun refresh() {
         val cur = File(paths.toolchainRoot, "current").takeIf { it.isFile }?.readText()?.trim()
         val dir = cur?.let { File(paths.toolchainRoot, it) }
-        _state.value = if (dir != null && File(dir, "VERSION.json").isFile) State.Ready(cur, dir) else State.Missing
+        val ok = dir != null && File(dir, "VERSION.json").isFile
+        lastReady = if (ok) dir else null
+        _state.value = if (ok) State.Ready(cur!!, dir!!) else State.Missing
     }
 
-    val dir: File? get() = (state.value as? State.Ready)?.dir
+    /** The installed toolchain stays usable while a new pack imports, and after one fails to. */
+    @Volatile private var lastReady: File? = null
+    val dir: File? get() = (state.value as? State.Ready)?.dir ?: lastReady
+
+    /** Called before the active toolchain is swapped (the warm compiler JVM must not outlive its files). */
+    var beforeSwitch: (suspend () -> Unit)? = null
+    private val installLock = kotlinx.coroutines.sync.Mutex()
     fun require(): File = dir ?: error("Toolchain not installed — open Settings → Toolchain and import the pack.")
 
     // ---- layout ----
@@ -73,15 +81,22 @@ class Toolchain(private val paths: Paths) {
         ?.maxByOrNull { it.lastModified() }
 
     suspend fun install(input: InputStream, totalBytes: Long): Result<String> = withContext(Dispatchers.IO) {
+        // Auto-import (on resume) and a manual import must not share the staging dir at once.
+        if (!installLock.tryLock()) return@withContext Result.failure(IllegalStateException("a toolchain import is already running"))
+        try { installLocked(input, totalBytes) } finally { installLock.unlock() }
+    }
+
+    private suspend fun installLocked(input: InputStream, totalBytes: Long): Result<String> = withContext(Dispatchers.IO) {
+        val staging = File(paths.toolchainRoot, ".staging")
         runCatching {
-            val staging = File(paths.toolchainRoot, ".staging").apply { deleteRecursively(); mkdirs() }
+            staging.apply { deleteRecursively(); mkdirs() }
             var done = 0L
             ZipInputStream(input.buffered(1 shl 16)).use { zin ->
                 val buf = ByteArray(1 shl 16)
                 while (true) {
                     val e = zin.nextEntry ?: break
                     val out = File(staging, e.name).canonicalFile
-                    require(out.path.startsWith(staging.canonicalPath)) { "bad entry ${e.name}" }
+                    require(out.path.startsWith(staging.canonicalPath + File.separator)) { "bad entry ${e.name}" }
                     if (e.isDirectory) { out.mkdirs(); continue }
                     out.parentFile?.mkdirs()
                     out.outputStream().use { o ->
@@ -109,16 +124,23 @@ class Toolchain(private val paths: Paths) {
                 checked++
                 _state.value = State.Installing(checked.toLong(), files.size.toLong(), "verify $rel")
             }
-            val target = File(paths.toolchainRoot, version)
-            target.deleteRecursively()
+            beforeSwitch?.invoke()
+            // Reinstalling the active version: never delete the directory builds are using.
+            val target = File(paths.toolchainRoot, version).let { t ->
+                if (t.exists() && t == dir) File(paths.toolchainRoot, "$version-${System.currentTimeMillis()}") else t.also { it.deleteRecursively() }
+            }
             check(staging.renameTo(target)) { "could not move pack into place" }
-            File(paths.toolchainRoot, "current.tmp").apply { writeText(version) }
+            File(paths.toolchainRoot, "current.tmp").apply { writeText(target.name) }
                 .renameTo(File(paths.toolchainRoot, "current"))
-            paths.toolchainRoot.listFiles()?.filter { it.isDirectory && it.name != version && !it.name.startsWith(".") }
+            paths.toolchainRoot.listFiles()?.filter { it.isDirectory && it != target && !it.name.startsWith(".") }
                 ?.forEach { it.deleteRecursively() }
             refresh()
             version
-        }.onFailure { _state.value = State.Failed(it.message ?: it.toString()) }
+        }.onFailure {
+            staging.deleteRecursively()
+            refresh()   // back to the installed toolchain, if there is one
+            if (_state.value !is State.Ready) _state.value = State.Failed(it.message ?: it.toString())
+        }
     }
 
     private fun sha256(f: File): String {

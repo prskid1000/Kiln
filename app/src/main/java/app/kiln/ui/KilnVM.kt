@@ -35,8 +35,15 @@ class ProjectState(val project: Project) {
     /** Non-null while Run is in progress: "Building…", "Installing…", "Launching…". */
     val runStep = MutableStateFlow<String?>(null)
     internal var job: Job? = null
-    val pkg: String get() = runCatching { project.meta().`package` }.getOrDefault(Project.packageFor(project.name))
-    val label: String get() = runCatching { project.meta().label }.getOrDefault(project.name)
+    // Read often during composition (every build-progress update): parse kiln.json only when it changed.
+    @Volatile private var metaCache: Pair<Long, app.kiln.build.ProjectMeta?> = -1L to null
+    private fun meta(): app.kiln.build.ProjectMeta? {
+        val stamp = project.metaFile.lastModified()
+        if (metaCache.first != stamp) metaCache = stamp to runCatching { project.meta() }.getOrNull()
+        return metaCache.second
+    }
+    val pkg: String get() = meta()?.`package` ?: Project.packageFor(project.name)
+    val label: String get() = meta()?.label ?: project.name
 }
 
 class KilnVM(app: Application) : AndroidViewModel(app) {
@@ -45,7 +52,20 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     val installed = MutableStateFlow<Set<String>>(emptySet())
     val warden = MutableStateFlow(Warden.Status.NOT_RUNNING)
     val message = MutableStateFlow<String?>(null)
-    private val states = HashMap<String, ProjectState>()
+    /**
+     * Runs outlive the screen: Back on the home screen (which finishes the activity on Android 11)
+     * or a second activity from the notification must not cancel or duplicate a run. Project state
+     * and run jobs are process-wide; the ViewModel is just a view onto them.
+     */
+    companion object Runs {
+        private val states = HashMap<String, ProjectState>()
+        private val runScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+        /** Agent runs in flight across all projects; the foreground service lives while > 0. */
+        private val active = java.util.concurrent.atomic.AtomicInteger()
+
+        fun slug(label: String): String = label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+            .let { if (it.firstOrNull()?.isLetter() == true) it else "app_$it" }.take(36).trimEnd('_').ifBlank { "app" }
+    }
 
     init { refresh(); autoImportPack() }
 
@@ -68,7 +88,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
 
     /** A pack zip dropped in the app's external files dir installs itself. */
     fun autoImportPack() = viewModelScope.launch(Dispatchers.IO) {
-        if (Graph.toolchain.state.value is Toolchain.State.Ready) return@launch
+        // Not while one is installing (onResume fires again during a long import).
+        if (Graph.toolchain.state.value.let { it is Toolchain.State.Ready || it is Toolchain.State.Installing }) return@launch
         val zip = Graph.toolchain.inboxPack() ?: return@launch
         Graph.toolchain.install(zip.inputStream(), zip.length()).onSuccess { zip.delete(); message.value = "Toolchain $it installed" }
             .onFailure { message.value = "Toolchain: ${it.message}" }
@@ -134,13 +155,16 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             warden.value = Graph.warden.status()
             val l = s.loop.value ?: runCatching { Graph.kiln.newSession(s.project) }.getOrElse { message.value = it.message; return@launch }
                 .also { s.loop.value = it }
+            // One run per project: a second send while it works would be dropped by the loop
+            // and (before) stopped the foreground service under the live run.
+            if (l.running.value) { message.value = "Kiln is still working on this app — wait, or tap Stop"; return@launch }
             val ctx = getApplication<Application>()
+            active.incrementAndGet()
             ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java))
-            s.job = viewModelScope.launch(Dispatchers.IO) {
+            s.job = runScope.launch {
                 try { l.send(text, attachments) } finally {
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
-                    if (synchronized(states) { states.values.none { it.job?.isActive == true && it !== s } })
-                        ctx.stopService(Intent(ctx, RunService::class.java))
+                    if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
                     refresh()
                 }
             }
@@ -150,7 +174,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     fun stop(name: String) { state(name).job?.cancel() }
 
     /** Build → install → launch, the same path the agent's run_app takes. */
-    fun run(name: String) = viewModelScope.launch(Dispatchers.IO) {
+    fun run(name: String) = runScope.launch {   // a build keeps going if the screen goes away
         val s = state(name)
         if (s.runStep.value != null) return@launch
         try {
@@ -182,8 +206,4 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         message.value = if (r.ok) "App data cleared" else r.all.trim()
     }
 
-    companion object {
-        fun slug(label: String): String = label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
-            .let { if (it.firstOrNull()?.isLetter() == true) it else "app_$it" }.take(36).trimEnd('_').ifBlank { "app" }
-    }
 }

@@ -51,7 +51,7 @@ private fun parse(md: String): List<Block> {
                 while (i < lines.size && !lines[i].trimStart().startsWith("```")) { code.appendLine(lines[i]); i++ }
                 out += Block.Code(code.toString().trimEnd())
             }
-            t.startsWith("#") -> { flush(); out += Block.Heading(t.trimStart('#').trim()) }
+            Regex("^#{1,6} ").containsMatchIn(t) -> { flush(); out += Block.Heading(t.trimStart('#').trim()) }   // not "#1 priority"
             Regex("^([-*•]|\\d+[.)])\\s+").containsMatchIn(t) -> {
                 flush()
                 val m = Regex("^([-*•]|\\d+[.)])\\s+").find(t)!!

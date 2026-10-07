@@ -153,7 +153,8 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
                 obj("id" to b.str("id"), "type" to "function",
                     "function" to obj("name" to b.str("name"), "arguments" to (b["input"] ?: obj()).compact()))
             }
-            return listOf(obj("role" to "assistant", "content" to text.ifBlank { null },
+            // A turn with only reasoning has neither text nor calls; an empty assistant message is a 400.
+            return listOf(obj("role" to "assistant", "content" to text.ifBlank { if (calls.isEmpty()) "" else null },
                 "tool_calls" to if (calls.isNotEmpty()) calls else null))
         }
         // user: tool results become role:tool messages; images in them are lifted into a user message.
@@ -204,7 +205,10 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
                 (d.str("reasoning_content") ?: d.str("reasoning"))?.let { thinking.append(it); onEvent(ModelEvent.Thinking(it)) }
                 (d["tool_calls"] as? JsonArray)?.forEach { tc ->
                     val o = tc as JsonObject
-                    val idx = (o["index"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+                    // Some proxies omit "index": match by id, else treat it as a new call — never merge two calls.
+                    val idx = (o["index"] as? JsonPrimitive)?.content?.toIntOrNull()
+                        ?: o.str("id")?.let { id -> calls.entries.firstOrNull { it.value.id == id }?.key ?: calls.size }
+                        ?: (if (calls.isEmpty()) 0 else calls.lastKey())
                     val c = calls.getOrPut(idx) { Call() }
                     o.str("id")?.let { c.id = it }
                     (o["function"] as? JsonObject)?.let { f ->
@@ -220,7 +224,7 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
         if (text.isNotBlank()) blocks += obj("type" to "text", "text" to text.toString())
         calls.values.forEachIndexed { i, c ->
             val input = runCatching { parseJson(c.args.toString().ifBlank { "{}" }) }.getOrElse { obj("_invalid_json" to c.args.toString()) }
-            blocks += obj("type" to "tool_use", "id" to c.id.ifBlank { "call_$i" }, "name" to c.name, "input" to input)
+            blocks += obj("type" to "tool_use", "id" to c.id.ifBlank { "call_" + java.util.UUID.randomUUID().toString().take(12) }, "name" to c.name, "input" to input)
         }
         val stop = if (calls.isNotEmpty()) Stop.TOOL_USE else stopFrom(finish)
         ModelTurn(JsonArray(blocks), stop, usage)
@@ -298,7 +302,11 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
                         ?.let { onEvent(ModelEvent.ToolStart(it.str("call_id") ?: "", it.str("name") ?: "")) }
                     "response.function_call_arguments.delta" -> onEvent(ModelEvent.ToolArgs("", j.str("delta") ?: ""))
                     "response.completed" -> final = j["response"] as? JsonObject
-                    "response.incomplete" -> { final = j["response"] as? JsonObject; incomplete = "max_output_tokens" }
+                    "response.incomplete" -> {
+                        final = j["response"] as? JsonObject
+                        // content_filter isn't "keep going": only max_output_tokens maps to MAX_TOKENS.
+                        incomplete = ((final?.get("incomplete_details") as? JsonObject)?.str("reason")) ?: "max_output_tokens"
+                    }
                     "response.failed", "error" -> throw ProviderException(data.take(600), retryable = false)
                 }
             }
@@ -320,7 +328,8 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
                 }
                 "function_call" -> {
                     calls++
-                    val input = runCatching { parseJson(it.str("arguments") ?: "{}") }.getOrElse { _ -> obj() }
+                    val args = it.str("arguments") ?: "{}"
+                    val input = runCatching { parseJson(args) }.getOrElse { _ -> obj("_invalid_json" to args) }
                     blocks += obj("type" to "tool_use", "id" to it.str("call_id"), "name" to it.str("name"), "input" to input)
                 }
             }
@@ -330,7 +339,7 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
         val usage = Usage(
             input = ((u?.get("input_tokens") as? JsonPrimitive)?.content?.toLongOrNull() ?: 0) - cached,
             output = (u?.get("output_tokens") as? JsonPrimitive)?.content?.toLongOrNull() ?: 0, cacheRead = cached)
-        val stop = if (calls > 0) Stop.TOOL_USE else if (incomplete != null) Stop.MAX_TOKENS else Stop.END_TURN
+        val stop = when { calls > 0 -> Stop.TOOL_USE; incomplete == "max_output_tokens" -> Stop.MAX_TOKENS; incomplete == "content_filter" -> Stop.REFUSAL; else -> Stop.END_TURN }
         ModelTurn(splitThinkTags(JsonArray(blocks)), stop, usage, providerState = obj("items" to items))
     }
 }

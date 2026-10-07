@@ -21,7 +21,7 @@ import java.io.File
 class BuildOnDeviceTest {
     private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @Test fun importPackAndBuild() = runBlocking {
+    @Test fun importPackAndBuild() = runBlocking<Unit> {
         Graph.init(ctx.applicationContext as android.app.Application)
         val tc = Graph.toolchain
         if (tc.state.value !is Toolchain.State.Ready) {
@@ -53,5 +53,6 @@ class BuildOnDeviceTest {
         assertTrue(!broken.ok)
         val e = broken.errors.first()
         assertTrue(e.file!!.endsWith("MainActivity.kt") && e.line != null)
+        p.dir.deleteRecursively()   // don't leave "Smoke Test" on the user's Projects screen
     }
 }

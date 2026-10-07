@@ -53,7 +53,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen(vm: KilnVM, onClose: () -> Unit) {
     var editing by remember { mutableStateOf<Profile?>(null) }
-    editing?.let { ProfileEditor(it) { editing = null }; return }
+    editing?.let { androidx.activity.compose.BackHandler { editing = null }; ProfileEditor(it) { editing = null }; return }
     Column(Modifier.fillMaxSize()) {
     KTopBar("Settings", onBack = onClose)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
@@ -116,7 +116,10 @@ private fun ModelsCard(onEdit: (Profile) -> Unit) {
                 }
             }
             KField("model", model, { model = it; Graph.providers.setRole(role, b.copy(model = it)); roles = Graph.providers.roles }, mono = true)
-            KField("fallbacks (profile:model, comma-separated)", b.fallback.joinToString(","), { s ->
+            // Keep the raw text: re-rendering the parsed list ate the comma before a second entry could be typed.
+            var fallbacks by remember(role) { mutableStateOf(b.fallback.joinToString(", ")) }
+            KField("fallbacks (profile:model, comma-separated)", fallbacks, { s ->
+                fallbacks = s
                 Graph.providers.setRole(role, b.copy(fallback = s.split(",").map { it.trim() }.filter { it.isNotEmpty() })); roles = Graph.providers.roles
             }, mono = true)
         }
@@ -212,9 +215,9 @@ private fun LimitsCard() {
     var s by remember { mutableStateOf(Graph.settings.value) }
     fun save(f: (app.kiln.agent.Settings) -> app.kiln.agent.Settings) { Graph.settings.update(f); s = Graph.settings.value }
     Section("Limits") {
-        KField("Max steps per request", s.maxSteps.toString(), { v -> v.toIntOrNull()?.let { n -> save { it.copy(maxSteps = n) } } })
-        KField("Spending cap per chat (USD)", s.sessionUsd.toString(), { v -> v.toDoubleOrNull()?.let { n -> save { it.copy(sessionUsd = n) } } })
-        KField("Spending cap per day (USD)", s.dailyUsd.toString(), { v -> v.toDoubleOrNull()?.let { n -> save { it.copy(dailyUsd = n) } } })
+        NumField("Max steps per request", s.maxSteps.toString(), { it.toIntOrNull()?.takeIf { n -> n > 0 } }) { n -> save { it.copy(maxSteps = n) } }
+        NumField("Spending cap per chat (USD)", s.sessionUsd.toString(), { it.toDoubleOrNull()?.takeIf { n -> n >= 0 } }) { n -> save { it.copy(sessionUsd = n) } }
+        NumField("Spending cap per day (USD)", s.dailyUsd.toString(), { it.toDoubleOrNull()?.takeIf { n -> n >= 0 } }) { n -> save { it.copy(dailyUsd = n) } }
         Text("Spent today: $" + "%.3f".format(Graph.settings.spentToday()), style = T.bodySmall)
         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
             androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
@@ -286,4 +289,14 @@ private fun EvalsCard() {
         }
         if (state.report.isNotBlank()) Text(state.report, style = T.mono)
     }
+}
+
+/**
+ * A number field that keeps what the user is typing (it can be emptied and retyped) and saves
+ * only values that parse — writing the parsed value back made "40" impossible to change to "25".
+ */
+@Composable
+private fun <T> NumField(label: String, initial: String, parse: (String) -> T?, onValid: (T) -> Unit) {
+    var raw by remember { mutableStateOf(initial) }
+    KField(label, raw, { v -> raw = v; parse(v.trim())?.let(onValid) })
 }

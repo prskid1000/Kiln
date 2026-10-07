@@ -113,7 +113,12 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
     suspend fun pid(pkg: String): Int? = warden.exec(listOf("pidof", pkg)).out.trim().split(" ").firstOrNull()?.toIntOrNull()
 
     /** Device clock in logcat's -T format, used as a "since" marker. */
-    suspend fun logMarker(): String = warden.exec(listOf("date", "+%m-%d %H:%M:%S.000")).out.trim()
+    suspend fun logMarker(): String {
+        // To the millisecond: lines from the run that `install -r` killed in the same second must not count.
+        val precise = warden.exec(listOf("date", "+%m-%d %H:%M:%S.%3N")).out.trim()
+        return if (Regex("""\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}""").matches(precise)) precise
+            else warden.exec(listOf("date", "+%m-%d %H:%M:%S.000")).out.trim()
+    }
 
     /**
      * Logcat for [pkg]: lines from its pid (or by tag when not running), since
@@ -128,7 +133,11 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
         args += "*:$minLevel"
         val r = warden.exec(args, timeoutMs = 30_000)
         val lines = r.out.lines().let { all ->
-            if (pid != null) all else all.filter { pkg in it || "KILN-APP" in it || "KILN-CRASH" in it }
+            // App not running: its own lines plus crash lines (the exception text doesn't name the package).
+            if (pid != null) all else {
+                val own = Regex("""${Regex.escape(pkg)}(?![\w.])""")
+                all.filter { own.containsMatchIn(it) || "KILN-APP" in it || "KILN-CRASH" in it || "AndroidRuntime" in it }
+            }
         }
         return lines.takeLast(max).joinToString("\n")
     }
@@ -153,10 +162,15 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
             }
         }
         val lines = out.lines()
-        val start = lines.indexOfLast { "FATAL EXCEPTION" in it }
-        if (start < 0) return null
-        val block = lines.drop(start).takeWhile { "AndroidRuntime" in it }.take(60)
-        return if (block.any { pkg in it }) block.joinToString("\n") { it.substringAfter("AndroidRuntime: ") } else null
+        // The newest FATAL EXCEPTION that is this app's: another app may have crashed after it, and
+        // "kiln.app.foo" must not match "kiln.app.foobar".
+        val owner = Regex("""Process: ${Regex.escape(pkg)}(,|\s|$)""")
+        for (start in lines.indices.reversed()) {
+            if ("FATAL EXCEPTION" !in lines[start]) continue
+            val block = lines.drop(start).takeWhile { "AndroidRuntime" in it }.take(60)
+            if (block.any { owner.containsMatchIn(it) }) return block.joinToString("\n") { it.substringAfter("AndroidRuntime: ") }
+        }
+        return null
     }
 
     /** PNG screenshot, scaled to [maxSide] on the long edge (models don't need 2780 px). */
@@ -223,8 +237,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
         warden.exec(input("swipe", "$x1", "$y1", "$x2", "$y2", "$ms"))
     suspend fun key(key: String) = warden.exec(input("keyevent", key.uppercase().let { if (it.startsWith("KEYCODE_")) it else "KEYCODE_$it" }))
     /** `input text` needs spaces as %s and shell metacharacters escaped. */
-    suspend fun type(text: String) = warden.exec(input("text", text.replace(" ", "%s")
-        .replace(Regex("""([\\'"`$&|;<>()*?!#~\[\]{}])"""), "\\\\$1")))
+    suspend fun type(text: String) = warden.exec(input("text", text.replace(" ", "%s")))
+    // Warden passes argv without a shell, so no escaping: backslashes would be typed literally.
     /** Package of the activity in front right now, or null if it can't be told. */
     suspend fun foregroundPackage(): String? {
         val out = warden.exec(listOf("dumpsys", "activity", "activities")).out

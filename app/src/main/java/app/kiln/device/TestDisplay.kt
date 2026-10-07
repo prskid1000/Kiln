@@ -51,13 +51,19 @@ class TestDisplay(private val context: Context, private val size: Triple<Int, In
         var tries = 0
         while (img == null && tries++ < 20) { delay(100); img = r.acquireLatestImage() }
         img ?: return@withContext lastFrame
-        val plane = img.planes[0]
-        val padded = Bitmap.createBitmap(plane.rowStride / plane.pixelStride, height, Bitmap.Config.ARGB_8888)
-        padded.copyPixelsFromBuffer(plane.buffer)
-        img.close()
-        val full = Bitmap.createBitmap(padded, 0, 0, width, height)
+        // Always close the image: with maxImages = 2, two leaked frames would end all captures.
+        val full = try {
+            val plane = img.planes[0]
+            val stride = plane.rowStride / plane.pixelStride
+            // Some GPUs don't pad the last row: copy only the rows the buffer actually holds.
+            val rows = minOf(height, plane.buffer.remaining() / plane.rowStride)
+            val padded = Bitmap.createBitmap(stride, rows, Bitmap.Config.ARGB_8888)
+            plane.buffer.limit(plane.buffer.position() + rows * plane.rowStride)
+            padded.copyPixelsFromBuffer(plane.buffer)
+            Bitmap.createBitmap(padded, 0, 0, width, rows)
+        } catch (e: Exception) { return@withContext lastFrame } finally { img.close() }
         val k = maxSide.toFloat() / maxOf(width, height)
-        val out = if (k < 1f) Bitmap.createScaledBitmap(full, (width * k).toInt(), (height * k).toInt(), true) else full
+        val out = if (k < 1f) Bitmap.createScaledBitmap(full, (full.width * k).toInt(), (full.height * k).toInt(), true) else full
         ByteArrayOutputStream().also { out.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray().also { lastFrame = it }
     }
 

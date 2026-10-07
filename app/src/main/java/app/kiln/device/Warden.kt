@@ -38,36 +38,44 @@ class Warden(private val context: Context) {
 
     val ready: Boolean get() = status() == Status.READY
 
-    /** Run [argv] as shell. [stdin] is streamed to the process; output is collected. */
-    suspend fun exec(argv: List<String>, stdin: ByteArray? = null, timeoutMs: Long = 120_000): ExecResult =
-        withContext(Dispatchers.IO) {
-            val t0 = System.currentTimeMillis()
-            val svc = broker() ?: return@withContext ExecResult(-1, "", "Warden is not running", 0)
-            val p = try { svc.newProcess(argv.toTypedArray(), emptyArray(), "/") } catch (e: SecurityException) {
-                return@withContext ExecResult(-1, "", "Warden denied Kiln — grant it in the Warden app", 0)
-            }
-            coroutineScope {
-                val out = async(Dispatchers.IO) { ParcelFileDescriptor.AutoCloseInputStream(p.inputStream).use { it.readBytes() } }
-                val err = async(Dispatchers.IO) { ParcelFileDescriptor.AutoCloseInputStream(p.errorStream).use { it.readBytes() } }
-                ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).use { o -> if (stdin != null) o.write(stdin) }
-                val code = withTimeoutOrNull(timeoutMs) { async(Dispatchers.IO) { p.waitFor() }.await() }
-                if (code == null) runCatching { p.destroy() }
-                ExecResult(code ?: -1, out.await().decodeToString(), err.await().decodeToString(),
-                    System.currentTimeMillis() - t0, timedOut = code == null)
-            }
-        }
+    /** Run [argv] as shell. [stdin] is streamed to the process; output is collected. Never throws. */
+    suspend fun exec(argv: List<String>, stdin: ByteArray? = null, timeoutMs: Long = 120_000): ExecResult {
+        val (code, out, err, ms, timedOut) = run(argv, stdin, timeoutMs) ?: return ExecResult(-1, "", lastError, 0)
+        return ExecResult(code, out.decodeToString(), err.decodeToString(), ms, timedOut)
+    }
 
     /** Like [exec] but returns raw stdout bytes (screencap). */
     suspend fun execBytes(argv: List<String>, timeoutMs: Long = 60_000): Pair<Int, ByteArray> =
-        withContext(Dispatchers.IO) {
-            val svc = broker() ?: return@withContext -1 to ByteArray(0)
-            val p = svc.newProcess(argv.toTypedArray(), emptyArray(), "/")
+        run(argv, null, timeoutMs)?.let { it.code to it.out } ?: (-1 to ByteArray(0))
+
+    private data class Raw(val code: Int, val out: ByteArray, val err: ByteArray, val ms: Long, val timedOut: Boolean)
+    @Volatile private var lastError = ""
+
+    /**
+     * The process runs remotely; waitFor() is a blocking binder call that ignores cancellation,
+     * so it waits on its own thread, outside the timeout, and the process is destroyed when the
+     * timeout fires (which also ends the output reads). Broker failures (died, denied, too many
+     * processes, broken stdin) come back as null + [lastError] instead of crashing the caller.
+     */
+    private suspend fun run(argv: List<String>, stdin: ByteArray?, timeoutMs: Long): Raw? = withContext(Dispatchers.IO) {
+        val t0 = System.currentTimeMillis()
+        val svc = broker() ?: run { lastError = "Warden is not running"; return@withContext null }
+        val p = try { svc.newProcess(argv.toTypedArray(), emptyArray(), "/") } catch (e: SecurityException) {
+            lastError = "Warden denied Kiln — grant it in the Warden app"; return@withContext null
+        } catch (e: Exception) { lastError = "Warden: ${e.message ?: e}"; return@withContext null }
+        try {
             coroutineScope {
-                val out = async(Dispatchers.IO) { ParcelFileDescriptor.AutoCloseInputStream(p.inputStream).use { it.readBytes() } }
-                async(Dispatchers.IO) { ParcelFileDescriptor.AutoCloseInputStream(p.errorStream).use { it.readBytes() } }
-                ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).close()
-                val code = withTimeoutOrNull(timeoutMs) { async(Dispatchers.IO) { p.waitFor() }.await() } ?: -1
-                code to out.await()
+                val out = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.inputStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
+                val err = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.errorStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
+                // A child that exits early closes its stdin: that's not our failure.
+                runCatching { ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).use { o -> if (stdin != null) o.write(stdin) } }
+                val done = java.util.concurrent.CompletableFuture<Int>()
+                Thread({ done.complete(runCatching { p.waitFor() }.getOrDefault(-1)) }, "warden-wait").apply { isDaemon = true }.start()
+                val code = runCatching { done.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrNull()
+                if (code == null) runCatching { p.destroy() }
+                Raw(code ?: -1, out.await(), err.await(), System.currentTimeMillis() - t0, timedOut = code == null)
             }
-        }
+        } catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; throw e
+        } catch (e: Exception) { runCatching { p.destroy() }; lastError = "Warden: ${e.message ?: e}"; null }
+    }
 }

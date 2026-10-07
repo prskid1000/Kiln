@@ -62,7 +62,9 @@ class SetAppMetaTool : Tool {
         ctx.project.metaFile.writeText(KJPretty.encodeToString(ProjectMeta.serializer(), next))
         // The manifest label follows kiln.json.
         val man = ctx.project.manifest
-        man.writeText(man.readText().replace(Regex("""android:label="[^"]*""""), "android:label=\"${next.label.replace("\"", "&quot;")}\""))
+        // XML-escaped, and only the <application> label (activities may have their own).
+        val esc = next.label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+        man.writeText(man.readText().replace(Regex("""(<application\s[^>]*?android:label=")[^"]*(")""")) { it.groupValues[1] + esc + it.groupValues[2] })
         return ToolResult.ok("kiln.json updated: label=${next.label}, version=${next.versionName} (${next.versionCode}), permissions=${next.permissions}")
     }
 }

@@ -34,7 +34,8 @@ class Session private constructor(val dir: File, meta: SessionMeta, messages: Li
 
     @Synchronized fun append(m: Msg) {
         _messages += m
-        log.appendText(KJ.encodeToString(Msg.serializer(), m) + "\n")
+        // Synced, so a crash right after can't leave the turn half-written.
+        java.io.FileOutputStream(log, true).use { o -> o.write((KJ.encodeToString(Msg.serializer(), m) + "\n").toByteArray()); o.fd.sync() }
     }
 
     @Synchronized fun updateMeta(f: (SessionMeta) -> SessionMeta) {
@@ -56,7 +57,8 @@ class Session private constructor(val dir: File, meta: SessionMeta, messages: Li
         fun open(dir: File): Session? = runCatching {
             val meta = KJ.decodeFromString(SessionMeta.serializer(), File(dir, "meta.json").readText())
             val msgs = File(dir, "transcript.jsonl").takeIf { it.isFile }?.readLines()?.filter { it.isNotBlank() }
-                ?.map { KJ.decodeFromString(Msg.serializer(), it) } ?: emptyList()
+                // A crash mid-write can leave a partial last line: drop unreadable lines, keep the session.
+                ?.mapNotNull { runCatching { KJ.decodeFromString(Msg.serializer(), it) }.getOrNull() } ?: emptyList()
             Session(dir, meta, msgs)
         }.getOrNull()
 

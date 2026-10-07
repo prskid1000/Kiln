@@ -43,13 +43,14 @@ data class CommandToolDef(
     val timeoutMs: Long = 60_000,
 )
 
-class CommandTool(private val def: CommandToolDef, private val warden: Warden) : Tool {
+class CommandTool(private val def: CommandToolDef, private val warden: Warden, trusted: Boolean = true) : Tool {
     override val name = def.name
     override val description = def.description + if (def.runAs == "broker") " (runs as shell through Warden)" else ""
     override val schema: JsonObject = obj("type" to "object", "properties" to JsonObject(def.params),
         "required" to JsonArray(def.params.keys.map { JsonPrimitive(it) }), "additionalProperties" to false)
-    override val traits = def.traits.mapNotNull { runCatching { Trait.valueOf(it) }.getOrNull() }.toSet() +
-        if (def.runAs == "broker") setOf(Trait.NEEDS_BROKER) else emptySet()
+    // A project's own tools.d can't declare itself read-only: it always asks first.
+    override val traits = (if (trusted) def.traits.mapNotNull { runCatching { Trait.valueOf(it) }.getOrNull() }.toSet()
+        else setOf(Trait.NEEDS_APPROVAL)) + if (def.runAs == "broker") setOf(Trait.NEEDS_BROKER) else emptySet()
     override val timeoutMs = def.timeoutMs
 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -65,9 +66,9 @@ class CommandTool(private val def: CommandToolDef, private val warden: Warden) :
     private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
     companion object {
-        fun load(dirs: List<File>, warden: Warden): List<CommandTool> = dirs.flatMap { d ->
+        fun load(dirs: List<File>, warden: Warden, trusted: Boolean = true): List<CommandTool> = dirs.flatMap { d ->
             d.listFiles { f -> f.extension == "json" }?.sortedBy { it.name }?.mapNotNull { f ->
-                runCatching { CommandTool(KJ.decodeFromString(CommandToolDef.serializer(), f.readText()), warden) }.getOrNull()
+                runCatching { CommandTool(KJ.decodeFromString(CommandToolDef.serializer(), f.readText()), warden, trusted) }.getOrNull()
             } ?: emptyList()
         }
     }
@@ -163,7 +164,8 @@ class ToolRegistry(private val builtins: List<Tool>) {
      * nullable — the documented strict-schema form — and the harness treats null as absent.
      */
     fun specs(tools: List<Tool>): List<ToolSpec> = tools.map { t ->
-        if (t.schema["additionalProperties"]?.toString() != "false") ToolSpec(t.name, t.description, t.schema, strict = false)
+        // Strict form only for Kiln's own tools: MCP/command schemas may use keywords strict mode rejects.
+        if (t.schema["additionalProperties"]?.toString() != "false" || t is McpTool || t is CommandTool) ToolSpec(t.name, t.description, t.schema, strict = false)
         else ToolSpec(t.name, t.description, strictForm(t.schema), strict = true)
     }
 
