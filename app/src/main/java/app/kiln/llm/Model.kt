@@ -1,0 +1,120 @@
+package app.kiln.llm
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+
+/** Wire protocol a profile speaks (SPEC §8.1). */
+@Serializable
+enum class Protocol { ANTHROPIC, OPENAI_CHAT, OPENAI_RESPONSES }
+
+@Serializable
+enum class AuthStyle { X_API_KEY, BEARER, NONE }
+
+/**
+ * What an endpoint can do — probed on "Test connection", overridable by hand.
+ * The harness degrades per flag instead of failing (SPEC §8.4).
+ */
+@Serializable
+data class Caps(
+    val tools: Boolean = true,
+    val parallelTools: Boolean = true,
+    val strictTools: Boolean = false,
+    val vision: Boolean = true,
+    val caching: Boolean = false,
+    val midSystem: Boolean = false,
+    val thinking: Boolean = false,
+    val effort: Boolean = false,
+    val compaction: Boolean = false,
+    val contextEditing: Boolean = false,
+    val serverWebSearch: Boolean = false,
+    val fallbacks: Boolean = false,
+    val taskBudget: Boolean = false,
+    val contextWindow: Int = 200_000,
+    val maxOutput: Int = 32_000,
+)
+
+/** A configured endpoint (SPEC §8.3). The API key lives in [app.kiln.llm.Secrets], never here. */
+@Serializable
+data class Profile(
+    val id: String,
+    val label: String,
+    val protocol: Protocol,
+    val baseUrl: String,
+    val auth: AuthStyle = AuthStyle.BEARER,
+    val headers: Map<String, String> = emptyMap(),
+    val models: List<String> = emptyList(),
+    val caps: Caps = Caps(),
+    /** SHA-256 (hex) of a pinned self-signed certificate (On Device AI), if any. */
+    val pinnedCertSha256: String? = null,
+    /** $ per million tokens: input, output, cache read, cache write. 0 = free/local. */
+    val price: Price? = null,
+)
+
+@Serializable
+data class Price(val input: Double, val output: Double, val cacheRead: Double = input * 0.1, val cacheWrite: Double = input * 1.25)
+
+/** A tool as the model sees it. */
+@Serializable
+data class ToolSpec(val name: String, val description: String, val schema: JsonObject, val strict: Boolean = false)
+
+/**
+ * One transcript entry, Anthropic-shaped content blocks (SPEC §8.2).
+ * [origin] is "profileId|model" for assistant turns; [providerState] holds
+ * opaque provider data (OpenAI reasoning items) replayed only to that origin.
+ * role is user | assistant | system (mid-conversation operator message).
+ */
+@Serializable
+data class Msg(
+    val role: String,
+    val content: JsonArray,
+    val origin: String? = null,
+    val providerState: JsonObject? = null,
+    val ts: Long = System.currentTimeMillis(),
+)
+
+data class ModelRequest(
+    val model: String,
+    val system: String,
+    val messages: List<Msg>,
+    val tools: List<ToolSpec>,
+    val maxTokens: Int = 32_000,
+    val effort: String? = null,
+    /** Advisory total for the whole run (task budget), when supported. */
+    val taskBudgetTokens: Int? = null,
+    /** Anthropic server tools to declare (e.g. web search) when caps allow. */
+    val serverTools: List<JsonObject> = emptyList(),
+)
+
+sealed interface ModelEvent {
+    data class Text(val delta: String) : ModelEvent
+    data class Thinking(val delta: String) : ModelEvent
+    data class ToolStart(val id: String, val name: String) : ModelEvent
+    data class ToolArgs(val id: String, val partial: String) : ModelEvent
+    data class Status(val message: String) : ModelEvent
+}
+
+enum class Stop { TOOL_USE, END_TURN, MAX_TOKENS, REFUSAL, PAUSE_TURN, OTHER }
+
+@Serializable
+data class Usage(val input: Long = 0, val output: Long = 0, val cacheRead: Long = 0, val cacheWrite: Long = 0) {
+    operator fun plus(o: Usage) = Usage(input + o.input, output + o.output, cacheRead + o.cacheRead, cacheWrite + o.cacheWrite)
+    fun cost(p: Price?): Double = if (p == null) 0.0 else
+        (input * p.input + output * p.output + cacheRead * p.cacheRead + cacheWrite * p.cacheWrite) / 1_000_000.0
+}
+
+data class ModelTurn(
+    val content: JsonArray,
+    val stop: Stop,
+    val usage: Usage,
+    val providerState: JsonObject? = null,
+    val refusal: String? = null,
+)
+
+class ProviderException(message: String, val retryable: Boolean, cause: Throwable? = null) : Exception(message, cause)
+
+/** A wire protocol implementation. */
+interface Adapter {
+    suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn
+    suspend fun listModels(): List<String> = emptyList()
+}

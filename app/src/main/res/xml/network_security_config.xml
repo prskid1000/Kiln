@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Cleartext only to loopback. Tailnet (100.64.0.0/10) hosts are allowed per
-     profile in code (OkHttp), never globally; everything else is HTTPS. -->
+<!-- Network security config can't express a CIDR, so cleartext policy lives in code:
+     Http.cleartextAllowed permits only loopback and tailnet (100.64.0.0/10) hosts,
+     and every request is checked by an OkHttp interceptor. Everything else is HTTPS. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">localhost</domain>
-        <domain includeSubdomains="false">127.0.0.1</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>
