@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Kiln" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#161826</item>
+        <item name="android:navigationBarColor">#161826</item>
+        <item name="android:windowBackground">#161826</item>
+    </style>
+</resources>

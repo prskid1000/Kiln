@@ -1,0 +1,9 @@
+{
+  "package": "{{package}}",
+  "label": "{{label}}",
+  "versionCode": 1,
+  "versionName": "1.0",
+  "minSdk": 30,
+  "targetSdk": 36,
+  "permissions": []
+}

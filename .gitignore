@@ -1,0 +1,14 @@
+.gradle/
+build/
+*/build/
+.kotlin/
+.idea/
+*.iml
+local.properties
+dist/
+toolchain/out/
+# secrets / signing
+*.jks
+keystore.properties
+toolchain/.cache/
+toolchain/out/
