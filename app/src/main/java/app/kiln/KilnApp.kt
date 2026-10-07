@@ -14,6 +14,7 @@ import app.kiln.llm.Secrets
 import app.kiln.toolchain.ToolHost
 import app.kiln.toolchain.Toolchain
 import app.kiln.build.AppSecrets
+import app.kiln.agent.Schedules
 import kotlinx.coroutines.launch
 
 class KilnApp : Application() {
@@ -56,6 +57,6 @@ object Graph {
         kiln = Kiln(paths, toolchain, builds, warden, device, testDevice, providers, settings, Skills(app))
         // The toolchain ships in the APK: install or update whatever changed, off the main thread.
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
-            .launch { toolchain.syncBundled(app.assets) }
+            .launch { toolchain.syncBundled(app.assets); runCatching { Schedules.armAll(app) } }
     }
 }

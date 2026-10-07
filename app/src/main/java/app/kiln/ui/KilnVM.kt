@@ -71,6 +71,55 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
 
         init { app.kiln.agent.Attention.loops = { name -> synchronized(states) { states[name] }?.loop?.value } }
 
+        fun projectState(name: String): ProjectState = synchronized(states) {
+            states.getOrPut(name) {
+                ProjectState(Project(File(Graph.paths.projects, name))).also { s ->
+                    runScope.launch {
+                        s.sessions.value = Session.list(Graph.paths.sessions, name)
+                        val last = (s.sessions.value.firstOrNull { it.title.isNotBlank() } ?: s.sessions.value.firstOrNull())
+                            ?.let { runCatching { Graph.kiln.openSession(s.project, it.id) }.getOrNull() }
+                        // A run may have started a new chat meanwhile: never replace it with the old one.
+                        if (s.loop.value == null) s.loop.value = last
+                    }
+                }
+            }
+        }
+
+        /**
+         * Start an agent run on a project — from the chat, or from a schedule with no screen at all.
+         * Returns why it couldn't start, or null. [freshChat] starts a new chat for it.
+         */
+        suspend fun startRun(ctx: android.content.Context, name: String, text: String,
+                             attachments: List<app.kiln.agent.Attachment> = emptyList(),
+                             mode: app.kiln.agent.AgentLoop.Mode = app.kiln.agent.AgentLoop.Mode.BUILD, goal: String? = null,
+                             freshChat: Boolean = false, onFinish: () -> Unit = {}): String? {
+            if (Graph.toolchain.state.value !is Toolchain.State.Ready) return "The build tools are still setting up — try again in a moment"
+            val s = projectState(name)
+            val l = s.loop.value?.takeIf { !freshChat } ?: runCatching { Graph.kiln.newSession(s.project) }.getOrElse { return it.message }
+                .also { s.loop.value = it }
+            // One run per project: a second send while it works would be dropped by the loop
+            // and (before) stopped the foreground service under the live run.
+            if (l.running.value) return "Kiln is still working on this app — wait, or tap Stop"
+            active.incrementAndGet()
+            ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java))
+            s.job = runScope.launch {
+                // Kiln in the background: approvals and questions become actionable notifications.
+                val watch = launch {
+                    launch { l.approval.collect { a -> if (a != null) app.kiln.agent.Attention.approval(ctx, name, s.label, a.tool, a.input) else app.kiln.agent.Attention.clear(ctx, name) } }
+                    launch { l.question.collect { q -> if (q != null) app.kiln.agent.Attention.question(ctx, name, s.label, q.text) } }
+                }
+                try { l.send(text, attachments, mode, goal) } finally {
+                    watch.cancel()
+                    val last = l.feed.value.lastOrNull { it.kind == app.kiln.agent.Activity.Kind.ASSISTANT }?.text ?: ""
+                    app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
+                    s.sessions.value = Session.list(Graph.paths.sessions, name)
+                    if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
+                    onFinish()
+                }
+            }
+            return null
+        }
+
         fun slug(label: String): String = label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
             .let { if (it.firstOrNull()?.isLetter() == true) it else "app_$it" }.take(36).trimEnd('_').ifBlank { "app" }
     }
@@ -94,22 +143,12 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         if (warden.value == Warden.Status.READY) installed.value = runCatching { Graph.device.installedApps().toSet() }.getOrDefault(emptySet())
     }
 
-    /** A pack zip dropped in the app's external files dir installs itself. */
     /** Set up or update the bundled toolchain (normally already done at app start; a retry after a failure). */
     fun setupToolchain() = viewModelScope.launch(Dispatchers.IO) {
         Graph.toolchain.syncBundled(Graph.app.assets).onFailure { message.value = "Toolchain: ${it.message}" }
     }
 
-    fun state(name: String): ProjectState = synchronized(states) {
-        states.getOrPut(name) {
-            ProjectState(Project(File(Graph.paths.projects, name))).also { s ->
-                viewModelScope.launch(Dispatchers.IO) {
-                    s.sessions.value = Session.list(Graph.paths.sessions, name)
-                    s.loop.value = (s.sessions.value.firstOrNull { it.title.isNotBlank() } ?: s.sessions.value.firstOrNull())?.let { runCatching { Graph.kiln.openSession(s.project, it.id) }.getOrNull() }
-                }
-            }
-        }
-    }
+    fun state(name: String): ProjectState = projectState(name)
 
     /** New project; returns its name through [then] so the UI can navigate to it. */
     fun createProject(label: String, prompt: String?, then: (String) -> Unit) = viewModelScope.launch(Dispatchers.IO) {
@@ -158,32 +197,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             l.steer(text); return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            if (Graph.toolchain.state.value !is Toolchain.State.Ready) { message.value = "Install the toolchain first (Settings)"; return@launch }
-            val s = state(name)
             warden.value = Graph.warden.status()
-            val l = s.loop.value ?: runCatching { Graph.kiln.newSession(s.project) }.getOrElse { message.value = it.message; return@launch }
-                .also { s.loop.value = it }
-            // One run per project: a second send while it works would be dropped by the loop
-            // and (before) stopped the foreground service under the live run.
-            if (l.running.value) { message.value = "Kiln is still working on this app — wait, or tap Stop"; return@launch }
-            val ctx = getApplication<Application>()
-            active.incrementAndGet()
-            ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java))
-            s.job = runScope.launch {
-                // Kiln in the background: approvals and questions become actionable notifications.
-                val watch = launch {
-                    launch { l.approval.collect { a -> if (a != null) app.kiln.agent.Attention.approval(ctx, name, s.label, a.tool, a.input) else app.kiln.agent.Attention.clear(ctx, name) } }
-                    launch { l.question.collect { q -> if (q != null) app.kiln.agent.Attention.question(ctx, name, s.label, q.text) } }
-                }
-                try { l.send(text, attachments, mode, goal) } finally {
-                    watch.cancel()
-                    val last = l.feed.value.lastOrNull { it.kind == app.kiln.agent.Activity.Kind.ASSISTANT }?.text ?: ""
-                    app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
-                    s.sessions.value = Session.list(Graph.paths.sessions, name)
-                    if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
-                    refresh()
-                }
-            }
+            startRun(getApplication(), name, text, attachments, mode, goal, onFinish = { refresh() })?.let { message.value = it }
         }
     }
 
