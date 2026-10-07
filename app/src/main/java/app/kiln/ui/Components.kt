@@ -86,12 +86,13 @@ fun Dot(color: Color, modifier: Modifier = Modifier) = Box(modifier.size(8.dp).c
 /** Labeled single-line field in a Nocturne inset well. */
 @Composable
 fun KField(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier,
-           mono: Boolean = false, hint: String = "", singleLine: Boolean = true) {
+           mono: Boolean = false, hint: String = "", singleLine: Boolean = true, secret: Boolean = false) {
     androidx.compose.foundation.layout.Column(modifier.fillMaxWidth()) {
         if (label.isNotEmpty()) { Text(label, style = T.label); Spacer(Modifier.height(4.dp)) }
         Box(Modifier.fillMaxWidth().vInset().padding(horizontal = 12.dp, vertical = 10.dp)) {
             if (value.isEmpty() && hint.isNotEmpty()) Text(hint, style = (if (mono) T.mono else T.body).copy(color = N.textMuted))
             BasicTextField(value, onChange, singleLine = singleLine, cursorBrush = SolidColor(N.accent),
+                visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
                 textStyle = if (mono) T.mono.copy(color = N.text) else T.body, modifier = Modifier.fillMaxWidth().fieldLabel(label.ifEmpty { hint }))
         }
     }

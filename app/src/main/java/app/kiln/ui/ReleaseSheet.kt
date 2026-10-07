@@ -1,6 +1,8 @@
 package app.kiln.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -51,7 +53,7 @@ fun ReleaseSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
     }
 
     ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = N.surface) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Release ${ps.label}", style = T.cardTitle)
             Text("A release build isn't debuggable and is signed with this app's own key.", style = T.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -75,6 +77,8 @@ fun ReleaseSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
                     }
                 }
             }
+            PlaySection(vm, ps, versionName, versionCode)
+            GitHubSection(vm, ps)
             Column(Modifier.fillMaxWidth().vCard(N.shapeLg, N.warn.copy(alpha = 0.4f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Signing key", style = T.subtitle)
                 Text("Every update must be signed with the same key. Keep a copy somewhere safe and private — " +
@@ -87,5 +91,97 @@ fun ReleaseSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PlaySection(vm: KilnVM, ps: ProjectState, versionName: String, versionCode: String) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var email by remember { mutableStateOf<String?>(null) }
+    var notes by remember { mutableStateOf("") }
+    var step by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { email = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.playAccount() } }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val json = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { String(it.readNBytes(65_536)) } }.getOrNull()
+        vm.savePlayKey(json ?: "").onSuccess { email = it; error = null }.onFailure { error = it.message }
+    }
+    Column(Modifier.fillMaxWidth().vCard(N.shapeLg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Google Play · internal testing", style = T.subtitle)
+        val e = email
+        if (e == null) {
+            Text("Send a bundle straight to your testers. You need a service-account key (JSON) that's invited in Play Console " +
+                "with release rights, and the app must already exist there (upload its first bundle by hand).", style = T.bodySmall)
+            KButton("Add key file") { pick.launch(arrayOf("application/json", "*/*")) }
+        } else {
+            Text("Signed in as $e", style = T.label)
+            KField("What's new (optional)", notes, { notes = it }, hint = "Release notes for testers", singleLine = false)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KButton("Upload", Tone.Accent) {
+                    val code = versionCode.toIntOrNull() ?: run { error = "Set a version code"; return@KButton }
+                    if (step != null) return@KButton
+                    error = null; result = null; step = "Starting…"
+                    scope.launch {
+                        vm.uploadToPlay(ps.project.name, versionName.trim(), code, notes) { step = it }
+                            .onSuccess { result = it }.onFailure { error = it.message }
+                        step = null
+                    }
+                }
+                KButton("Remove key") { vm.savePlayKey(null); email = null }
+            }
+        }
+        step?.let { Text(it, style = T.label.copy(color = N.accent2)) }
+        result?.let { Text(it, style = T.bodySmall.copy(color = N.ok)) }
+        error?.let { Text(it, style = T.bodySmall.copy(color = N.danger)) }
+    }
+}
+
+@Composable
+private fun GitHubSection(vm: KilnVM, ps: ProjectState) {
+    val scope = rememberCoroutineScope()
+    val name = ps.project.name
+    var login by remember { mutableStateOf<String?>(null) }
+    var checked by remember { mutableStateOf(false) }
+    var token by remember { mutableStateOf("") }
+    var repo by remember { mutableStateOf(vm.githubRepo(name)) }
+    var message by remember { mutableStateOf("") }
+    var step by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { login = vm.githubLogin(); checked = true }
+    fun busy(label: String, work: suspend () -> Result<String>) {
+        if (step != null) return
+        error = null; result = null; step = label
+        scope.launch { work().onSuccess { result = it }.onFailure { error = it.message }; step = null }
+    }
+    Column(Modifier.fillMaxWidth().vCard(N.shapeLg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("GitHub", style = T.subtitle)
+        val l = login
+        if (!checked) Text("Checking…", style = T.label)
+        else if (l == null) {
+            Text("Keep the source in a repository. Use a fine-grained token with Contents read & write " +
+                "(and Administration to let Kiln create the repository).", style = T.bodySmall)
+            KField("", token, { token = it }, hint = "Personal access token", mono = true, secret = true)
+            KButton("Save token", Tone.Accent) {
+                scope.launch { vm.saveGithubToken(token).onSuccess { login = it; token = ""; error = null }.onFailure { error = it.message } }
+            }
+        } else {
+            Text("Signed in as @$l", style = T.label)
+            KField("Repository", repo, { repo = it.trim(); vm.setGithubRepo(name, it) }, hint = "$l/${name.replace('_', '-')}", mono = true)
+            KField("", message, { message = it }, hint = "What changed (commit message)")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KButton("Push", Tone.Accent) { busy("Pushing…") { vm.pushToGithub(name, message) { step = it } } }
+                if (repo.isBlank()) KButton("Create private repo") {
+                    busy("Creating…") { vm.createGithubRepo(name).map { repo = it; "Created $it" } }
+                }
+                KButton("Sign out") { scope.launch { vm.saveGithubToken(null); login = null } }
+            }
+        }
+        step?.let { Text(it, style = T.label.copy(color = N.accent2)) }
+        result?.let { Text(it, style = T.bodySmall.copy(color = N.ok)) }
+        error?.let { Text(it, style = T.bodySmall.copy(color = N.danger)) }
     }
 }

@@ -288,4 +288,13 @@ class CoreTest {
         assertEquals(1, issues.count { "cleartext" in it })
         assertTrue(issues.any { it.startsWith("src/Api.kt:1") })
     }
+
+    @Test fun `git blob ids match git and the bundle config is valid protobuf`() {
+        // printf 'hello' + newline | git hash-object --stdin
+        assertEquals("ce013625030ba8dba906f756967f9e9ca394464a", app.kiln.publish.GitHubSync.gitBlobSha(("hello" + 10.toChar()).toByteArray()))
+        assertEquals("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", app.kiln.publish.GitHubSync.gitBlobSha(ByteArray(0)))
+        val cfg = app.kiln.build.AabPackager.bundleConfig()
+        assertEquals(0x0A, cfg[0].toInt()); assertEquals(cfg.size - 2, cfg[1].toInt())
+        assertEquals(app.kiln.build.AabPackager.BUNDLETOOL_VERSION, String(cfg, 4, cfg.size - 4))
+    }
 }

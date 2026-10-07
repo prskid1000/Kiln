@@ -64,3 +64,69 @@ fun shareFile(ctx: Context, f: File, mime: String, title: String) {
     send.clipData = android.content.ClipData.newRawUri(f.name, uri)
     ctx.startActivity(Intent.createChooser(send, title).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
 }
+
+// Google Play and GitHub. Their credentials live in the Keystore-backed secrets store, never in
+// project files, settings, transcripts or logs.
+
+private const val PLAY_KEY = "play_service_account"
+private const val GITHUB_TOKEN = "github_token"
+
+fun KilnVM.playAccount(): String? = Graph.secrets.get(PLAY_KEY)?.let { runCatching { app.kiln.publish.PlayPublisher(it).email }.getOrNull() }
+
+/** Keep a service-account key; returns its email, or an error. */
+fun KilnVM.savePlayKey(json: String?): Result<String?> = runCatching {
+    if (json == null) { Graph.secrets.put(PLAY_KEY, null); return@runCatching null }
+    val email = app.kiln.publish.PlayPublisher(json).email
+    Graph.secrets.put(PLAY_KEY, json); email
+}
+
+/** Build a bundle with the given version and release it to Play's internal testing track. */
+suspend fun KilnVM.uploadToPlay(name: String, versionName: String, versionCode: Int, notes: String, onStep: (String) -> Unit): Result<String> {
+    val json = Graph.secrets.get(PLAY_KEY) ?: return Result.failure(IllegalStateException("Add a service-account key first"))
+    val aab = buildRelease(name, BuildEngine.Kind.RELEASE_AAB, versionName, versionCode, onStep).getOrElse { return Result.failure(it) }
+    return withContext(Dispatchers.IO) {
+        runCatching {
+            val code = app.kiln.publish.PlayPublisher(json).upload(state(name).pkg, aab, "internal", notes, onStep)
+            "Version $code is on the internal testing track"
+        }
+    }
+}
+
+suspend fun KilnVM.githubLogin(): String? = withContext(Dispatchers.IO) {
+    Graph.secrets.get(GITHUB_TOKEN)?.let { runCatching { app.kiln.publish.GitHubSync(it).login() }.getOrNull() }
+}
+
+suspend fun KilnVM.saveGithubToken(token: String?): Result<String?> = withContext(Dispatchers.IO) {
+    runCatching {
+        if (token.isNullOrBlank()) { Graph.secrets.put(GITHUB_TOKEN, null); return@runCatching null }
+        val login = app.kiln.publish.GitHubSync(token.trim()).login()
+        Graph.secrets.put(GITHUB_TOKEN, token.trim()); login
+    }
+}
+
+/** The repository this project syncs to ("owner/name"), kept in .kiln (which is never pushed). */
+fun KilnVM.githubRepo(name: String): String =
+    runCatching { File(state(name).project.kilnDir, "github.txt").readText().trim() }.getOrDefault("")
+
+fun KilnVM.setGithubRepo(name: String, repo: String) {
+    val p = state(name).project
+    p.kilnDir.mkdirs(); File(p.kilnDir, "github.txt").writeText(repo.trim())
+}
+
+suspend fun KilnVM.createGithubRepo(name: String): Result<String> = withContext(Dispatchers.IO) {
+    runCatching {
+        val token = Graph.secrets.get(GITHUB_TOKEN) ?: error("Add a GitHub token first")
+        val s = state(name)
+        app.kiln.publish.GitHubSync(token).createRepo(s.project.name.replace('_', '-'), "${s.label} — an Android app built with Kiln")
+            .also { setGithubRepo(name, it) }
+    }
+}
+
+suspend fun KilnVM.pushToGithub(name: String, message: String, onStep: (String) -> Unit): Result<String> = withContext(Dispatchers.IO) {
+    runCatching {
+        val token = Graph.secrets.get(GITHUB_TOKEN) ?: error("Add a GitHub token first")
+        val repo = githubRepo(name).ifBlank { error("Set the repository first") }
+        app.kiln.publish.GitHubSync(token).push(state(name).project, repo, message.ifBlank { "Update from Kiln" }, onStep)
+            ?.let { "Pushed: $it" } ?: "Nothing changed since the last push"
+    }
+}
