@@ -266,3 +266,26 @@ class SaveScreenshotTool(w: Warden, d: Device) : DeviceTool(w, d) {
         return ToolResult.ok("saved $path (${o.outWidth}x${o.outHeight})", "saved $path")
     }
 }
+
+/** Finds deferred tools (from large MCP servers) by keyword and loads them into the session. */
+class ToolSearchTool(private val hidden: List<Tool>) : Tool {
+    override val name = "tool_search"
+    override val description = "Find and load more tools. ${hidden.size} tools from connected MCP servers " +
+        "(${hidden.map { it.name.substringBefore("__") }.distinct().joinToString()}) are hidden until you search: give keywords for " +
+        "what you need; matching tools become callable from your next step."
+    override val schema = schema { str("query", "Keywords, e.g. \"create issue\" or \"query database\".") }
+    override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
+    override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
+        val words = (input.str("query") ?: "").lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 1 }
+        if (words.isEmpty()) return ToolResult.error("give some keywords")
+        val hits = hidden.map { t ->
+            val name = t.name.lowercase(); val desc = t.description.lowercase()
+            t to words.sumOf { w -> (if (w in name) 3 else 0) + (if (w in desc) 1 else 0) }
+        }.filter { it.second > 0 }.sortedByDescending { it.second }.take(5).map { it.first }
+        if (hits.isEmpty()) return ToolResult.ok("No tool matches \"${input.str("query")}\". Hidden tools: " +
+            hidden.joinToString { it.name }.take(1500), "no match")
+        hits.forEach { ctx.state.loadedTools += it.name }
+        return ToolResult.ok("Loaded — callable from your next step:\n" +
+            hits.joinToString("\n") { "- ${it.name}: ${it.description.take(200)}" }, "loaded ${plural(hits.size, "tool")}")
+    }
+}

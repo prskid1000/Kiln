@@ -103,6 +103,9 @@ class Kiln(
         val extra = mutableListOf<Tool>()
         extra += CommandTool.load(listOf(File(paths.files, "tools.d")), warden) + CommandTool.load(listOf(File(project.kilnDir, "tools.d")), warden, trusted = false)
         for (srv in cfg.mcpServers.filter { it.enabled }) runCatching { extra += McpClient(srv).connect() }
+        // Many MCP tools would bloat every request: hold them back behind tool_search.
+        val mcp = extra.filterIsInstance<app.kiln.tools.McpTool>()
+        if (mcp.size > DEFER_MCP_OVER) mcp.forEach { it.deferred = true }
         val base = builtins()
         val registry = ToolRegistry(base)
         val brokerReady = warden.status() == Warden.Status.READY
@@ -114,7 +117,9 @@ class Kiln(
         val qaTools = tools.filter { it.name in QA_TOOLS }
         val agentDevice = if (settings.value.backgroundTesting) testDevice else device
         val qa = app.kiln.tools.QaCheckTool({ criteria -> qaTask(project, registry, qaTools, criteria) }, agentDevice)
-        tools = (tools + SubagentTool(this, project, registry, readOnly) + qa).sortedBy { it.name }
+        val deferred = tools.filter { it.deferred }
+        tools = (tools + SubagentTool(this, project, registry, readOnly) + qa +
+            listOfNotNull(deferred.takeIf { it.isNotEmpty() }?.let { app.kiln.tools.ToolSearchTool(it) })).sortedBy { it.name }
         ToolRegistry.validateNames(tools)
         return registry to tools
     }
@@ -161,6 +166,9 @@ class SubagentTool(private val kiln: Kiln, private val project: Project, private
         return ToolResult.ok(ctx.spill(answer), "subagent: ${usage.output} tokens out")
     }
 }
+
+/** More MCP tools than this are deferred behind tool_search. */
+private const val DEFER_MCP_OVER = 8
 
 /** What the QA agent may use: look at and operate the app, read the code, never change it. */
 private val QA_TOOLS = setOf("launch", "screenshot", "ui_tree", "tap", "type_text", "swipe", "press_key", "wait_for",

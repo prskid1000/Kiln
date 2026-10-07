@@ -43,6 +43,8 @@ class SessionState {
     var todos: List<Todo> = emptyList()
     var lastBuild: BuildResult? = null
     var launchMarker: Pair<String, String>? = null
+    /** Deferred tools tool_search has loaded into this session. */
+    val loadedTools: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     data class Todo(val text: String, val status: String)
 }
 
@@ -69,6 +71,8 @@ interface Tool {
     val schema: JsonObject
     val traits: Set<Trait>
     val timeoutMs: Long get() = 120_000
+    /** Held back from the model until `tool_search` finds it (large MCP servers). */
+    val deferred: Boolean get() = false
     suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult
 }
 

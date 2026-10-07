@@ -337,7 +337,9 @@ class AgentLoop(
     private suspend fun stream(adapter: Adapter, profile: Profile, model: String, cfg: Settings): Pair<String, ModelTurn> {
         val origin = "${profile.id}|$model"
         // Plan mode: the model only sees tools that can't change anything.
-        val specs = registry.specs(if (mode == Mode.PLAN) tools.filter { Trait.READ_ONLY in it.traits } else tools)
+        // Deferred tools appear once tool_search has loaded them.
+        val offered = tools.filter { !it.deferred || it.name in state.loadedTools }
+        val specs = registry.specs(if (mode == Mode.PLAN) offered.filter { Trait.READ_ONLY in it.traits } else offered)
         val req = ModelRequest(
             model = model, system = session.meta.systemPrompt,
             messages = ContextFit.fit(session.messages, session.meta.systemPrompt, profile.caps.contextWindow), tools = specs,

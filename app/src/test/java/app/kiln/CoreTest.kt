@@ -297,4 +297,30 @@ class CoreTest {
         assertEquals(0x0A, cfg[0].toInt()); assertEquals(cfg.size - 2, cfg[1].toInt())
         assertEquals(app.kiln.build.AabPackager.BUNDLETOOL_VERSION, String(cfg, 4, cfg.size - 4))
     }
+
+    @Test fun `tool_search loads matching deferred tools into the session`() = kotlinx.coroutines.runBlocking<Unit> {
+        fun fake(n: String, d: String) = object : app.kiln.tools.Tool {
+            override val name = n; override val description = d
+            override val schema = obj(); override val traits = emptySet<app.kiln.tools.Trait>()
+            override val deferred = true
+            override suspend fun run(ctx: app.kiln.tools.ToolContext, input: JsonObject) = app.kiln.tools.ToolResult.ok("x")
+        }
+        val tmp = Files.createTempDirectory("kiln").toFile()
+        val ctx = object : app.kiln.tools.ToolContext {
+            override val project = app.kiln.build.Project(tmp)
+            override val sessionId = "t"
+            override val state = app.kiln.tools.SessionState()
+            override fun progress(line: String) {}
+            override suspend fun ask(question: String, options: List<String>) = ""
+            override fun spill(text: String, maxChars: Int) = text
+            override val spillDir = tmp
+        }
+        val search = app.kiln.tools.ToolSearchTool(listOf(fake("gh__create_issue", "[gh] Create an issue"),
+            fake("gh__list_prs", "[gh] List pull requests"), fake("db__query", "[db] Run a SQL query")))
+        val r = search.run(ctx, obj("query" to "create issue"))
+        assertTrue(r.text.contains("gh__create_issue"))
+        assertEquals(setOf("gh__create_issue"), ctx.state.loadedTools.toSet())
+        assertTrue(search.run(ctx, obj("query" to "weather")).text.contains("No tool matches"))
+        tmp.deleteRecursively()
+    }
 }

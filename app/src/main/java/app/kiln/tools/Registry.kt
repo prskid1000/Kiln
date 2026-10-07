@@ -136,6 +136,7 @@ class McpClient(private val cfg: McpServerConfig) {
 }
 
 class McpTool(private val client: McpClient, server: String, private val remote: String, desc: String, override val schema: JsonObject) : Tool {
+    override var deferred = false
     override val name = "${server}__$remote".replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64)
     override val description = "[$server] $desc"
     override val traits = setOf(Trait.NEEDS_APPROVAL)
