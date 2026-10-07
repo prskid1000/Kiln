@@ -117,10 +117,10 @@ object McpServer {
     private fun handle(method: String, params: JsonObject): JsonElement = when (method) {
         "initialize" -> obj("protocolVersion" to "2025-06-18", "capabilities" to obj("tools" to obj()),
             "serverInfo" to obj("name" to "kiln", "version" to "0.1"),
-            "instructions" to "Kiln builds Android apps on this phone. Every tool takes `project` (a Kiln project name). " +
-                "Kit reference: call kit_docs.")
+            "instructions" to "Kiln builds Android apps on this phone. Start with list_projects (or create_project); every " +
+                "other tool takes `project`, a project name from that list. Kit reference: call kit_docs.")
         "ping" -> obj()
-        "tools/list" -> obj("tools" to JsonArray(tools().map { t ->
+        "tools/list" -> obj("tools" to JsonArray(PROJECT_TOOLS + tools().map { t ->
             val props = (t.schema["properties"] as? JsonObject ?: obj()).toMutableMap()
             props["project"] = obj("type" to "string", "description" to "Kiln project name (Projects folder).")
             val req = ((t.schema["required"] as? JsonArray)?.toList() ?: emptyList()) + JsonPrimitive("project")
@@ -130,6 +130,7 @@ object McpServer {
         "tools/call" -> {
             val name = params.str("name") ?: error("missing name")
             val args = params["arguments"] as? JsonObject ?: obj()
+            projectTool(name, args)?.let { return@handle it }
             val projectName = args.str("project") ?: error("missing project")
             val project = Project(File(Graph.paths.projects, projectName)).also { require(it.metaFile.isFile) { "no project $projectName" } }
             val tool = tools().firstOrNull { it.name == name } ?: error("unknown tool $name")
@@ -141,10 +142,38 @@ object McpServer {
         else -> error("unsupported method $method")
     }
 
+    /** Managing projects: what a remote agent needs before any per-project tool. */
+    private val PROJECT_TOOLS = listOf(
+        obj("name" to "list_projects", "description" to "The Kiln projects on this phone: name (pass it as `project`), label, package.",
+            "inputSchema" to obj("type" to "object", "properties" to obj())),
+        obj("name" to "create_project", "description" to "Create a new Kiln project from the Compose template. Returns its name.",
+            "inputSchema" to obj("type" to "object", "properties" to obj("label" to obj("type" to "string", "description" to "App name, e.g. \"Habit Tracker\".")),
+                "required" to JsonArray(listOf(JsonPrimitive("label"))))),
+    )
+
+    private fun projectTool(name: String, args: JsonObject): JsonElement? {
+        fun text(t: String, error: Boolean = false) = obj("content" to JsonArray(listOf(obj("type" to "text", "text" to t))), "isError" to error)
+        return when (name) {
+            "list_projects" -> text(Graph.paths.projects.listFiles().orEmpty()
+                .filter { File(it, "kiln.json").isFile && !app.kiln.agent.Attempts.isAttempt(it) }.sortedBy { it.name }
+                .joinToString(System.lineSeparator()) { d -> runCatching { Project(d).meta() }.getOrNull()?.let { "${d.name} — ${it.label} (${it.`package`})" } ?: d.name }
+                .ifBlank { "No projects yet — create_project makes one." })
+            "create_project" -> runCatching {
+                val label = args.str("label")?.trim().orEmpty().ifBlank { error("give a label") }
+                val base = app.kiln.ui.KilnVM.slug(label)
+                val pname = generateSequence(1) { it + 1 }.map { if (it == 1) base else "${base}_$it" }.first { !File(Graph.paths.projects, it).exists() }
+                Project.create(Graph.paths.projects, pname, label, File(Graph.toolchain.templates(), "compose"))
+                text("Created $pname (package ${Project.packageFor(pname)}). Pass project=\"$pname\" to the other tools.")
+            }.getOrElse { text("create_project failed: ${it.message}", error = true) }
+            else -> null
+        }
+    }
+
     /** No ask_user / subagent / approvals over MCP: the remote client is the agent and the user. */
     private fun tools(): List<Tool> = runBlocking {
-        val any = Graph.paths.projects.listFiles()?.firstOrNull { File(it, "kiln.json").isFile }
-        if (any == null) emptyList() else Graph.kiln.tools(Project(any)).second
+        // The tool set doesn't depend on which project: list it even when there are none yet.
+        val any = Graph.paths.projects.listFiles()?.firstOrNull { File(it, "kiln.json").isFile } ?: File(Graph.paths.projects, ".mcp")
+        Graph.kiln.tools(Project(any)).second
             .filter { it.name !in setOf("ask_user", "subagent", "shell") }
     }
 

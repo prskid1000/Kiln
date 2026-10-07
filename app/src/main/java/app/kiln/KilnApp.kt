@@ -15,6 +15,7 @@ import app.kiln.toolchain.ToolHost
 import app.kiln.toolchain.Toolchain
 import app.kiln.build.AppSecrets
 import app.kiln.agent.Schedules
+import app.kiln.mcp.McpServer
 import kotlinx.coroutines.launch
 
 class KilnApp : Application() {
@@ -57,6 +58,10 @@ object Graph {
         kiln = Kiln(paths, toolchain, builds, warden, device, testDevice, providers, settings, Skills(app))
         // The toolchain ships in the APK: install or update whatever changed, off the main thread.
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
-            .launch { toolchain.syncBundled(app.assets); runCatching { Schedules.armAll(app) } }
+            .launch {
+                toolchain.syncBundled(app.assets); runCatching { Schedules.armAll(app) }
+                // The MCP server is a setting: switched on, it runs whenever Kiln's process does.
+                if (settings.value.mcpServe) runCatching { McpServer.start(settings.value.mcpPort) }
+            }
     }
 }

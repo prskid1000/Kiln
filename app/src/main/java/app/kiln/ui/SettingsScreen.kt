@@ -5,6 +5,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Construction
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.Icons
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -56,7 +67,7 @@ fun SettingsScreen(vm: KilnVM, onClose: () -> Unit) {
     editing?.let { androidx.activity.compose.BackHandler { editing = null }; ProfileEditor(it) { editing = null }; return }
     Column(Modifier.fillMaxSize()) {
     KTopBar("Settings", onBack = onClose)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ToolchainCard(vm)
         ModelsCard { editing = it }
@@ -68,28 +79,86 @@ fun SettingsScreen(vm: KilnVM, onClose: () -> Unit) {
     }
 }
 
+/** A settings group: an icon tile, a title, what it's for, then its controls. */
 @Composable
-private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) =
-    Column(Modifier.fillMaxWidth().vCard().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title.uppercase(), style = T.kicker); content()
+private fun Section(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String,
+                    trailing: (@Composable () -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) =
+    Column(Modifier.fillMaxWidth().vCard(N.shapeLg).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(38.dp).clip(N.shapeMd).background(N.accent.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.Icon(icon, null, tint = N.accent2, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = T.cardTitle)
+                Text(subtitle, style = T.label)
+            }
+            trailing?.invoke()
+        }
+        content()
+    }
+
+/** A pill with a coloured dot: Ready, Running, Stopped… */
+@Composable
+private fun StatusPill(text: String, color: androidx.compose.ui.graphics.Color) =
+    Row(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(50)).background(color.copy(alpha = 0.14f))
+        .padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Dot(color, Modifier.size(7.dp)); Spacer(Modifier.width(6.dp)); Text(text, style = T.label.copy(color = color))
+    }
+
+/** One setting on a line: what it is (and why) on the left, its control on the right. */
+@Composable
+private fun SettingRow(title: String, desc: String? = null, control: @Composable () -> Unit) =
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = T.body)
+            desc?.let { Text(it, style = T.label) }
+        }
+        control()
+    }
+
+@Composable
+private fun Toggle(on: Boolean, onChange: (Boolean) -> Unit) =
+    androidx.compose.material3.Switch(on, onChange, colors = androidx.compose.material3.SwitchDefaults.colors(
+        checkedTrackColor = N.accent, checkedThumbColor = N.text, uncheckedTrackColor = N.bg, uncheckedBorderColor = N.divider))
+
+/** A small three-way choice that fits beside a label. */
+@Composable
+private fun MiniSeg(options: List<String>, selected: Int, onSelect: (Int) -> Unit) =
+    Row(Modifier.clip(N.shapeMd).background(N.bg).padding(3.dp)) {
+        options.forEachIndexed { i, o ->
+            val on = i == selected
+            Text(o, style = T.label.copy(color = if (on) N.text else N.textMuted),
+                modifier = Modifier.clip(N.shapeMd).background(if (on) N.accent.copy(alpha = 0.35f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { onSelect(i) }.padding(horizontal = 12.dp, vertical = 7.dp))
+        }
     }
 
 @Composable
 private fun ToolchainCard(vm: KilnVM) {
     val state by vm.toolchain.collectAsStateWithLifecycle()
     // Bundled with the app and set up on launch: nothing to import.
-    Section("Toolchain") {
+    Section(Icons.Rounded.Construction, "Toolchain", "Builds apps right here — bundled with Kiln", trailing = {
+        when (state) {
+            is Toolchain.State.Ready -> StatusPill("Ready", N.ok)
+            is Toolchain.State.Failed -> StatusPill("Failed", N.danger)
+            else -> StatusPill("Setting up", N.warn)
+        }
+    }) {
         when (val s = state) {
-            is Toolchain.State.Ready -> Text("Built in — JDK 21, Kotlin 2.4.20 (Compose), R8, aapt2, app kit. Set ${s.version}.", style = T.bodySmall)
+            is Toolchain.State.Ready -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("JDK 21", "Kotlin 2.4", "Compose", "R8", "aapt2").forEach { KTag(it) }
+            }
             is Toolchain.State.Installing -> {
                 Text("${s.step}…", style = T.bodySmall)
-                LinearProgressIndicator(progress = { if (s.total > 0) s.done.toFloat() / s.total else 0f }, color = N.accent, modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(progress = { if (s.total > 0) s.done.toFloat() / s.total else 0f }, color = N.accent,
+                    trackColor = N.bg, modifier = Modifier.fillMaxWidth())
             }
             is Toolchain.State.Failed -> {
-                Text("Setup didn't finish: ${s.message}", style = T.bodySmall.copy(color = N.danger))
+                Text(s.message, style = T.bodySmall.copy(color = N.danger))
                 KButton("Try again", Tone.Accent) { vm.setupToolchain() }
             }
-            Toolchain.State.Missing -> Text("Setting up…", style = T.bodySmall)
+            Toolchain.State.Missing -> Text("Checking the build tools…", style = T.bodySmall)
         }
     }
 }
@@ -98,35 +167,35 @@ private fun ToolchainCard(vm: KilnVM) {
 private fun ModelsCard(onEdit: (Profile) -> Unit) {
     var roles by remember { mutableStateOf(Graph.providers.roles) }
     val profiles = Graph.providers.profiles
-    Section("Models") {
-        listOf("agent" to "Main agent", "subagent" to "Subagent (cheap helper)").forEach { (role, label) ->
+    Section(Icons.Rounded.AutoAwesome, "Models", "Who writes the code, and who helps") {
+        listOf("agent" to "Main agent", "subagent" to "Helper (cheaper, for research and QA)").forEach { (role, label) ->
             val b = roles[role] ?: RoleBinding("anthropic", "claude-opus-5-5")
             var model by remember(role) { mutableStateOf(b.model) }
-            Text(label, style = T.subtitle)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                profiles.forEach { p ->
-                    KTag(p.id, if (p.id == b.profile) Tone.Accent else Tone.Neutral, Modifier.clickable {
-                        Graph.providers.setRole(role, b.copy(profile = p.id, model = p.models.firstOrNull() ?: model)); roles = Graph.providers.roles
-                        model = roles[role]!!.model
-                    })
+            Column(Modifier.fillMaxWidth().clip(N.shapeMd).background(N.bg.copy(alpha = 0.6f)).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(label, style = T.subtitle)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    profiles.forEach { p ->
+                        KTag(p.label, if (p.id == b.profile) Tone.Accent else Tone.Neutral, Modifier.clickable {
+                            Graph.providers.setRole(role, b.copy(profile = p.id, model = p.models.firstOrNull() ?: model)); roles = Graph.providers.roles
+                            model = roles[role]!!.model
+                        })
+                    }
                 }
+                KField("", model, { model = it; Graph.providers.setRole(role, b.copy(model = it)); roles = Graph.providers.roles },
+                    mono = true, hint = "model id")
             }
-            KField("model", model, { model = it; Graph.providers.setRole(role, b.copy(model = it)); roles = Graph.providers.roles }, mono = true)
-            // Keep the raw text: re-rendering the parsed list ate the comma before a second entry could be typed.
-            var fallbacks by remember(role) { mutableStateOf(b.fallback.joinToString(", ")) }
-            KField("fallbacks (profile:model, comma-separated)", fallbacks, { s ->
-                fallbacks = s
-                Graph.providers.setRole(role, b.copy(fallback = s.split(",").map { it.trim() }.filter { it.isNotEmpty() })); roles = Graph.providers.roles
-            }, mono = true)
         }
         Text("PROVIDERS", style = T.overline)
         profiles.forEach { p ->
-            Row(Modifier.fillMaxWidth().clickable { onEdit(p) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Dot(if (Graph.providers.key(p.id) != null || p.auth == AuthStyle.NONE) N.ok else N.neutral600); Spacer(Modifier.width(8.dp))
+            Row(Modifier.fillMaxWidth().clip(N.shapeMd).clickable { onEdit(p) }.padding(vertical = 8.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Dot(if (Graph.providers.key(p.id) != null || p.auth == AuthStyle.NONE) N.ok else N.neutral600); Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(p.label, style = T.subtitle)
                     Text("${p.protocol.name.lowercase().replace('_', '-')} · ${p.baseUrl}", style = T.monoSmall)
                 }
+                androidx.compose.material3.Icon(Icons.Rounded.ChevronRight, null, tint = N.textMuted)
             }
         }
         // Presets first (Anthropic, OpenAI, OpenRouter, On Device AI, Telecode…), then a blank one.
@@ -211,19 +280,14 @@ private fun ProfileEditor(start: Profile, onDone: () -> Unit) {
 private fun LimitsCard() {
     var s by remember { mutableStateOf(Graph.settings.value) }
     fun save(f: (app.kiln.agent.Settings) -> app.kiln.agent.Settings) { Graph.settings.update(f); s = Graph.settings.value }
-    Section("Limits") {
-        NumField("Max steps per request", s.maxSteps.toString(), { it.toIntOrNull()?.takeIf { n -> n > 0 } }) { n -> save { it.copy(maxSteps = n) } }
-        NumField("Spending cap per chat (USD)", s.sessionUsd.toString(), { it.toDoubleOrNull()?.takeIf { n -> n >= 0 } }) { n -> save { it.copy(sessionUsd = n) } }
-        NumField("Spending cap per day (USD)", s.dailyUsd.toString(), { it.toDoubleOrNull()?.takeIf { n -> n >= 0 } }) { n -> save { it.copy(dailyUsd = n) } }
-        Text("Spent today: $" + "%.3f".format(Graph.settings.spentToday()), style = T.bodySmall)
-        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
-                Text("Test apps in the background", style = T.body)
-                Text("The agent runs and taps the app on a hidden display, so your screen stays yours. Your Run button always uses the real screen.",
-                    style = T.label)
-            }
-            androidx.compose.material3.Switch(s.backgroundTesting, { v -> save { it.copy(backgroundTesting = v) } },
-                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = N.accent))
+    Section(Icons.Rounded.Tune, "Limits & behaviour", "Spent today: $" + "%.3f".format(Graph.settings.spentToday())) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.weight(1f)) { NumField("Max steps", s.maxSteps.toString(), { it.toIntOrNull()?.takeIf { n -> n > 0 } }) { n -> save { it.copy(maxSteps = n) } } }
+            Box(Modifier.weight(1f)) { NumField("Per chat $", s.sessionUsd.toString(), { it.toDoubleOrNull()?.takeIf { n -> n >= 0 } }) { n -> save { it.copy(sessionUsd = n) } } }
+            Box(Modifier.weight(1f)) { NumField("Per day $", s.dailyUsd.toString(), { it.toDoubleOrNull()?.takeIf { n -> n >= 0 } }) { n -> save { it.copy(dailyUsd = n) } } }
+        }
+        SettingRow("Test apps in the background", "The agent uses a hidden screen, so yours stays yours. Run always uses the real screen.") {
+            Toggle(s.backgroundTesting) { v -> save { it.copy(backgroundTesting = v) } }
         }
         Text("Effort (main agent)", style = T.label)
         val levels = listOf("low", "medium", "high", "xhigh", "max")
@@ -234,13 +298,14 @@ private fun LimitsCard() {
 @Composable
 private fun ToolsCard() {
     var s by remember { mutableStateOf(Graph.settings.value) }
-    Section("Tool approval") {
-        Text("Destructive tools ask by default. Change any tool's policy here.", style = T.bodySmall)
-        listOf("shell", "delete", "clear_data", "restore").forEach { tool ->
-            val cur = s.approval[tool] ?: "ask"
-            Text(tool, style = T.mono.copy(color = N.text))
-            SegTabs(listOf("allow" to "", "ask" to "", "deny" to ""), listOf("allow", "ask", "deny").indexOf(cur)) { i ->
-                Graph.settings.update { it.copy(approval = it.approval + (tool to listOf("allow", "ask", "deny")[i])) }; s = Graph.settings.value
+    val choices = listOf("allow", "ask", "deny")
+    Section(Icons.Rounded.VerifiedUser, "Tool approval", "What the agent may do without asking") {
+        listOf("shell" to "Run shell commands", "delete" to "Delete files", "clear_data" to "Clear the app's data",
+            "restore" to "Restore a checkpoint").forEach { (tool, what) ->
+            SettingRow(what, tool) {
+                MiniSeg(choices, choices.indexOf(s.approval[tool] ?: "ask")) { i ->
+                    Graph.settings.update { it.copy(approval = it.approval + (tool to choices[i])) }; s = Graph.settings.value
+                }
             }
         }
     }
@@ -250,36 +315,49 @@ private fun ToolsCard() {
 private fun McpCard() {
     var s by remember { mutableStateOf(Graph.settings.value) }
     var name by remember { mutableStateOf("") }; var url by remember { mutableStateOf("") }; var token by remember { mutableStateOf("") }
+    var adding by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
     val status by McpServer.status.collectAsStateWithLifecycle()
-    Section("MCP") {
-        Text("Serve Kiln's tools over MCP on the tailnet, so Claude Code or Codex on a PC can build on this phone.", style = T.bodySmall)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            KButton(if (s.mcpServe) "Stop server" else "Start server", if (s.mcpServe) Tone.Danger else Tone.Accent) {
-                Graph.settings.update { it.copy(mcpServe = !it.mcpServe) }; s = Graph.settings.value
-                if (s.mcpServe) McpServer.start(s.mcpPort) else McpServer.stop()
-            }
-            if (s.mcpServe) {
-                Spacer(Modifier.width(8.dp))
-                val clip = androidx.compose.ui.platform.LocalClipboardManager.current
-                KButton("Copy setup command") {
-                    // Claude Code: one line that registers this phone with its token.
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    Section(Icons.Rounded.Hub, "MCP", "Let Claude Code or Codex on a PC build on this phone", trailing = {
+        Toggle(s.mcpServe) { on ->
+            Graph.settings.update { it.copy(mcpServe = on) }; s = Graph.settings.value
+            if (on) McpServer.start(s.mcpPort) else McpServer.stop()
+        }
+    }) {
+        if (s.mcpServe) {
+            val up = McpServer.url != null && !status.startsWith("failed") && status != "stopped"
+            Column(Modifier.fillMaxWidth().clip(N.shapeMd).background(N.bg.copy(alpha = 0.6f)).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusPill(if (up) "Running" else "Not running", if (up) N.ok else N.danger)
+                Text(status, style = T.monoSmall)
+                KButton(if (copied) "Copied" else "Copy Claude Code command", Tone.Accent) {
+                    // One line that registers this phone (with its token) in Claude Code.
                     clip.setText(androidx.compose.ui.text.AnnotatedString("claude mcp add --transport http kiln ${McpServer.url} " +
                         "--header \"Authorization: Bearer ${McpServer.token}\""))
+                    copied = true
                 }
             }
         }
-        Text(status, style = T.monoSmall)
-        Text("CONNECTED SERVERS (tools appear in new chats)", style = T.overline)
+        Text("SERVERS KILN USES (their tools appear in new chats)", style = T.overline)
+        if (s.mcpServers.isEmpty() && !adding) Text("None yet.", style = T.label)
         s.mcpServers.forEach { m ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${m.name}  ${m.url}", style = T.monoSmall, modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) { Text(m.name, style = T.subtitle); Text(m.url, style = T.monoSmall) }
                 KButton("Remove", Tone.Danger) { Graph.settings.update { it.copy(mcpServers = it.mcpServers - m) }; s = Graph.settings.value }
             }
         }
-        KField("Name", name, { name = it }); KField("URL", url, { url = it }, mono = true); KField("Bearer token (optional)", token, { token = it }, mono = true)
-        KButton("Add server", enabled = name.isNotBlank() && url.isNotBlank()) {
-            Graph.settings.update { it.copy(mcpServers = it.mcpServers + McpServerConfig(name.trim(), url.trim(), token.trim().ifBlank { null })) }
-            s = Graph.settings.value; name = ""; url = ""; token = ""
+        if (!adding) KButton("Add server") { adding = true }
+        else {
+            KField("Name", name, { name = it }); KField("URL", url, { url = it }, mono = true)
+            KField("Bearer token (optional)", token, { token = it }, mono = true, secret = true)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KButton("Cancel") { adding = false }
+                KButton("Add", Tone.Accent, enabled = name.isNotBlank() && url.isNotBlank()) {
+                    Graph.settings.update { it.copy(mcpServers = it.mcpServers + McpServerConfig(name.trim(), url.trim(), token.trim().ifBlank { null })) }
+                    s = Graph.settings.value; name = ""; url = ""; token = ""; adding = false
+                }
+            }
         }
     }
 }
@@ -288,8 +366,11 @@ private fun McpCard() {
 private fun EvalsCard() {
     val state by Evals.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    Section("Evals") {
-        Text("Build a fixed set of apps from scratch and score them: built, runs without crashing, steps, cost, time. Run after changing models or settings. Uses real API spend.", style = T.bodySmall)
+    Section(Icons.Rounded.Science, "Evals", "A benchmark for your model setup") {
+        Text("Builds six test apps from scratch with your current models (Counter, Todo, Timer, Tabs, Notes, Weather) " +
+            "and scores each: does it build, does it run without crashing, plus steps, cost and time. Run it after changing " +
+            "models or settings to see whether results got better. It takes a while and uses API credit (free with a local model).",
+            style = T.bodySmall)
         KButton(if (state.running) "Running ${state.done}/${state.total}…" else "Run evals", Tone.Accent, enabled = !state.running) {
             scope.launch(Dispatchers.IO) { Evals.run() }
         }
