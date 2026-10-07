@@ -247,3 +247,22 @@ class QaCheckTool(
         return ToolResult(report.trim(), isError = verdict != "PASS", summary = "QA: ${verdict ?: "no verdict"}", video = clip?.path)
     }
 }
+
+/** A full-resolution screenshot saved into the project, for the store listing. */
+class SaveScreenshotTool(w: Warden, d: Device) : DeviceTool(w, d) {
+    override val name = "save_screenshot"
+    override val description = "Save what the app shows now as a full-resolution PNG in the project, under store/ " +
+        "(e.g. store/screenshots/1-home.png) — for the Play listing. Fill the app with realistic content first."
+    override val schema = schema { str("path", "Where to save it, under store/, ending in .png.") }
+    override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
+        val path = input.str("path")?.trim()?.trimStart('/') ?: return ToolResult.error("missing path")
+        if (!path.startsWith("store/") || !path.endsWith(".png")) return ToolResult.error("save under store/ as a .png, e.g. store/screenshots/1-home.png")
+        if (device.foregroundPackage() != pkg(ctx)) return ToolResult.error("${pkg(ctx)} is not on screen — launch it first")
+        val png = device.screenshot(maxSide = 4096) ?: return ToolResult.error("screenshot failed")
+        val f = ctx.project.resolveWritable(path)
+        f.parentFile?.mkdirs(); f.writeBytes(png)
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(png, 0, png.size, o)
+        return ToolResult.ok("saved $path (${o.outWidth}x${o.outHeight})", "saved $path")
+    }
+}

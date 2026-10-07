@@ -130,3 +130,60 @@ suspend fun KilnVM.pushToGithub(name: String, message: String, onStep: (String) 
             ?.let { "Pushed: $it" } ?: "Nothing changed since the last push"
     }
 }
+
+/** What the agent is asked to do for "Prepare store listing". */
+const val STORE_LISTING_PROMPT = "Prepare this app's Google Play listing in store/ (don't change the app's code; if the review " +
+    "finds a real problem, describe the fix and ask me first):\n" +
+    "1. store/listing.md — App name (≤ 30 chars), Short description (≤ 80), Full description (≤ 4000, plain text, " +
+    "benefit-led, no keyword stuffing), Category, and tags.\n" +
+    "2. Run the app, fill it with realistic sample content, and save 4–6 screenshots of its main screens with " +
+    "save_screenshot to store/screenshots/ (1-…png, 2-…png in story order). No debug text or empty states unless that's the point.\n" +
+    "3. store/policy.md — a Play policy review: every permission and why it's needed, Data safety answers (what's " +
+    "collected or shared, encrypted in transit, can users delete it), target audience, ads, and anything likely to " +
+    "get the app rejected.\nThen summarise what's ready and what I still need to do in Play Console."
+
+/** A 1024×500 feature graphic from the app's icon and name, saved as store/feature-graphic.png. */
+suspend fun KilnVM.featureGraphic(name: String): Result<File> = withContext(Dispatchers.IO) {
+    runCatching {
+        val s = state(name)
+        // From the built APK: Kiln can't look other apps up by package name (package visibility).
+        val apk = File(s.project.buildDir, "${s.pkg}.apk")
+        val icon = runCatching {
+            val pm = Graph.app.packageManager
+            val info = pm.getPackageArchiveInfo(apk.path, 0)!!.applicationInfo!!
+            info.sourceDir = apk.path; info.publicSourceDir = apk.path
+            info.loadIcon(pm)
+        }.getOrNull() ?: error("Run the app once first — the icon comes from its build")
+        val w = 1024; val h = 500
+        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        c.drawPaint(android.graphics.Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, w.toFloat(), h.toFloat(),
+                android.graphics.Color.rgb(46, 38, 92), android.graphics.Color.rgb(18, 20, 33), android.graphics.Shader.TileMode.CLAMP)
+        })
+        val side = 260
+        // Clipped like a launcher icon: an adaptive icon's layers are full-bleed squares.
+        val top = (h - side) / 2f
+        c.save()
+        c.clipPath(android.graphics.Path().apply { addRoundRect(96f, top, 96f + side, top + side, 64f, 64f, android.graphics.Path.Direction.CW) })
+        icon.setBounds(96, top.toInt(), 96 + side, top.toInt() + side); icon.draw(c)
+        c.restore()
+        val title = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE; textSize = 68f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        val x = 96f + side + 64f; val maxW = w - x - 64f
+        var label = s.label
+        while (title.measureText(label) > maxW && title.textSize > 36f) title.textSize -= 2f
+        while (title.measureText(label) > maxW && label.length > 4) label = label.dropLast(2) + "…"
+        c.drawText(label, x, h / 2f + title.textSize / 3f, title)
+        val out = s.project.resolveWritable("store/feature-graphic.png")
+        out.parentFile?.mkdirs()
+        out.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        out
+    }
+}
+
+fun KilnVM.storeFiles(name: String): List<String> {
+    val p = state(name).project
+    return File(p.dir, "store").takeIf { it.isDirectory }?.walkTopDown()?.filter { it.isFile }?.map { p.rel(it) }?.sorted()?.toList() ?: emptyList()
+}

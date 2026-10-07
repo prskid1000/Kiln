@@ -92,7 +92,7 @@ class Kiln(
         KeyTool(warden, device), WaitForTool(warden, device), DumpsysTool(warden, device), ShellTool(warden, device),
         SdkLookupTool(classIndex), KitDocsTool(toolchain), WebFetchTool(),
         app.kiln.tools.LoadSkillTool(skills), app.kiln.tools.ProposeRuleTool(), app.kiln.tools.SecurityCheckTool(),
-        app.kiln.tools.CompareScreenTool(warden, device), app.kiln.tools.UiCheckTool(warden, device),
+        app.kiln.tools.CompareScreenTool(warden, device), app.kiln.tools.UiCheckTool(warden, device), app.kiln.tools.SaveScreenshotTool(warden, device),
         TodoTool(), AskUserTool(), CheckpointTool(), RestoreTool(), MemoryTool(),
         )
     }

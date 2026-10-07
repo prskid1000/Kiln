@@ -77,6 +77,7 @@ fun ReleaseSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
                     }
                 }
             }
+            StoreSection(vm, ps, onDismiss)
             PlaySection(vm, ps, versionName, versionCode)
             GitHubSection(vm, ps)
             Column(Modifier.fillMaxWidth().vCard(N.shapeLg, N.warn.copy(alpha = 0.4f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -182,6 +183,27 @@ private fun GitHubSection(vm: KilnVM, ps: ProjectState) {
         }
         step?.let { Text(it, style = T.label.copy(color = N.accent2)) }
         result?.let { Text(it, style = T.bodySmall.copy(color = N.ok)) }
+        error?.let { Text(it, style = T.bodySmall.copy(color = N.danger)) }
+    }
+}
+
+@Composable
+private fun StoreSection(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var files by remember { mutableStateOf(vm.storeFiles(ps.project.name)) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxWidth().vCard(N.shapeLg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Store listing", style = T.subtitle)
+        Text(if (files.isEmpty()) "Kiln writes the listing text, takes the screenshots and reviews Play policy, all into store/."
+            else files.joinToString(" · ") { it.removePrefix("store/") }, style = T.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KButton(if ("store/listing.md" in files) "Redo listing" else "Prepare listing", Tone.Accent) {
+                vm.send(ps.project.name, STORE_LISTING_PROMPT); onDismiss()
+            }
+            KButton("Feature graphic") {
+                scope.launch { vm.featureGraphic(ps.project.name).onSuccess { files = vm.storeFiles(ps.project.name); error = null }.onFailure { error = it.message } }
+            }
+        }
         error?.let { Text(it, style = T.bodySmall.copy(color = N.danger)) }
     }
 }

@@ -149,6 +149,8 @@ class ToolsOnDeviceTest {
             Case("run_app", """{"wait_ms":3000}""", expect = "running", images = true),
             Case("screenshot", "{}", expect = "screen pixels", images = true),
             Case("ui_check", "{}", expect = "checked"),
+            Case("save_screenshot", """{"path":"store/screenshots/1-home.png"}""", expect = "saved store/screenshots/1-home.png"),
+            Case("save_screenshot", """{"path":"src/x.png"}""", expectError = true, expect = "under store/"),
             Case("compare_screen", """{"target":"attachments/target.png"}""", expect = "Similarity", images = true),
             Case("compare_screen", """{"target":"kiln.json"}""", expectError = true, expect = "not an image"),
             Case("ui_tree", "{}", expect = "Built on this phone"),
