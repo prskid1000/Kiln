@@ -1,6 +1,8 @@
 package app.kiln.kit
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -12,6 +14,7 @@ import org.json.JSONObject
  *
  * Kiln's `last_crash` tool reads exactly this line (and falls back to the
  * standard FATAL EXCEPTION block for crashes before the hook was installed).
+ * In a development build the same report also goes to Kiln, for a "Fix with Kiln" notification.
  */
 object KilnCrash {
     const val TAG = "KILN-CRASH"
@@ -21,6 +24,7 @@ object KilnCrash {
         if (installed) return
         installed = true
         val pkg = context.packageName
+        val debuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
@@ -34,6 +38,11 @@ object KilnCrash {
                     .put("rootType", root.javaClass.name).put("rootMessage", root.message ?: "")
                     .put("frames", frames)
                 Log.e(TAG, line.toString())
+                // A development build tells Kiln on this phone, which offers to fix it. Release builds
+                // never do: on someone else's phone the report would go to whatever app is there.
+                if (debuggable) context.sendBroadcast(Intent("app.kiln.CRASH")
+                    .setClassName("app.kiln", "app.kiln.agent.CrashReceiver")
+                    .putExtra("pkg", pkg).putExtra("report", line.toString()))
             }
             previous?.uncaughtException(thread, error)
         }

@@ -36,6 +36,10 @@
         <!-- Keeps an agent run (and the MCP server) alive with the screen off. -->
         <!-- Allow / Deny / Answer from a notification while the agent waits on the user. -->
         <receiver android:name=".agent.AttentionReceiver" android:exported="false" />
+        <!-- Crash reports from development builds of the apps Kiln made (the kit's crash hook). -->
+        <receiver android:name=".agent.CrashReceiver" android:exported="true">
+            <intent-filter><action android:name="app.kiln.CRASH" /></intent-filter>
+        </receiver>
         <!-- Shares release builds and key backups with other apps (Files, Drive, email). -->
         <provider
             android:name="androidx.core.content.FileProvider"

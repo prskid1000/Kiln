@@ -56,6 +56,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     val installed = MutableStateFlow<Set<String>>(emptySet())
     val warden = MutableStateFlow(Warden.Status.NOT_RUNNING)
     val message = MutableStateFlow<String?>(null)
+    /** A project to open (from a notification). */
+    val openRequest = MutableStateFlow<String?>(null)
     /**
      * Runs outlive the screen: Back on the home screen (which finishes the activity on Android 11)
      * or a second activity from the notification must not cancel or duplicate a run. Project state

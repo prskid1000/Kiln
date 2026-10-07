@@ -103,6 +103,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         setContent { KilnTheme { App(vm) } }
+        handle(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); handle(intent) }
+
+    /** "Fix with Kiln" on a crash notification: open that project with the crash in the message box. */
+    private fun handle(intent: android.content.Intent?) {
+        val project = intent?.getStringExtra(EXTRA_PROJECT) ?: return
+        intent.getStringExtra(EXTRA_DRAFT)?.let { vm.state(project).draft.value = it }
+        vm.openRequest.value = project
+        intent.removeExtra(EXTRA_PROJECT)
+    }
+
+    companion object {
+        const val EXTRA_PROJECT = "app.kiln.extra.PROJECT"
+        const val EXTRA_DRAFT = "app.kiln.extra.DRAFT"
     }
 
     override fun onStart() { super.onStart(); app.kiln.agent.Attention.visible = true }
@@ -129,6 +145,12 @@ private fun App(vm: KilnVM) {
         }
     }
     LaunchedEffect(message) { message?.let { vm.message.value = null; snack.showSnackbar(it) } }
+    val openRequest by vm.openRequest.collectAsStateWithLifecycle()
+    LaunchedEffect(openRequest) {
+        val p = openRequest ?: return@LaunchedEffect
+        vm.openRequest.value = null
+        if ((backStack.lastOrNull() as? ProjectKey)?.name != p) { while (backStack.size > 1) backStack.removeLastOrNull(); backStack.add(ProjectKey(p)) }
+    }
     Box(Modifier.fillMaxSize().background(N.bg).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
         // Never pop the last entry: a fast double back-tap would empty the stack and crash NavDisplay.
         val back = { if (backStack.size > 1) backStack.removeLastOrNull() }
