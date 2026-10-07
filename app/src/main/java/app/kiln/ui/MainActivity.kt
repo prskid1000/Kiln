@@ -63,6 +63,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -301,6 +302,7 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf(false) }
+    var release by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val isInstalled = ps.pkg in installed
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -318,6 +320,9 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                 DropdownMenu(menu, { menu = false }, containerColor = N.surfaceHi) {
                     DropdownMenuItem(text = { Text("New chat", style = T.body) }, leadingIcon = { Icon(Icons.Rounded.Add, null, tint = N.textLabel) },
                         onClick = { menu = false; vm.newChat(name); tab = 0 })
+                    DropdownMenuItem(text = { Text("Release…", style = T.body) },
+                        leadingIcon = { Icon(Icons.Rounded.RocketLaunch, null, tint = N.textLabel) }, enabled = !running,
+                        onClick = { menu = false; release = true })
                     DropdownMenuItem(text = { Text("Share chat", style = T.body) },
                         leadingIcon = { Icon(Icons.Rounded.Share, null, tint = N.textLabel) }, enabled = loop != null,
                         onClick = {
@@ -359,6 +364,7 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
         }
     }
 
+    if (release) ReleaseSheet(vm, ps) { release = false }
     if (preview) PreviewSheet(vm, ps, onDismiss = { preview = false }) { picked -> ps.draft.value = picked; preview = false; tab = 0 }
     if (history) ModalBottomSheet({ history = false }, containerColor = N.surface) {
         val sessions by ps.sessions.collectAsStateWithLifecycle()

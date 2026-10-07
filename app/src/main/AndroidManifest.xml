@@ -36,6 +36,14 @@
         <!-- Keeps an agent run (and the MCP server) alive with the screen off. -->
         <!-- Allow / Deny / Answer from a notification while the agent waits on the user. -->
         <receiver android:name=".agent.AttentionReceiver" android:exported="false" />
+        <!-- Shares release builds and key backups with other apps (Files, Drive, email). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="app.kiln.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/shared_paths" />
+        </provider>
         <service
             android:name=".agent.RunService"
             android:exported="false"
