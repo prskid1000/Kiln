@@ -60,6 +60,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         }?.sortedByDescending { it.edited } ?: emptyList()
 
     fun refresh() = viewModelScope.launch(Dispatchers.IO) {
+        IconCache.version.value++
         projects.value = listProjects()
         warden.value = Graph.warden.status()
         if (warden.value == Warden.Status.READY) installed.value = runCatching { Graph.device.installedApps().toSet() }.getOrDefault(emptySet())
@@ -83,7 +84,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             ProjectState(Project(File(Graph.paths.projects, name))).also { s ->
                 viewModelScope.launch(Dispatchers.IO) {
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
-                    s.loop.value = s.sessions.value.firstOrNull()?.let { runCatching { Graph.kiln.openSession(s.project, it.id) }.getOrNull() }
+                    s.loop.value = (s.sessions.value.firstOrNull { it.title.isNotBlank() } ?: s.sessions.value.firstOrNull())?.let { runCatching { Graph.kiln.openSession(s.project, it.id) }.getOrNull() }
                 }
             }
         }
@@ -167,7 +168,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             s.runStep.value = "Launching…"
             Graph.device.launch(s.pkg)
             refresh()
-        } finally { s.runStep.value = null }
+        } finally { s.runStep.value = null; IconCache.version.value++ }
     }
 
     fun uninstall(name: String) = viewModelScope.launch(Dispatchers.IO) {

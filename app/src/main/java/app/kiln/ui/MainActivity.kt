@@ -34,6 +34,8 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.History
@@ -144,7 +146,7 @@ private fun ProjectsScreen(vm: KilnVM, open: (String) -> Unit, settings: () -> U
             }, "Check again") { vm.refresh() }
         }
         item { NewAppCard(enabled = toolchain is Toolchain.State.Ready) { label, prompt -> vm.createProject(label, prompt, open) } }
-        if (projects.isNotEmpty()) item { Overline("Your apps", Modifier.padding(start = 20.dp, top = 12.dp)) }
+        if (projects.isNotEmpty()) item { Overline("Your apps", Modifier.padding(start = 16.dp, top = 12.dp)) }
         items(projects, key = { it.project.name }) { p ->
             ProjectCard(p, installed = p.pkg in installed, onOpen = { open(p.project.name) }, onDelete = { deleting = p })
         }
@@ -189,7 +191,7 @@ private fun NewAppCard(enabled: Boolean, onCreate: (label: String, prompt: Strin
         Box(Modifier.fillMaxWidth().heightIn(min = 72.dp)) {
             if (prompt.isEmpty()) Text("A habit tracker with a weekly chart and a daily reminder…", style = T.body.copy(color = N.textMuted))
             BasicTextField(prompt, { prompt = it }, textStyle = T.body, cursorBrush = SolidColor(N.accent),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp, max = 200.dp))
+                modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp, max = 200.dp).fieldLabel("App description"))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(N.bg).border(1.dp, N.divider, RoundedCornerShape(14.dp))
@@ -198,7 +200,7 @@ private fun NewAppCard(enabled: Boolean, onCreate: (label: String, prompt: Strin
                 Box(Modifier.weight(1f)) {
                     if (label.isEmpty()) Text("App name", style = T.body.copy(color = N.textMuted))
                     BasicTextField(label, { name = it; nameEdited = true }, singleLine = true, textStyle = T.body,
-                        cursorBrush = SolidColor(N.accent), modifier = Modifier.fillMaxWidth())
+                        cursorBrush = SolidColor(N.accent), modifier = Modifier.fillMaxWidth().fieldLabel("App name"))
                 }
             }
             Spacer(Modifier.width(10.dp))
@@ -223,7 +225,7 @@ private fun ProjectCard(p: ProjectInfo, installed: Boolean, onOpen: () -> Unit, 
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth().vCard(N.shapeLg).clickable(onClick = onOpen)
         .padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        AppTile(p.label, p.project.name, 46.dp)
+        ProjectIcon(p.project, p.label, 46.dp)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(p.label, style = T.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -262,7 +264,7 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         KTopBar(ps.label, subtitle = runStep ?: if (running) "Working…" else ps.pkg, onBack = back,
-            leading = { AppTile(ps.label, name, 34.dp) }) {
+            leading = { ProjectIcon(ps.project, ps.label, 34.dp) }) {
             if (runStep != null) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = N.accent, strokeWidth = 2.dp)
             } else IconBtn(Icons.Rounded.PlayArrow, "Run", tint = N.accent, enabled = !running) { vm.run(name) }
@@ -273,11 +275,13 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                     DropdownMenuItem(text = { Text("New chat", style = T.body) }, leadingIcon = { Icon(Icons.Rounded.Add, null, tint = N.textLabel) },
                         onClick = { menu = false; vm.newChat(name); tab = 0 })
                     if (isInstalled) {
-                        DropdownMenuItem(text = { Text("Clear app data", style = T.body) }, onClick = { menu = false; vm.clearData(name) })
-                        DropdownMenuItem(text = { Text("Uninstall app", style = T.body) }, onClick = { menu = false; vm.uninstall(name) })
+                        DropdownMenuItem(text = { Text("Clear app data", style = T.body) },
+                            leadingIcon = { Icon(Icons.Rounded.CleaningServices, null, tint = N.textLabel) }, onClick = { menu = false; vm.clearData(name) })
+                        DropdownMenuItem(text = { Text("Uninstall app", style = T.body) },
+                            leadingIcon = { Icon(Icons.Rounded.RemoveCircleOutline, null, tint = N.textLabel) }, onClick = { menu = false; vm.uninstall(name) })
                     }
                     DropdownMenuItem(text = { Text("Delete project", style = T.body.copy(color = N.danger)) },
-                        onClick = { menu = false; confirmDelete = true })
+                        leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = N.danger) }, onClick = { menu = false; confirmDelete = true })
                 }
             }
         }
@@ -294,14 +298,15 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
 
     if (history) ModalBottomSheet({ history = false }, containerColor = N.surface) {
         val sessions by ps.sessions.collectAsStateWithLifecycle()
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.padding(horizontal = 4.dp).padding(bottom = 24.dp)) {
+            Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Chats", style = T.cardTitle, modifier = Modifier.weight(1f))
                 KButton("New chat", Tone.Accent) { history = false; vm.newChat(name); tab = 0 }
             }
             Spacer(Modifier.height(8.dp))
-            if (sessions.isEmpty()) Text("No chats yet.", style = T.bodySmall.copy(color = N.textMuted), modifier = Modifier.padding(vertical = 16.dp))
-            sessions.take(30).forEach { s ->
+            if (sessions.isEmpty()) Text("No chats yet.", style = T.bodySmall.copy(color = N.textMuted), modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp))
+            // An empty chat (no message yet, so no title) is only worth listing while it is the open one.
+            sessions.filter { it.title.isNotBlank() || it.id == loop?.session?.meta?.id }.take(30).forEach { s ->
                 val current = loop?.session?.meta?.id == s.id
                 Row(Modifier.fillMaxWidth().clip(N.shapeMd).clickable { history = false; vm.openSession(name, s.id); tab = 0 }
                     .background(if (current) N.accent800.copy(alpha = 0.5f) else androidx.compose.ui.graphics.Color.Transparent)

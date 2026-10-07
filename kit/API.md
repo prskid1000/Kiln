@@ -102,6 +102,34 @@ danger`; fonts `Nocturne.sans`, `Nocturne.mono`. Prefer
 `MaterialTheme.colorScheme.*` and `MaterialTheme.typography.*` in components.
 Dark only. Never hard-code other colours.
 
+## App icon
+
+Every app draws its own launcher icon in `res/drawable/ic_launcher.xml` (the
+manifest already points at it). It is a 108×108 vector drawable:
+
+- First path: the full-bleed background square `M0,0h108v108h-108z`, filled
+  `#161826` (bg) or `#232532` (surface).
+- Then one bold, simple glyph for what the app *does* (a drop for water, a
+  check for todos, a flame for streaks…) drawn inside the centre safe zone
+  x,y 30–78 — launchers crop to a circle or squircle, so keep it centred.
+- Colours from the Nocturne palette only: `#9184D9` accent, `#A7A1DB`
+  accent2, `#F5F4FF` accent100, `#423A6A` accent800, `#7FB69A` ok,
+  `#D9C48A` warn, `#D98A8A` danger. Use 1–3 of them; no gradients, no text.
+- Use `android:pathData` with simple commands (M, L, H, V, C, A, Z) and
+  `android:strokeWidth`/`android:strokeColor`/`android:strokeLineCap="round"`
+  for line icons.
+
+```xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#161826" android:pathData="M0,0h108v108h-108z" />
+    <!-- water drop -->
+    <path android:fillColor="#9184D9"
+        android:pathData="M54,30 C54,30 72,50 72,62 A18,18 0 0 1 36,62 C36,50 54,30 54,30 Z" />
+</vector>
+```
+
 ## State and data
 
 - UI state: `remember { mutableStateOf(…) }`, `rememberSaveable`, or a `ViewModel`

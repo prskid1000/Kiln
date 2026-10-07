@@ -85,3 +85,6 @@ class SchemaBuilder {
 }
 
 fun schema(block: SchemaBuilder.() -> Unit): JsonObject = SchemaBuilder().apply(block).build()
+
+/** "1 file", "3 files" — tool summaries are shown to people. */
+fun plural(n: Int, one: String, many: String = one + "s") = "$n ${if (n == 1) one else many}"

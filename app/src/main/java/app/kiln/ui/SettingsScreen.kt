@@ -1,5 +1,11 @@
 package app.kiln.ui
 
+import app.kiln.llm.Providers
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.Icons
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -124,7 +130,21 @@ private fun ModelsCard(onEdit: (Profile) -> Unit) {
                 }
             }
         }
-        KButton("Add provider") { onEdit(Profile("custom-${System.currentTimeMillis() % 100000}", "Custom", Protocol.OPENAI_CHAT, "https://", AuthStyle.BEARER)) }
+        // Presets first (Anthropic, OpenAI, OpenRouter, On Device AI, Telecode…), then a blank one.
+        Box {
+            var pick by remember { mutableStateOf(false) }
+            KButton("Add provider") { pick = true }
+            DropdownMenu(pick, { pick = false }, containerColor = N.surfaceHi) {
+                Providers.PRESETS.filter { pr -> profiles.none { it.id == pr.id } }.forEach { pr ->
+                    DropdownMenuItem(text = { Column { Text(pr.label, style = T.body); Text(pr.baseUrl, style = T.monoSmall) } },
+                        onClick = { pick = false; onEdit(pr) })
+                }
+                DropdownMenuItem(text = { Text("Custom…", style = T.body.copy(color = N.accent)) }, onClick = {
+                    pick = false
+                    onEdit(Profile("custom-${System.currentTimeMillis() % 100000}", "Custom", Protocol.OPENAI_CHAT, "https://", AuthStyle.BEARER))
+                })
+            }
+        }
     }
 }
 
@@ -137,17 +157,21 @@ private fun ProfileEditor(start: Profile, onDone: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun current() = p.copy(models = models.split(",").map { it.trim() }.filter { it.isNotEmpty() })
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(p.label, style = T.h4, modifier = Modifier.weight(1f))
-            KButton("Save", Tone.Accent) { Graph.providers.save(current()); if (key.isNotBlank()) Graph.providers.setKey(p.id, key.trim()); onDone() }
+    val exists = Graph.providers.profiles.any { it.id == start.id }
+    Column(Modifier.fillMaxSize()) {
+    KTopBar(p.label.ifBlank { "Provider" }, subtitle = if (exists) "Edit provider" else "New provider", onBack = onDone) {
+        IconBtn(Icons.Rounded.Check, "Save", tint = N.accent) {
+            Graph.providers.save(current()); if (key.isNotBlank()) Graph.providers.setKey(p.id, key.trim()); onDone()
         }
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
         KField("Label", p.label, { p = p.copy(label = it) })
         Text("Protocol", style = T.label)
-        SegTabs(Protocol.entries.map { it.name.lowercase().replace('_', '-') to "" }, p.protocol.ordinal) { p = p.copy(protocol = Protocol.entries[it]) }
+        SegTabs(Protocol.entries.map { when (it) { Protocol.ANTHROPIC -> "Anthropic"; Protocol.OPENAI_CHAT -> "Chat API"; Protocol.OPENAI_RESPONSES -> "Responses" } to "" }, p.protocol.ordinal) { p = p.copy(protocol = Protocol.entries[it]) }
         KField("Base URL (with or without /v1)", p.baseUrl, { p = p.copy(baseUrl = it) }, mono = true)
         Text("Auth", style = T.label)
-        SegTabs(AuthStyle.entries.map { it.name.lowercase().replace('_', '-') to "" }, p.auth.ordinal) { p = p.copy(auth = AuthStyle.entries[it]) }
+        SegTabs(AuthStyle.entries.map { when (it) { AuthStyle.X_API_KEY -> "x-api-key"; AuthStyle.BEARER -> "Bearer"; AuthStyle.NONE -> "None" } to "" }, p.auth.ordinal) { p = p.copy(auth = AuthStyle.entries[it]) }
         KField(if (Graph.providers.key(p.id) != null) "API key (saved — type to replace)" else "API key", key, { key = it }, mono = true, hint = "kept in the Android Keystore")
         KField("Models (comma-separated)", models, { models = it }, mono = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -178,8 +202,8 @@ private fun ProfileEditor(start: Profile, onDone: () -> Unit) {
             "tools".takeIf { p.caps.tools }, "parallel".takeIf { p.caps.parallelTools }, "vision".takeIf { p.caps.vision },
             "caching".takeIf { p.caps.caching }, "thinking".takeIf { p.caps.thinking }, "effort".takeIf { p.caps.effort },
             "compaction".takeIf { p.caps.compaction }, "context-editing".takeIf { p.caps.contextEditing }).joinToString(", "), style = T.bodySmall)
-        if (p.id !in setOf("anthropic", "openai", "openrouter")) KButton("Delete provider", Tone.Danger) { Graph.providers.remove(p.id); onDone() }
-        KButton("Back") { onDone() }
+        if (exists) KButton("Delete provider", Tone.Danger, Modifier.padding(top = 8.dp)) { Graph.providers.remove(p.id); onDone() }
+    }
     }
 }
 

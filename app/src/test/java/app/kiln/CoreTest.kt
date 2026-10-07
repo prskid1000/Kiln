@@ -158,6 +158,33 @@ class CoreTest {
         assertTrue(app.kiln.llm.splitThinkTags(plain) === plain)
     }
 
+    // Inputs below are the exact ones that failed in a real session.
+    @Test fun `sdk_lookup understands how models phrase queries`() {
+        val p = app.kiln.tools.ClassIndex::parseSdkQuery
+        assertEquals("KStore" to null, p("class KStore"))
+        assertEquals("KilnActivity" to "onCreate", p("KilnActivity onCreate"))
+        assertEquals("ComponentActivity" to "onCreate", p("class ComponentActivity onCreate"))
+        assertEquals("Modifier" to "padding", p("Modifier.padding"))
+        assertEquals("androidx.compose.ui.Modifier" to "padding", p("androidx.compose.ui.Modifier.padding"))
+        assertEquals("LazyColumn" to "items", p("LazyColumn#items"))
+        assertEquals("app.kiln.kit.KilnActivity" to null, p("app.kiln.kit.KilnActivity"))
+        assertEquals("app.kiln.kit.KStore" to null, p("app.kiln.kit KStore"))
+        assertEquals("Icons.Filled.FlashlightOff" to null, p("Icons.Filled.FlashlightOff"))
+    }
+
+    @Test fun `tap targets match the way models describe them`() {
+        fun n(text: String, desc: String = "", click: Boolean = false, y: Int = 0) =
+            app.kiln.device.UiNode(text, desc, "", "android.view.View", click, false, null, true, 0, y, 10, y + 10)
+        val screen = listOf(n("Today's Intake", y = 900), n("0 ml", y = 1000), n("", "Add 250ml", click = true, y = 1600),
+            n("250 ml", y = 1700), n("Reset", click = true, y = 2000))
+        val f = { t: String -> app.kiln.device.findNode(screen, t)?.top }
+        assertEquals(1600, f("Button \"Add 250ml\""))
+        assertEquals(1600, f("add 250ml"))
+        assertEquals(2000, f("the Reset button"))
+        assertEquals(900, f("Today's Intake"))
+        assertEquals(null, f("the large circular water drop button"))
+    }
+
     @Test fun `openai responses converts calls and outputs`() {
         val a = OpenAIResponsesAdapter(Profile("oa", "OA", Protocol.OPENAI_RESPONSES, "https://api.openai.com", caps = Caps()), "k")
         val body = a.buildBody(ModelRequest("gpt", "sys", transcript(), listOf(tool)))

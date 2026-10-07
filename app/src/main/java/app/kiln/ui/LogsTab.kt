@@ -108,7 +108,7 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
                 Box(Modifier.weight(1f)) {
                     if (query.isEmpty()) Text("Filter", style = T.body.copy(color = N.textMuted))
                     BasicTextField(query, { query = it }, singleLine = true, textStyle = T.body, cursorBrush = SolidColor(N.accent),
-                        modifier = Modifier.fillMaxWidth())
+                        modifier = Modifier.fillMaxWidth().fieldLabel("Filter logs"))
                 }
             }
             IconBtn(if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, if (paused) "Resume" else "Pause") { paused = !paused }
@@ -123,7 +123,7 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
             LEVELS.forEach { (l, label) -> KChip(label, level == l, color = if (l == "V") N.accent else levelColor(l[0])) { level = l } }
         }
         crash?.takeIf { it != dismissed }?.let { c ->
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp).fillMaxWidth().clip(N.shapeLg).background(N.danger.copy(alpha = 0.10f))
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(N.shapeLg).background(N.danger.copy(alpha = 0.10f))
                 .border(1.dp, N.danger.copy(alpha = 0.4f), N.shapeLg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.BugReport, null, tint = N.danger, modifier = Modifier.size(18.dp))
@@ -133,7 +133,9 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
                 Text(c.trim(), style = T.monoSmall.copy(color = N.text), maxLines = 6, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     KButton("Dismiss") { dismissed = c }
-                    KButton("Ask Kiln to fix", Tone.Accent) { dismissed = c; onAskFix("The app crashed. Find the cause and fix it, then verify it runs:\n\n$c") }
+                    KButton("Ask Kiln to fix", Tone.Accent) { dismissed = c; onAskFix("The app crashed. Find the cause and fix it, then verify it runs:\n\n" +
+                        // The top of the trace is enough to start; the agent fetches the rest with last_crash.
+                        c.trim().lines().take(8).joinToString("\n")) }
                 }
             }
         }
@@ -145,7 +147,7 @@ fun LogsTab(vm: KilnVM, ps: ProjectState, onAskFix: (String) -> Unit) {
         if (shown.isEmpty()) EmptyState(Icons.Rounded.ReceiptLong, if (paused) "Paused" else "No log lines yet",
             if (since != null) "Cleared — new lines will appear as the app logs." else "Open the app and interact with it.")
         else Box(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
-            LazyColumn(state = list, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp)) {
+            LazyColumn(state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 itemsIndexed(shown, key = { i, _ -> i }) { _, l ->
                     Text(buildAnnotatedString {
                         withStyle(SpanStyle(color = N.textMuted)) { append(l.time.padEnd(13)) }

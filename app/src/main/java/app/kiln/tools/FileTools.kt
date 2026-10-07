@@ -18,7 +18,7 @@ class ListDirTool : Tool {
         if (!dir.isDirectory) return ToolResult.error("not a directory: ${input.str("path")}")
         val files = ctx.project.files().filter { it.path.startsWith(dir.path) }
         if (files.isEmpty()) return ToolResult.ok("(empty)")
-        return ToolResult.ok(files.joinToString("\n") { "${ctx.project.rel(it)}  (${it.length()} B)" }, "${files.size} files")
+        return ToolResult.ok(files.joinToString("\n") { "${ctx.project.rel(it)}  (${it.length()} B)" }, plural(files.size, "file"))
     }
 }
 
@@ -30,7 +30,7 @@ class GlobTool : Tool {
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val m = java.nio.file.FileSystems.getDefault().getPathMatcher("glob:" + input.req("pattern"))
         val hits = ctx.project.files().map { ctx.project.rel(it) }.filter { m.matches(java.nio.file.Paths.get(it)) }
-        return ToolResult.ok(hits.joinToString("\n").ifEmpty { "(no matches)" }, "${hits.size} matches")
+        return ToolResult.ok(hits.joinToString("\n").ifEmpty { "(no matches)" }, plural(hits.size, "match", "matches"))
     }
 }
 
@@ -83,7 +83,7 @@ class ReadFileTool : Tool {
         ctx.state.readStamps[ctx.project.rel(f)] = f.lastModified()
         val body = lines.drop(from).take(n).mapIndexed { i, l -> "%5d\t%s".format(from + i + 1, l) }.joinToString("\n")
         val more = if (from + n < lines.size) "\n… ${lines.size - from - n} more lines (use offset)" else ""
-        return ToolResult.ok(ctx.spill(body + more), "${ctx.project.rel(f)} (${lines.size} lines)")
+        return ToolResult.ok(ctx.spill(body + more), "${ctx.project.rel(f)} (${plural(lines.size, "line")})")
     }
 }
 

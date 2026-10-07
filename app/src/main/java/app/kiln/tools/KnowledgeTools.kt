@@ -35,6 +35,30 @@ class ClassIndex(private val toolchain: Toolchain) {
         built = dir.path
     }
 
+    /**
+     * Models write lookups the way they'd say them: "class KStore", "KilnActivity onCreate",
+     * "Modifier.padding", "LazyColumn#items". Returns (class part, member part or null).
+     */
+    fun parseQuery(raw: String): Pair<String, String?> = parseSdkQuery(raw)
+
+    companion object {
+    fun parseSdkQuery(raw: String): Pair<String, String?> {
+        val words = raw.trim().removeSuffix("()").split(Regex("[\\s#:]+|::")).filter { it.isNotBlank() }
+            .dropWhile { it.lowercase() in setOf("class", "interface", "object", "fun", "val", "enum", "data", "abstract", "annotation", "sealed") }
+        if (words.isEmpty()) return raw.trim() to null
+        // "app.kiln.kit KStore" = package then class.
+        if (words.size > 1 && words[0].all { it.isLowerCase() || it == '.' || it.isDigit() } && '.' in words[0] && words[1][0].isUpperCase())
+            return parseSdkQuery((listOf(words[0] + "." + words[1]) + words.drop(2)).joinToString(" "))
+        if (words.size > 1) return words[0] to words.drop(1).joinToString(" ").removeSuffix("()")
+        val w = words[0]
+        // a.b.Type.member → split off a trailing lower-case segment when the rest is a class.
+        val last = w.substringAfterLast('.', "")
+        if (last.isNotEmpty() && last[0].isLowerCase() && w.substringBeforeLast('.').substringAfterLast('.').firstOrNull()?.isUpperCase() == true)
+            return w.substringBeforeLast('.') to last
+        return w to null
+    }
+    }
+
     fun search(query: String, limit: Int = 40): List<String> {
         ensure()
         val q = query.lowercase()
@@ -53,17 +77,38 @@ class ClassIndex(private val toolchain: Toolchain) {
         if (c.superName != null && c.superName != "java.lang.Object") sb.append(" extends ${c.superName}")
         if (c.interfaces.isNotEmpty()) sb.append(" implements ${c.interfaces.joinToString()}")
         sb.append("   [${jar.name}]\n")
-        val ms = c.members.filter { it.public && (member.isNullOrBlank() || it.name.contains(member, true)) }
+        val ms = c.members.filter { it.visible && (member.isNullOrBlank() || it.name.contains(member, true)) }
         ms.take(150).forEach { sb.append("  ").append(it.render()).append('\n') }
         if (ms.size > 150) sb.append("  … ${ms.size - 150} more (filter with member)\n")
+        // A named member that isn't declared here is usually inherited (Activity.onCreate): walk the supertypes.
+        if (!member.isNullOrBlank() && ms.isEmpty()) {
+            val seen = HashSet<String>(); val queue = ArrayDeque(listOfNotNull(c.superName) + c.interfaces)
+            var found = 0
+            while (queue.isNotEmpty() && seen.size < 40) {
+                val t = queue.removeFirst(); if (!seen.add(t) || t !in where) continue
+                val sc = parse(ZipFile(where[t]!!).use { z -> z.getInputStream(z.getEntry(t.replace('.', '/') + ".class")).readBytes() })
+                sc.members.filter { it.visible && it.name.contains(member, true) && it.name != "<constructor>" }.forEach {
+                    sb.append("  ").append(it.render()).append("   (inherited from $t)\n"); found++
+                }
+                queue.addAll(listOfNotNull(sc.superName) + sc.interfaces)
+            }
+            if (found == 0) {
+                // Near misses help more than a bare "no": FLASHLIGHT_INFO → FLASH_INFO_AVAILABLE.
+                val stem = member.lowercase().take(4)
+                val near = c.members.filter { it.visible && it.name.lowercase().startsWith(stem.take(3)) }.map { it.name }.distinct().take(25)
+                sb.append("  no member matching \"$member\" here or in its supertypes")
+                sb.append(if (near.isNotEmpty()) "; similar: ${near.joinToString()}\n" else "; call without member to list all\n")
+            }
+        }
         if (fq.endsWith("Kt")) sb.append("  (Kotlin file facade: these are top-level functions; the first parameter of an extension is its receiver)\n")
         return sb.toString()
     }
 
     private data class Member(val name: String, val desc: String, val access: Int, val field: Boolean) {
-        val public get() = access and 0x0001 != 0
+        /** public or protected: what an app can call or override. */
+        val visible get() = access and 0x0005 != 0
         fun render(): String {
-            val static = if (access and 0x0008 != 0) "static " else ""
+            val static = (if (access and 0x0004 != 0) "protected " else "") + (if (access and 0x0008 != 0) "static " else "")
             return if (field) "${static}val $name: ${type(desc)}"
             else {
                 val params = desc.substring(1, desc.indexOf(')'))
@@ -120,12 +165,29 @@ class SdkLookupTool(private val index: ClassIndex) : Tool {
     }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult = withContext(Dispatchers.IO) {
-        val q = input.req("query")
-        val hits = index.search(q)
-        val exact = hits.firstOrNull { it == q || it.substringAfterLast('.') == q }
-        if (exact != null) ToolResult.ok(ctx.spill(index.describe(exact, input.str("member"))), exact)
-        else if (hits.isEmpty()) ToolResult.error("nothing matches \"$q\"")
-        else ToolResult.ok("classes matching \"$q\":\n" + hits.joinToString("\n"), "${hits.size} classes")
+        val (q0, impliedMember) = index.parseQuery(input.req("query"))
+        // "*", "all" or the class's own name (= its constructors) are what models write for "show me everything".
+        val member = (input.str("member")?.takeIf { it.isNotBlank() } ?: impliedMember)?.trim()
+            ?.takeUnless { it == "*" || it.equals("all", true) }
+            ?.let { if (it == q0.substringAfterLast('.') || it in setOf("constructor", "init", "<init>")) "<constructor>" else it }
+        // Dotted names may be nested classes (Icons.Filled → Icons$Filled) or file-level members
+        // (Icons.Filled.Home → HomeKt): try those spellings before giving up.
+        val tries = buildList {
+            add(q0)
+            if ('.' in q0) {
+                val parts = q0.split('.')
+                val firstUpper = parts.indexOfFirst { it.firstOrNull()?.isUpperCase() == true }
+                if (firstUpper >= 0 && firstUpper < parts.size - 1)
+                    add((parts.take(firstUpper + 1).joinToString(".") + "$" + parts.drop(firstUpper + 1).joinToString("$")).removePrefix("."))
+                add(parts.last()); add(parts.last() + "Kt")
+            }
+        }.distinct()
+        var q = q0; var hits = emptyList<String>()
+        for (t in tries) { hits = index.search(t); if (hits.isNotEmpty()) { q = t; break } }
+        val exact = hits.firstOrNull { it == q || it.endsWith(".$q") || it.substringAfterLast('.') == q || it.substringAfterLast('.').substringAfterLast('$') == q }
+        if (exact != null) ToolResult.ok(ctx.spill(index.describe(exact, member)), exact)
+        else if (hits.isEmpty()) ToolResult.error("nothing matches \"$q0\" — try a shorter fragment of the class name")
+        else ToolResult.ok("classes matching \"$q\":\n" + hits.joinToString("\n"), plural(hits.size, "class", "classes"))
     }
 }
 

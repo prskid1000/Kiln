@@ -322,6 +322,26 @@ class AgentLoop(
         if (missing.isNotEmpty()) return "missing required input: ${missing.joinToString()}"
         val unknown = input.keys.filter { it !in props }
         if (unknown.isNotEmpty() && tool.schema["additionalProperties"]?.toString() == "false") return "unknown input: ${unknown.joinToString()}"
+        // Providers without strict tool schemas (local models, most OpenAI-compatible proxies) can send
+        // any value; check enums and primitive types so a bad call fails loudly instead of misbehaving.
+        for ((k, v) in input) {
+            val spec = props[k] as? JsonObject ?: continue
+            if (v is kotlinx.serialization.json.JsonNull && k !in required) continue
+            val prim = v as? JsonPrimitive
+            (spec["enum"] as? JsonArray)?.map { (it as JsonPrimitive).content }?.let { allowed ->
+                if (prim == null || prim.content !in allowed) return "$k must be one of ${allowed.joinToString { "\"$it\"" }}, got ${v}"
+            }
+            val ok = when ((spec["type"] as? JsonPrimitive)?.content) {
+                "string" -> prim?.isString == true
+                "integer" -> prim != null && !prim.isString && prim.content.toLongOrNull() != null
+                "number" -> prim != null && !prim.isString && prim.content.toDoubleOrNull() != null
+                "boolean" -> prim != null && !prim.isString && prim.content in setOf("true", "false")
+                "array" -> v is JsonArray
+                "object" -> v is JsonObject
+                else -> true
+            }
+            if (!ok) return "$k must be a ${(spec["type"] as JsonPrimitive).content}, got $v"
+        }
         return null
     }
 

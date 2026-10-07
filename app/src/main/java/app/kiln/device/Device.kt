@@ -181,11 +181,7 @@ class Device(private val warden: Warden) {
     }
 
     /** Find a node by visible text / content description / resource id (case-insensitive contains). */
-    fun find(nodes: List<UiNode>, target: String): UiNode? {
-        val t = target.lowercase()
-        return nodes.firstOrNull { it.text.equals(target, true) || it.desc.equals(target, true) }
-            ?: nodes.firstOrNull { it.text.lowercase().contains(t) || it.desc.lowercase().contains(t) || it.id.lowercase().endsWith(t) }
-    }
+    fun find(nodes: List<UiNode>, target: String): UiNode? = findNode(nodes, target)
 
     suspend fun tap(x: Int, y: Int) = warden.exec(listOf("input", "tap", "$x", "$y"))
     suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int = 300) =
@@ -203,4 +199,24 @@ class Device(private val warden: Warden) {
     suspend fun installedApps(): List<String> =
         warden.exec(listOf("pm", "list", "packages", "kiln.app.")).out.lines()
             .mapNotNull { it.removePrefix("package:").trim().takeIf { p -> p.startsWith("kiln.app.") } }.sorted()
+}
+
+/**
+ * The element a model means by [target]. Models write targets the way they'd describe them —
+ * `Button "Add 250ml"`, `the Save button`, `'Reset'` — so roles, quotes and filler words are
+ * stripped, then exact, contains, and best word-overlap matches are tried; clickable wins ties.
+ */
+fun findNode(nodes: List<UiNode>, target: String): UiNode? {
+    val filler = setOf("button", "btn", "text", "textview", "view", "image", "imageview", "icon", "the", "a", "an",
+        "tab", "label", "field", "edittext", "switch", "checkbox", "item", "element", "on", "labeled", "labelled", "called")
+    val quoted = Regex("[\"'“”‘’]([^\"'“”‘’]+)[\"'“”‘’]").find(target)?.groupValues?.get(1)
+    val words = target.lowercase().split(Regex("[^\\p{L}\\p{N}+.%-]+")).filter { it.isNotBlank() && it !in filler }
+    val candidates = listOfNotNull(quoted, target, words.joinToString(" ")).map { it.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+    fun hay(n: UiNode) = listOf(n.text, n.desc, n.id.substringAfter(":id/")).map { it.lowercase() }
+    val ordered = nodes.sortedBy { if (it.clickable) 0 else 1 }
+    for (c in candidates) ordered.firstOrNull { n -> hay(n).any { it == c } }?.let { return it }
+    for (c in candidates) ordered.firstOrNull { n -> hay(n).any { it.isNotEmpty() && (it.contains(c) || (c.length > 3 && c.contains(it) && it.length > 2)) } }?.let { return it }
+    if (words.isEmpty()) return null
+    val best = ordered.map { n -> n to words.count { w -> hay(n).any { it.contains(w) } } }.maxByOrNull { it.second } ?: return null
+    return best.first.takeIf { best.second * 2 >= words.size && best.second > 0 }
 }

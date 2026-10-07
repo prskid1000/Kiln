@@ -240,7 +240,13 @@ class ScreenshotTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.READ_ONLY, Trait.RETURNS_IMAGE)
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val png = device.screenshot() ?: return ToolResult.error("screenshot failed")
-        return ToolResult("screenshot (${png.size / 1024} KB)", listOf(png))
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size, o)
+        val (w, h) = device.screenSize()
+        // The image is scaled down; tap/ui_tree use screen pixels. Say so, or models tap in image space.
+        val k = if (o.outWidth > 0) w.toDouble() / o.outWidth else 1.0
+        return ToolResult("screenshot ${o.outWidth}x${o.outHeight} of a ${w}x$h screen. Tap by target text; " +
+            "if you must use x,y, they are screen pixels = image pixels × ${"%.2f".format(k)}.", listOf(png))
     }
 }
 
@@ -251,27 +257,33 @@ class UiTreeTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.READ_ONLY)
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val nodes = device.uiTree()
-        return ToolResult.ok(ctx.spill(treeText(nodes).ifBlank { "(empty screen)" }), "${nodes.size} elements")
+        return ToolResult.ok(ctx.spill(treeText(nodes).ifBlank { "(empty screen)" }), plural(nodes.size, "element"))
     }
 }
 
 class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val name = "tap"
-    override val description = "Tap an element by its visible text, content description or resource id (preferred), or at x,y."
+    override val description = "Tap an element by its visible text, content description or resource id (preferred — copy the label " +
+        "from ui_tree, e.g. Add 250ml), or at x,y in screen pixels (ui_tree coordinates, not screenshot pixels)."
     override val schema = schema {
-        str("target", "Text / description / id to tap; empty to use x,y.")
-        int("x", "X when target is empty (0 otherwise).")
-        int("y", "Y when target is empty (0 otherwise).")
+        str("target", "Label to tap, as ui_tree shows it; empty to use x,y.")
+        int("x", "Screen-pixel X when target is empty (0 otherwise).")
+        int("y", "Screen-pixel Y when target is empty (0 otherwise).")
     }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        val target = input.str("target")?.takeIf { it.isNotBlank() }
+        // "640, 1427" in target is a coordinate, not a label.
+        val coord = Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(input.str("target") ?: "")
+        val target = input.str("target")?.takeIf { it.isNotBlank() && coord == null }
         val (x, y) = if (target != null) {
-            val n = device.find(device.uiTree(), target) ?: return ToolResult.error("no element matching \"$target\" on screen (see ui_tree)")
+            val nodes = device.uiTree()
+            val n = device.find(nodes, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
+                treeText(nodes.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
             n.cx to n.cy
-        } else (input.int("x") ?: 0) to (input.int("y") ?: 0)
+        } else if (coord != null) coord.groupValues[1].toInt() to coord.groupValues[2].toInt()
+        else (input.int("x") ?: 0) to (input.int("y") ?: 0)
         device.tap(x, y)
         delay(600)
-        return ToolResult.ok("tapped ${target ?: "$x,$y"}")
+        return ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}")
     }
 }
 

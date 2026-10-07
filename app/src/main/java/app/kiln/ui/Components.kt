@@ -17,6 +17,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,7 +92,7 @@ fun KField(label: String, value: String, onChange: (String) -> Unit, modifier: M
         Box(Modifier.fillMaxWidth().vInset().padding(horizontal = 12.dp, vertical = 10.dp)) {
             if (value.isEmpty() && hint.isNotEmpty()) Text(hint, style = (if (mono) T.mono else T.body).copy(color = N.textMuted))
             BasicTextField(value, onChange, singleLine = singleLine, cursorBrush = SolidColor(N.accent),
-                textStyle = if (mono) T.mono.copy(color = N.text) else T.body, modifier = Modifier.fillMaxWidth())
+                textStyle = if (mono) T.mono.copy(color = N.text) else T.body, modifier = Modifier.fillMaxWidth().fieldLabel(label.ifEmpty { hint }))
         }
     }
 }
@@ -107,6 +113,9 @@ fun SegTabs(options: List<Pair<String, String>>, selected: Int, modifier: Modifi
         }
     }
 }
+
+/** Names a bare text field for TalkBack and UI automation (its placeholder is a separate Text). */
+fun Modifier.fieldLabel(label: String): Modifier = this.semantics { contentDescription = label }
 
 /** Top app bar: optional back arrow, title + subtitle, trailing actions. */
 @Composable
@@ -153,6 +162,43 @@ fun AppTile(label: String, key: String, size: Dp = 44.dp) {
         .border(1.dp, hue.copy(alpha = 0.45f), RoundedCornerShape(size * 0.28f)), contentAlignment = Alignment.Center) {
         Text(label.trim().take(1).uppercase().ifBlank { "?" }, style = T.cardTitle.copy(color = hue, fontSize = (size.value * 0.42f).sp))
     }
+}
+
+/** Launcher icons read from built APKs, keyed by path + mtime so a rebuild shows the new icon. */
+object IconCache {
+    /** Bumped after anything that may have built an APK; icons re-check their file when it changes. */
+    val version = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    private val map = java.util.concurrent.ConcurrentHashMap<String, androidx.compose.ui.graphics.ImageBitmap?>()
+    fun load(ctx: android.content.Context, apk: java.io.File, px: Int): androidx.compose.ui.graphics.ImageBitmap? {
+        if (!apk.isFile) return null
+        return map.getOrPut("${apk.path}@${apk.lastModified()}@$px") {
+            runCatching {
+                val pm = ctx.packageManager
+                val info = pm.getPackageArchiveInfo(apk.path, 0)?.applicationInfo ?: return@runCatching null
+                info.sourceDir = apk.path; info.publicSourceDir = apk.path
+                info.loadIcon(pm).toBitmap(px, px).asImageBitmap()
+            }.getOrNull()
+        }
+    }
+}
+
+/** The app's own launcher icon (from its last build), or its letter tile before the first build. */
+@Composable
+fun ProjectIcon(project: app.kiln.build.Project, label: String, size: Dp = 44.dp) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val pkg = remember(project) { runCatching { project.meta().`package` }.getOrDefault(app.kiln.build.Project.packageFor(project.name)) }
+    val version by IconCache.version.collectAsState()
+    val apk = java.io.File(project.buildDir, "$pkg.apk")
+    val stamp = remember(version) { apk.lastModified() }
+    val px = with(androidx.compose.ui.platform.LocalDensity.current) { size.roundToPx() }
+    val bmp by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, apk.path, stamp, px) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { IconCache.load(ctx, apk, px) }
+    }
+    val b = bmp
+    if (b == null) AppTile(label, project.name, size)
+    else androidx.compose.foundation.Image(b, null, Modifier.size(size).clip(RoundedCornerShape(size * 0.28f))
+        .border(1.dp, N.cardRingSm, RoundedCornerShape(size * 0.28f)))
 }
 
 /** Pill tab strip with a sliding indicator. */

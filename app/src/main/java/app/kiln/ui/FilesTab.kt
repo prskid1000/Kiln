@@ -106,7 +106,7 @@ private fun SourceList(ps: ProjectState, onOpen: (Open) -> Unit) {
     // Folders as section headers; the package path is collapsed so Kotlin files don't drown in it.
     val pkgDir = "src/" + ps.pkg.replace('.', '/') + "/"
     val groups = files.groupBy { (rel, _) -> rel.removePrefix(pkgDir).let { r -> if (rel.startsWith(pkgDir)) "src" + (r.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "/$it" }) else rel.substringBeforeLast('/', "") } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 24.dp)) {
         groups.toSortedMap(compareBy({ it.isNotEmpty() }, { it })).forEach { (dir, list) ->
             item(key = "d:$dir") { FolderHeader(dir.ifEmpty { "/" }) }
             items(list, key = { it.first }) { (rel, f) ->
@@ -120,7 +120,7 @@ private fun SourceList(ps: ProjectState, onOpen: (Open) -> Unit) {
 
 @Composable
 private fun FolderHeader(dir: String) {
-    Row(Modifier.padding(start = 6.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(start = 8.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Rounded.Folder, null, tint = N.textMuted, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(6.dp))
         Text(dir, style = T.overline)
@@ -166,12 +166,12 @@ private fun DataList(vm: KilnVM, ps: ProjectState, onOpen: (Open) -> Unit) {
         else -> {
             val list = files!!.getOrThrow()
             Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("/data/data/${ps.pkg}", style = T.monoSmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     IconBtn(Icons.Rounded.Refresh, "Refresh") { tick++ }
                 }
                 if (list.isEmpty()) EmptyState(Icons.Rounded.Storage, "Nothing saved yet", "The app hasn't written any files.")
-                else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
+                else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 24.dp)) {
                     list.groupBy { it.path.substringBeforeLast('/', "") }.forEach { (dir, fs) ->
                         item(key = "d:$dir") { FolderHeader(dir.ifEmpty { "/" }) }
                         items(fs, key = { it.path }) { f ->
@@ -237,7 +237,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, onClose: () -> Unit) {
                         modifier = Modifier.widthIn(min = 28.dp).background(N.bg.copy(alpha = 0.4f)).padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 48.dp))
                     Box(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
                         BasicTextField(text, { text = it }, textStyle = style, cursorBrush = SolidColor(N.accent),
-                            modifier = Modifier.widthIn(min = 600.dp).heightIn(min = 600.dp)
+                            modifier = Modifier.widthIn(min = 600.dp).heightIn(min = 600.dp).fieldLabel("File contents")
                                 .padding(start = 10.dp, end = 24.dp, top = 12.dp, bottom = 48.dp))
                     }
                 }

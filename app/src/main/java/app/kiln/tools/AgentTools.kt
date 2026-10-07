@@ -87,7 +87,12 @@ class MemoryTool : Tool {
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val f = ctx.project.memoryFile
-        return if (input.req("action") == "write") {
+        val action = when (input.req("action").lowercase()) {
+            "write", "save", "set", "update", "replace" -> "write"
+            "read", "get", "load", "show" -> "read"
+            else -> return ToolResult.error("action must be read or write")
+        }
+        return if (action == "write") {
             f.parentFile?.mkdirs(); f.writeText(input.str("content") ?: ""); ToolResult.ok("memory saved (${f.length()} B)")
         } else ToolResult.ok(f.takeIf { it.isFile }?.readText()?.ifBlank { null } ?: "(empty)")
     }

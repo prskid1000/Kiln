@@ -160,7 +160,7 @@ private fun ChatEmpty(ps: ProjectState, onPick: (String) -> Unit) {
         "Add a second tab", "Show a notification", "Fix anything that looks off")
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally) {
-        AppTile(ps.label, ps.project.name, 64.dp)
+        ProjectIcon(ps.project, ps.label, 64.dp)
         Spacer(Modifier.height(14.dp))
         Text(ps.label, style = T.h4)
         Spacer(Modifier.height(6.dp))
@@ -393,7 +393,7 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
     val shot = items.lastOrNull { it.images.isNotEmpty() }?.images?.firstOrNull()
     Column(Modifier.fillMaxWidth()) {
         if (live && current?.kind == Activity.Kind.THINKING) ThoughtCard(current, live = true)
-        else Row(Modifier.clip(N.shapeMd).clickable { open = !open }.padding(vertical = 6.dp, horizontal = 2.dp),
+        else Row(Modifier.clip(N.shapeMd).clickable { open = !open }.padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (live && current != null) {
                 CircularProgressIndicator(Modifier.size(14.dp), color = N.accent, strokeWidth = 2.dp)
@@ -416,7 +416,7 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
             Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = N.textMuted, modifier = Modifier.size(18.dp))
         }
         AnimatedVisibility(open) {
-            Column(Modifier.padding(start = 6.dp, top = 2.dp).fillMaxWidth()) {
+            Column(Modifier.padding(top = 2.dp).fillMaxWidth()) {
                 items.forEach { if (it.kind == Activity.Kind.THINKING) Box(Modifier.padding(vertical = 4.dp)) { ThoughtCard(it, live = false) } else StepRow(it) }
             }
         }
@@ -444,7 +444,7 @@ private fun StepRow(a: Activity) {
         Column(Modifier.weight(1f).clip(N.shapeSm).clickable { open = !open }.padding(top = 2.dp, bottom = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = T.bodySmall.copy(color = color), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (a.ms > 0) Text("%.1fs".format(a.ms / 1000.0), style = T.monoSmall)
+                if (a.ms >= 100) Text("%.1fs".format(a.ms / 1000.0), style = T.monoSmall)
             }
             val detail = if (a.kind == Activity.Kind.THINKING) a.text else a.summary
             if (detail.isNotBlank()) Text(detail.trim(), style = T.label.copy(color = N.textMuted), maxLines = if (open) 40 else 1,
@@ -477,7 +477,7 @@ private fun Prompts(loop: AgentLoop) {
     val approval by loop.approval.collectAsStateWithLifecycle()
     val question by loop.question.collectAsStateWithLifecycle()
     approval?.let { a ->
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().vCard(N.shapeLg, N.warn.copy(alpha = 0.6f)).padding(14.dp),
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().vCard(N.shapeLg, N.warn.copy(alpha = 0.6f)).padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Allow ${a.tool.replace('_', ' ')}?", style = T.subtitle)
             Text(a.input.take(600), style = T.monoSmall.copy(color = N.textLabel), maxLines = 8, overflow = TextOverflow.Ellipsis,
@@ -492,7 +492,7 @@ private fun Prompts(loop: AgentLoop) {
     }
     question?.let { q ->
         var free by remember(q) { mutableStateOf("") }
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().vCard(N.shapeLg, N.accent.copy(alpha = 0.6f)).padding(14.dp),
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().vCard(N.shapeLg, N.accent.copy(alpha = 0.6f)).padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(q.text, style = T.subtitle)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -524,7 +524,7 @@ private fun Composer(running: Boolean, hint: String, onSend: (String) -> Unit, o
             Box(Modifier.weight(1f).padding(vertical = 10.dp)) {
                 if (text.isEmpty()) Text(hint, style = T.body.copy(color = N.textMuted))
                 BasicTextField(text, { text = it }, textStyle = T.body, cursorBrush = SolidColor(N.accent),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp))
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).fieldLabel("Message"))
             }
             Spacer(Modifier.width(8.dp))
             if (running && text.isBlank()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, onClick = onStop)
