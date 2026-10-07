@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Construction
 import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VerifiedUser
@@ -313,13 +314,19 @@ private fun ToolsCard() {
 
 @Composable
 private fun McpCard() {
+    RemoteControlCard()
+    ExtraToolsCard()
+}
+
+/** Kiln as an MCP server: a coding agent on a PC drives Kiln on this phone. */
+@Composable
+private fun RemoteControlCard() {
     var s by remember { mutableStateOf(Graph.settings.value) }
-    var name by remember { mutableStateOf("") }; var url by remember { mutableStateOf("") }; var token by remember { mutableStateOf("") }
-    var adding by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
     val status by McpServer.status.collectAsStateWithLifecycle()
     val clip = androidx.compose.ui.platform.LocalClipboardManager.current
-    Section(Icons.Rounded.Hub, "MCP", "Let Claude Code or Codex on a PC build on this phone", trailing = {
+    Section(Icons.Rounded.Computer, "Control Kiln from your PC",
+        "Claude Code or Codex on your computer builds, runs and tests apps on this phone (MCP server)", trailing = {
         Toggle(s.mcpServe) { on ->
             Graph.settings.update { it.copy(mcpServe = on) }; s = Graph.settings.value
             if (on) McpServer.start(s.mcpPort) else McpServer.stop()
@@ -339,8 +346,18 @@ private fun McpCard() {
                 }
             }
         }
-        Text("SERVERS KILN USES (their tools appear in new chats)", style = T.overline)
-        if (s.mcpServers.isEmpty() && !adding) Text("None yet.", style = T.label)
+    }
+}
+
+/** Kiln as an MCP client: other servers' tools for Kiln's own agent. */
+@Composable
+private fun ExtraToolsCard() {
+    var s by remember { mutableStateOf(Graph.settings.value) }
+    var name by remember { mutableStateOf("") }; var url by remember { mutableStateOf("") }; var token by remember { mutableStateOf("") }
+    var adding by remember { mutableStateOf(false) }
+    Section(Icons.Rounded.Hub, "Extra tools for Kiln's agent",
+        "Connect MCP servers (GitHub, a database, your own service); their tools appear in new chats") {
+        if (s.mcpServers.isEmpty() && !adding) Text("None connected.", style = T.label)
         s.mcpServers.forEach { m ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text(m.name, style = T.subtitle); Text(m.url, style = T.monoSmall) }
