@@ -24,7 +24,14 @@ data class UiNode(
  * a package refuses anything outside `kiln.app.*` — enforced here, not in the
  * prompt.
  */
-class Device(private val warden: Warden) {
+/**
+ * Device actions through Warden. With a [testDisplay], everything visual (launch, input, UI tree,
+ * screenshot) targets that invisible display instead of the user's screen — that's the instance
+ * the agent's tools get. Install, logs, data and permissions are per-app and work the same.
+ */
+class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
+    private fun displayArgs(flag: String) = testDisplay?.let { listOf(flag, it.id().toString()) } ?: emptyList()
+    private fun input(vararg args: String) = listOf("input") + displayArgs("-d") + args
 
     private fun guard(pkg: String) =
         require(pkg.startsWith("kiln.app.")) { "Kiln only touches its own apps (kiln.app.*), not $pkg" }
@@ -54,7 +61,7 @@ class Device(private val warden: Warden) {
             "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", pkg))
         val component = resolve.out.lines().lastOrNull { '/' in it }?.trim()
             ?: return ExecResult(1, "", "no launcher activity in $pkg", 0)
-        return warden.exec(listOf("am", "start", "-W", "-S", "-n", component))
+        return warden.exec(listOf("am", "start", "-W", "-S") + displayArgs("--display") + listOf("-n", component))
     }
 
     suspend fun stop(pkg: String): ExecResult { guard(pkg); return warden.exec(listOf("am", "force-stop", pkg)) }
@@ -154,6 +161,7 @@ class Device(private val warden: Warden) {
 
     /** PNG screenshot, scaled to [maxSide] on the long edge (models don't need 2780 px). */
     suspend fun screenshot(maxSide: Int = 1280): ByteArray? {
+        testDisplay?.let { it.id(); return it.capture(maxSide) }
         val (code, png) = warden.execBytes(listOf("screencap", "-p"))
         if (code != 0 || png.isEmpty()) return null
         val bmp = BitmapFactory.decodeByteArray(png, 0, png.size) ?: return null
@@ -163,10 +171,28 @@ class Device(private val warden: Warden) {
     }
 
     /** The on-screen UI tree (uiautomator), compacted to meaningful nodes. */
-    suspend fun uiTree(): List<UiNode> {
+    /**
+     * The on-screen UI tree. With [expect] (the app's package), waits until that app's nodes are
+     * there — a just-created test display briefly dumps the default display instead — and on the
+     * test display never returns another app's tree.
+     */
+    suspend fun uiTree(expect: String? = null): List<UiNode> {
         val path = "/data/local/tmp/kiln-ui.xml"
-        val r = warden.exec(listOf("sh", "-c", "uiautomator dump $path >/dev/null 2>&1; cat $path"), timeoutMs = 30_000)
-        val xml = r.out.substring(r.out.indexOf('<').coerceAtLeast(0))
+        val display = testDisplay?.let { " --display ${it.id()}" } ?: ""
+        // Remove the previous dump first: when a fresh display isn't ready, uiautomator writes
+        // nothing and we'd read the last screen's tree. Retry briefly while it settles.
+        var xml = ""
+        for (attempt in 0 until 6) {
+            val r = warden.exec(listOf("sh", "-c", "rm -f $path; uiautomator dump$display $path >/dev/null 2>&1; cat $path 2>/dev/null"), timeoutMs = 30_000)
+            xml = r.out.substring(r.out.indexOf('<').coerceAtLeast(0))
+            val ready = xml.startsWith("<") && "<node" in xml && (expect == null || "package=\"$expect\"" in xml)
+            if (ready) break
+            // Accessibility reports windows of the focused display only; a no-op key event gives
+            // the test display focus (the user's next touch takes it back).
+            testDisplay?.let { warden.exec(input("keyevent", "KEYCODE_UNKNOWN")) }
+            kotlinx.coroutines.delay(300)
+        }
+        if (expect != null && testDisplay != null && "package=\"$expect\"" !in xml) return emptyList()
         if (!xml.startsWith("<")) return emptyList()
         val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.byteInputStream())
         val nodes = doc.getElementsByTagName("node")
@@ -192,21 +218,26 @@ class Device(private val warden: Warden) {
     /** Find a node by visible text / content description / resource id (case-insensitive contains). */
     fun find(nodes: List<UiNode>, target: String): UiNode? = findNode(nodes, target)
 
-    suspend fun tap(x: Int, y: Int) = warden.exec(listOf("input", "tap", "$x", "$y"))
+    suspend fun tap(x: Int, y: Int) = warden.exec(input("tap", "$x", "$y"))
     suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int = 300) =
-        warden.exec(listOf("input", "swipe", "$x1", "$y1", "$x2", "$y2", "$ms"))
-    suspend fun key(key: String) = warden.exec(listOf("input", "keyevent", key.uppercase().let { if (it.startsWith("KEYCODE_")) it else "KEYCODE_$it" }))
+        warden.exec(input("swipe", "$x1", "$y1", "$x2", "$y2", "$ms"))
+    suspend fun key(key: String) = warden.exec(input("keyevent", key.uppercase().let { if (it.startsWith("KEYCODE_")) it else "KEYCODE_$it" }))
     /** `input text` needs spaces as %s and shell metacharacters escaped. */
-    suspend fun type(text: String) = warden.exec(listOf("input", "text", text.replace(" ", "%s")
+    suspend fun type(text: String) = warden.exec(input("text", text.replace(" ", "%s")
         .replace(Regex("""([\\'"`$&|;<>()*?!#~\[\]{}])"""), "\\\\$1")))
     /** Package of the activity in front right now, or null if it can't be told. */
     suspend fun foregroundPackage(): String? {
         val out = warden.exec(listOf("dumpsys", "activity", "activities")).out
-        val line = out.lineSequence().firstOrNull { "topResumedActivity" in it || "mResumedActivity" in it } ?: return null
+        // On the test display, only that display's section counts.
+        // Each display has its own section; the first "topResumed" line follows input focus, not the screen.
+        val shown = testDisplay?.id() ?: 0
+        val section = out.substringAfter("Display #$shown ", "").substringBefore("\nDisplay #").ifEmpty { out }
+        val line = section.lineSequence().firstOrNull { "topResumedActivity" in it || "ResumedActivity" in it } ?: return null
         return Regex("""\s([a-zA-Z0-9_.]+)/""").find(line)?.groupValues?.get(1)
     }
 
     suspend fun screenSize(): Pair<Int, Int> {
+        testDisplay?.let { it.id(); return it.width to it.height }
         val m = Regex("""(\d+)x(\d+)""").findAll(warden.exec(listOf("wm", "size")).out).lastOrNull() ?: return 1080 to 2400
         return m.groupValues[1].toInt() to m.groupValues[2].toInt()
     }

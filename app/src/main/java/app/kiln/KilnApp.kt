@@ -6,6 +6,7 @@ import app.kiln.agent.SettingsStore
 import app.kiln.build.BuildEngine
 import app.kiln.core.Paths
 import app.kiln.device.Device
+import app.kiln.device.TestDisplay
 import app.kiln.device.Warden
 import app.kiln.llm.Providers
 import app.kiln.llm.Secrets
@@ -28,6 +29,8 @@ object Graph {
     lateinit var builds: BuildEngine; private set
     lateinit var warden: Warden; private set
     lateinit var device: Device; private set
+    /** The agent's device: like [device], but launch/input/screens target an invisible test display. */
+    lateinit var testDevice: Device; private set
     lateinit var secrets: Secrets; private set
     lateinit var providers: Providers; private set
     lateinit var settings: SettingsStore; private set
@@ -42,9 +45,10 @@ object Graph {
         builds = BuildEngine(toolchain, toolHost)
         warden = Warden(app)
         device = Device(warden)
+        testDevice = Device(warden, TestDisplay(app))
         secrets = Secrets(app)
         providers = Providers(paths.files, secrets)
         settings = SettingsStore(paths.files)
-        kiln = Kiln(paths, toolchain, builds, warden, device, providers, settings)
+        kiln = Kiln(paths, toolchain, builds, warden, device, testDevice, providers, settings)
     }
 }

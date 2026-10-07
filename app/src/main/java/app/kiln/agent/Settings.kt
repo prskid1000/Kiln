@@ -25,6 +25,8 @@ data class Settings(
     /** Kiln's own MCP server (SPEC §8.7). */
     val mcpServe: Boolean = false,
     val mcpPort: Int = 8765,
+    /** The agent runs and tests apps on an invisible display instead of taking over the screen. */
+    val backgroundTesting: Boolean = true,
 ) {
     fun merged(project: File?): Settings {
         val f = project?.let { File(it, ".kiln/config.json") }?.takeIf { it.isFile } ?: return this

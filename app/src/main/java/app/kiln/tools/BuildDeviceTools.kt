@@ -153,8 +153,8 @@ abstract class DeviceTool(protected val warden: Warden, protected val device: De
         // another app (a stray tap once pressed Warden's Stop button).
         if (inputTool) {
             val front = device.foregroundPackage()
-            if (front != null && front != pkg(ctx))
-                return ToolResult.error("${pkg(ctx)} is not in front ($front is) — launch it first with launch or run_app.")
+            if (front != pkg(ctx) && (front != null || device.testDisplay != null))
+                return ToolResult.error("${pkg(ctx)} is not in front (${front ?: "nothing"} is) — launch it first with launch or run_app.")
         }
         return exec(ctx, input)
     }
@@ -203,7 +203,7 @@ class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device, private 
         val logs = device.logcat(pkg, marker, minLevel = "W", max = 60)
         val alive = device.pid(pkg) != null
         val shot = if (alive) device.screenshot() else null
-        val tree = if (alive) device.uiTree() else emptyList()
+        val tree = if (alive) device.uiTree(pkg(ctx)) else emptyList()
         val text = buildString {
             appendLine("build OK ${r.totalMs}ms · installed · ${if (alive) "running" else "NOT RUNNING"}")
             if (fixed.isNotEmpty()) append(fixed)
@@ -308,7 +308,7 @@ class UiTreeTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val schema = schema { }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.READ_ONLY)
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        val nodes = device.uiTree()
+        val nodes = device.uiTree(pkg(ctx))
         return ToolResult.ok(ctx.spill(treeText(nodes).ifBlank { "(empty screen)" }), plural(nodes.size, "element"))
     }
 }
@@ -328,7 +328,7 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
         val coord = Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(input.str("target") ?: "")
         val target = input.str("target")?.takeIf { it.isNotBlank() && coord == null }
         val (x, y) = if (target != null) {
-            val nodes = device.uiTree()
+            val nodes = device.uiTree(pkg(ctx))
             val n = device.find(nodes, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
                 treeText(nodes.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
             n.cx to n.cy
@@ -379,7 +379,7 @@ class WaitForTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val end = System.currentTimeMillis() + (input.int("timeout_ms") ?: 5000).coerceIn(500, 20_000)
         while (System.currentTimeMillis() < end) {
-            if (device.find(device.uiTree(), input.req("target")) != null) return ToolResult.ok("\"${input.str("target")}\" is on screen")
+            if (device.find(device.uiTree(pkg(ctx)), input.req("target")) != null) return ToolResult.ok("\"${input.str("target")}\" is on screen")
             delay(500)
         }
         return ToolResult.error("\"${input.str("target")}\" did not appear")

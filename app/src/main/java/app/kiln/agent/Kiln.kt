@@ -70,12 +70,17 @@ class Kiln(
     private val builds: BuildEngine,
     private val warden: Warden,
     private val device: Device,
+    private val testDevice: Device,
     private val providers: Providers,
     val settings: SettingsStore,
 ) {
     private val classIndex = ClassIndex(toolchain)
 
-    private fun builtins(): List<Tool> = listOf(
+    private fun builtins(): List<Tool> {
+        // The agent tests on a hidden display unless the user turned that off; the user's own
+        // Run button always uses the real screen.
+        val device = if (settings.value.backgroundTesting) testDevice else device
+        return listOf(
         ListDirTool(), GlobTool(), GrepTool(), ReadFileTool(), WriteFileTool(), EditFileTool(), MultiEditTool(),
         MoveTool(), DeleteTool(), ReadOutputTool(),
         ProjectInfoTool(), SetAppMetaTool(), CheckTool(builds, classIndex), BuildTool(builds, classIndex), CleanTool(builds),
@@ -86,7 +91,8 @@ class Kiln(
         KeyTool(warden, device), WaitForTool(warden, device), DumpsysTool(warden, device), ShellTool(warden, device),
         SdkLookupTool(classIndex), KitDocsTool(toolchain), WebFetchTool(),
         TodoTool(), AskUserTool(), CheckpointTool(), RestoreTool(), MemoryTool(),
-    )
+        )
+    }
 
     /** Tools for [project]: built-ins + command tools (global and project) + connected MCP servers. */
     suspend fun tools(project: Project): Pair<ToolRegistry, List<Tool>> {

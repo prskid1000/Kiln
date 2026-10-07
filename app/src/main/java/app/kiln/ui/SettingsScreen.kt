@@ -216,6 +216,15 @@ private fun LimitsCard() {
         KField("Spending cap per chat (USD)", s.sessionUsd.toString(), { v -> v.toDoubleOrNull()?.let { n -> save { it.copy(sessionUsd = n) } } })
         KField("Spending cap per day (USD)", s.dailyUsd.toString(), { v -> v.toDoubleOrNull()?.let { n -> save { it.copy(dailyUsd = n) } } })
         Text("Spent today: $" + "%.3f".format(Graph.settings.spentToday()), style = T.bodySmall)
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+                Text("Test apps in the background", style = T.body)
+                Text("The agent runs and taps the app on a hidden display, so your screen stays yours. Your Run button always uses the real screen.",
+                    style = T.label)
+            }
+            androidx.compose.material3.Switch(s.backgroundTesting, { v -> save { it.copy(backgroundTesting = v) } },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = N.accent))
+        }
         Text("Effort (main agent)", style = T.label)
         val levels = listOf("low", "medium", "high", "xhigh", "max")
         SegTabs(levels.map { it to "" }, levels.indexOf(s.effort).coerceAtLeast(0)) { i -> save { it.copy(effort = levels[i]) } }
