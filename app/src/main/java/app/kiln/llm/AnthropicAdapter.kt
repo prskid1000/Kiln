@@ -61,13 +61,17 @@ class AnthropicAdapter(
             .apply { betas.forEach { addBeta(it) } }
             .build()
         val acc = BetaMessageAccumulator.create()
+        // Anthropic-format proxies in front of local reasoning models can still send
+        // inline <think>…</think> as plain text; route it to thinking like chat/completions does.
+        val tags = ThinkTags()
         try {
             client.beta().messages().createStreaming(params).use { stream ->
                 stream.stream().forEach { ev ->
                     acc.accumulate(ev)
-                    emit(parseJson(mapper.writeValueAsString(ev)) as JsonObject, onEvent)
+                    emit(parseJson(mapper.writeValueAsString(ev)) as JsonObject, tags, onEvent)
                 }
             }
+            tags.flush { t, think -> onEvent(if (think) ModelEvent.Thinking(t) else ModelEvent.Text(t)) }
         } catch (e: RateLimitException) {
             throw ProviderException("rate limited: ${e.message}", retryable = true, e)
         } catch (e: InternalServerException) {
@@ -76,7 +80,7 @@ class AnthropicAdapter(
             throw ProviderException("${e.statusCode()}: ${e.message}", retryable = e.statusCode() == 529 || e.statusCode() >= 500, e)
         }
         val msg = parseJson(mapper.writeValueAsString(acc.message())) as JsonObject
-        val content = msg["content"] as? JsonArray ?: JsonArray(emptyList())
+        val content = splitThinkTags(msg["content"] as? JsonArray ?: JsonArray(emptyList()))
         val u = msg["usage"] as? JsonObject
         val usage = Usage(
             input = (u?.get("input_tokens") as? JsonPrimitive)?.content?.toLongOrNull() ?: 0,
@@ -93,7 +97,7 @@ class AnthropicAdapter(
         ModelTurn(content, stop, usage, refusal = refusal)
     }
 
-    private fun emit(ev: JsonObject, onEvent: (ModelEvent) -> Unit) {
+    private fun emit(ev: JsonObject, tags: ThinkTags, onEvent: (ModelEvent) -> Unit) {
         when (ev.str("type")) {
             "content_block_start" -> {
                 val b = ev["content_block"] as? JsonObject ?: return
@@ -103,7 +107,7 @@ class AnthropicAdapter(
             "content_block_delta" -> {
                 val d = ev["delta"] as? JsonObject ?: return
                 when (d.str("type")) {
-                    "text_delta" -> onEvent(ModelEvent.Text(d.str("text") ?: ""))
+                    "text_delta" -> tags.feed(d.str("text") ?: "") { t, think -> onEvent(if (think) ModelEvent.Thinking(t) else ModelEvent.Text(t)) }
                     "thinking_delta" -> onEvent(ModelEvent.Thinking(d.str("thinking") ?: ""))
                     "input_json_delta" -> onEvent(ModelEvent.ToolArgs("", d.str("partial_json") ?: ""))
                 }

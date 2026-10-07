@@ -56,6 +56,44 @@ class Device(private val warden: Warden) {
         return warden.exec(listOf("pm", "grant", pkg, p))
     }
 
+    /** A file in an app's private data dir (relative to /data/data/<pkg>). */
+    data class DataFile(val path: String, val size: Long)
+
+    private fun dataPath(path: String): String {
+        val p = path.trim().removePrefix("./").removePrefix("/")
+        require(p.isNotEmpty() && p.split('/').none { it == ".." }) { "bad path: $path" }
+        return p
+    }
+
+    /** Every file in the app's private storage (builds are debuggable, so `run-as` works). */
+    suspend fun dataFiles(pkg: String): Result<List<DataFile>> {
+        guard(pkg)
+        val r = warden.exec(listOf("run-as", pkg, "sh", "-c",
+            "find . -type f ! -path './code_cache/*' -exec stat -c '%s|%n' {} +"))
+        if (!r.ok && r.out.isBlank()) return Result.failure(IllegalStateException(r.err.trim().ifBlank { "run-as failed" }))
+        return Result.success(r.out.lines().mapNotNull { l ->
+            val i = l.indexOf('|'); if (i < 0) null else DataFile(l.substring(i + 1).removePrefix("./"), l.substring(0, i).toLongOrNull() ?: 0)
+        }.sortedBy { it.path })
+    }
+
+    suspend fun readData(pkg: String, path: String): ByteArray? {
+        guard(pkg)
+        val (code, bytes) = warden.execBytes(listOf("run-as", pkg, "cat", dataPath(path)))
+        return if (code == 0) bytes else null
+    }
+
+    suspend fun writeData(pkg: String, path: String, bytes: ByteArray): ExecResult {
+        guard(pkg)
+        return warden.exec(listOf("run-as", pkg, "sh", "-c", "cat > \"$1\"", "sh", dataPath(path)), stdin = bytes)
+    }
+
+    suspend fun deleteData(pkg: String, path: String): ExecResult {
+        guard(pkg); return warden.exec(listOf("run-as", pkg, "rm", "-f", dataPath(path)))
+    }
+
+    suspend fun isInstalled(pkg: String): Boolean =
+        warden.exec(listOf("pm", "path", pkg)).out.contains("package:")
+
     suspend fun pid(pkg: String): Int? = warden.exec(listOf("pidof", pkg)).out.trim().split(" ").firstOrNull()?.toIntOrNull()
 
     /** Device clock in logcat's -T format, used as a "since" marker. */

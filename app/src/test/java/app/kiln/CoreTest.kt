@@ -134,6 +134,30 @@ class CoreTest {
         assertFalse(body.toString().contains("\"thinking\""))
     }
 
+    @Test fun `inline think tags split from text across chunk boundaries`() {
+        val t = app.kiln.llm.ThinkTags()
+        val text = StringBuilder(); val think = StringBuilder()
+        val out = { s: String, th: Boolean -> if (th) think.append(s) else text.append(s); Unit }
+        listOf("<thi", "nk>\nplan it", "</th", "ink>\n\nHello <b>", " world<", "/b>").forEach { t.feed(it, out) }
+        t.flush(out)
+        assertEquals("\nplan it", think.toString())
+        assertEquals("\n\nHello <b> world</b>", text.toString())
+    }
+
+    @Test fun `finished text blocks with inline think become a display-only thinking block`() {
+        val content = JsonArray(listOf(
+            obj("type" to "text", "text" to "<think>\nsimplify MainActivity\n</think>\n\nDone."),
+            obj("type" to "tool_use", "id" to "t1", "name" to "build", "input" to obj())))
+        val out = app.kiln.llm.splitThinkTags(content).map { it as JsonObject }
+        assertEquals(listOf("thinking", "text", "tool_use"), out.map { it.str("type") })
+        assertEquals("simplify MainActivity", out[0].str("thinking"))
+        assertTrue(out[0].containsKey("kiln_display_only"))   // never replayed to the model as a signed thinking block
+        assertEquals("Done.", out[1].str("text"))
+        // Content without tags is returned untouched.
+        val plain = JsonArray(listOf(obj("type" to "text", "text" to "Hello <b>x</b>")))
+        assertTrue(app.kiln.llm.splitThinkTags(plain) === plain)
+    }
+
     @Test fun `openai responses converts calls and outputs`() {
         val a = OpenAIResponsesAdapter(Profile("oa", "OA", Protocol.OPENAI_RESPONSES, "https://api.openai.com", caps = Caps()), "k")
         val body = a.buildBody(ModelRequest("gpt", "sys", transcript(), listOf(tool)))

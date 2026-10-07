@@ -3,7 +3,24 @@ package app.kiln.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,7 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.kiln.ui.theme.N
@@ -92,4 +108,111 @@ fun SegTabs(options: List<Pair<String, String>>, selected: Int, modifier: Modifi
     }
 }
 
-val MonoBody = TextStyle(fontSize = 12.sp)
+/** Top app bar: optional back arrow, title + subtitle, trailing actions. */
+@Composable
+fun KTopBar(title: String, subtitle: String? = null, onBack: (() -> Unit)? = null, modifier: Modifier = Modifier,
+            leading: (@Composable () -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
+    Row(modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = if (onBack != null) 4.dp else 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        if (onBack != null) IconBtn(Icons.AutoMirrored.Rounded.ArrowBack, "Back", onClick = onBack)
+        leading?.let { it(); Spacer(Modifier.width(12.dp)) }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = if (subtitle == null && onBack == null) T.h3 else T.cardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle != null) Text(subtitle, style = T.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        actions()
+    }
+}
+
+/** 48dp icon button. */
+@Composable
+fun IconBtn(icon: ImageVector, desc: String, modifier: Modifier = Modifier, tint: Color = N.textLabel,
+            enabled: Boolean = true, onClick: () -> Unit) {
+    Box(modifier.size(48.dp).clip(CircleShape).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, desc, tint = if (enabled) tint else N.textMuted.copy(alpha = 0.35f), modifier = Modifier.size(22.dp))
+    }
+}
+
+/** Filled circular accent button (send, run). */
+@Composable
+fun FilledIconBtn(icon: ImageVector, desc: String, modifier: Modifier = Modifier, container: Color = N.accent,
+                  enabled: Boolean = true, onClick: () -> Unit) {
+    Box(modifier.size(44.dp).clip(CircleShape).background(if (enabled) container else N.neutral800)
+        .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, desc, tint = if (enabled) N.bg else N.textMuted, modifier = Modifier.size(22.dp))
+    }
+}
+
+private val tileHues = listOf(0xFF9184D9, 0xFF7FB69A, 0xFFD9A48A, 0xFF84AED9, 0xFFC98AD9, 0xFFD9C48A).map { Color(it) }
+
+/** The app's tile: its initial on a hue picked from its name — stable per project. */
+@Composable
+fun AppTile(label: String, key: String, size: Dp = 44.dp) {
+    val hue = tileHues[(key.hashCode() and 0x7fffffff) % tileHues.size]
+    Box(Modifier.size(size).clip(RoundedCornerShape(size * 0.28f)).background(hue.copy(alpha = 0.18f))
+        .border(1.dp, hue.copy(alpha = 0.45f), RoundedCornerShape(size * 0.28f)), contentAlignment = Alignment.Center) {
+        Text(label.trim().take(1).uppercase().ifBlank { "?" }, style = T.cardTitle.copy(color = hue, fontSize = (size.value * 0.42f).sp))
+    }
+}
+
+/** Pill tab strip with a sliding indicator. */
+@Composable
+fun PillTabs(options: List<Pair<ImageVector, String>>, selected: Int, modifier: Modifier = Modifier, onSelect: (Int) -> Unit) {
+    BoxWithConstraints(modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(22.dp)).background(N.surface)
+        .border(1.dp, N.cardRingSm, RoundedCornerShape(22.dp)).padding(4.dp)) {
+        val w = maxWidth / options.size
+        val x by animateDpAsState(w * selected, label = "tab")
+        Box(Modifier.offset(x = x).width(w).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(N.accent800))
+        Row(Modifier.fillMaxSize()) {
+            options.forEachIndexed { i, (icon, label) ->
+                val on = i == selected
+                Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).clickable { onSelect(i) },
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, null, tint = if (on) N.accent100 else N.textMuted, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(label, style = T.control.copy(fontSize = 13.sp, color = if (on) N.accent100 else N.textLabel))
+                }
+            }
+        }
+    }
+}
+
+/** Small filter chip. */
+@Composable
+fun KChip(text: String, on: Boolean, modifier: Modifier = Modifier, color: Color = N.accent, onClick: () -> Unit) {
+    Text(text, style = T.label.copy(color = if (on) color else N.textMuted, fontSize = 12.sp),
+        modifier = modifier.clip(RoundedCornerShape(14.dp)).background(if (on) color.copy(alpha = 0.14f) else Color.Transparent)
+            .border(1.dp, if (on) color.copy(alpha = 0.5f) else N.divider, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp))
+}
+
+/** Centered empty state. */
+@Composable
+fun EmptyState(icon: ImageVector, title: String, body: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
+    Column(modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(56.dp).clip(CircleShape).background(N.accent800.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = N.accent2, modifier = Modifier.size(26.dp))
+        }
+        Text(title, style = T.cardTitle)
+        Text(body, style = T.bodySmall.copy(color = N.textMuted, textAlign = TextAlign.Center))
+        action?.invoke()
+    }
+}
+
+fun relativeTime(ms: Long, now: Long = System.currentTimeMillis()): String {
+    val s = (now - ms) / 1000
+    return when {
+        s < 60 -> "just now"
+        s < 3600 -> "${s / 60}m ago"
+        s < 86_400 -> "${s / 3600}h ago"
+        s < 7 * 86_400 -> "${s / 86_400}d ago"
+        else -> java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(java.util.Date(ms))
+    }
+}
+
+fun humanBytes(n: Long): String = when {
+    n < 1024 -> "$n B"
+    n < 1024 * 1024 -> "%.1f KB".format(n / 1024.0)
+    else -> "%.1f MB".format(n / 1048576.0)
+}

@@ -3,7 +3,8 @@
 Builds the Kiln toolchain pack: everything an on-device build needs, in one
 versioned zip that the app unpacks into its files dir.
 
-    python toolchain/build_pack.py            # -> toolchain/out/kiln-toolchain-<v>.zip
+    python toolchain/build_pack.py            # -> toolchain/out/kiln-toolchain-<v>.zip (arm64 phones)
+    KILN_ARCH=x86_64 python toolchain/build_pack.py   # -> ...-<v>-x86_64.zip (emulators, Chromebooks)
 
 Inputs are downloaded into toolchain/.cache (gitignored) and pinned below, so a
 pack is reproducible. Run `gradlew :kit:exportKit :toolserver:jar` first (the
@@ -39,7 +40,11 @@ ROOT = Path(__file__).resolve().parent            # toolchain/
 REPO = ROOT.parent
 CACHE = ROOT / ".cache"
 OUT = ROOT / "out"
-PACK = OUT / "pack"
+# Native parts (JDK, aapt2, launcher) are per ABI; everything else is shared.
+ARCH = os.environ.get("KILN_ARCH", "aarch64")
+ABI = {"aarch64": "arm64-v8a", "x86_64": "x86_64"}[ARCH]
+SUFFIX = "" if ARCH == "aarch64" else f"-{ARCH}"
+PACK = OUT / f"pack{SUFFIX}"
 
 SDK = Path(os.environ.get("ANDROID_HOME", r"C:\Users\prith\AppData\Local\Android\Sdk"))
 NDK = SDK / "ndk" / "27.1.12297006"
@@ -99,11 +104,11 @@ def ar_members(data):
 
 def termux_root():
     """Unpack the Termux packages into .cache/termux; returns its usr/ dir."""
-    root = CACHE / "termux"
+    root = CACHE / f"termux{SUFFIX}"
     usr = root / "data" / "data" / "com.termux" / "files" / "usr"
     if usr.exists():
         return usr
-    index = fetch(TERMUX + "dists/stable/main/binary-aarch64/Packages", "termux-Packages").read_text()
+    index = fetch(TERMUX + f"dists/stable/main/binary-{ARCH}/Packages", f"termux-Packages-{ARCH}").read_text()
     for pkg in TERMUX_PKGS:
         m = re.search(rf"^Package: {re.escape(pkg)}\n(?:.+\n)*?Filename: (\S+)", index, re.M)
         if m is None:
@@ -124,7 +129,7 @@ def build_jdk(usr):
     # Native deps libjvm/libjava need beyond bionic: copy real files (no symlinks).
     for lib in ["libandroid-shmem.so", "libandroid-spawn.so", "libz.so.1"]:
         shutil.copyfile(os.path.realpath(usr / "lib" / lib), out / "lib" / lib)
-    cxx = NDK / "toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+    cxx = NDK / f"toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/{ARCH}-linux-android/libc++_shared.so"
     shutil.copyfile(cxx, out / "lib" / "libc++_shared.so")
     return jhome
 
@@ -136,10 +141,10 @@ def build_aapt2():
     """aapt2 from Termux: a PIE binary, so it runs as `linker64 bin/aapt2` inside
     the app sandbox (the static builds are ET_EXEC, which linker64 refuses).
     Its shared libraries go to lib/ under their SONAME-style names."""
-    root = CACHE / "termux-aapt2"
+    root = CACHE / f"termux-aapt2{SUFFIX}"
     usr = root / "data" / "data" / "com.termux" / "files" / "usr"
     if not usr.exists():
-        index = fetch(TERMUX + "dists/stable/main/binary-aarch64/Packages", "termux-Packages").read_text()
+        index = fetch(TERMUX + f"dists/stable/main/binary-{ARCH}/Packages", f"termux-Packages-{ARCH}").read_text()
         for pkg in AAPT2_PKGS:
             m = re.search(rf"^Package: {re.escape(pkg)}\n(?:.+\n)*?Filename: (\S+)", index, re.M)
             if m is None:
@@ -161,7 +166,7 @@ def build_aapt2():
 def build_bin(jhome):
     b = PACK / "bin"
     b.mkdir(parents=True, exist_ok=True)
-    clang = NDK / "toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android30-clang.cmd"
+    clang = NDK / f"toolchains/llvm/prebuilt/windows-x86_64/bin/{ARCH}-linux-android30-clang.cmd"
     run([clang, "-O2", "-Wall", "-Wl,-z,max-page-size=16384", f"-I{jhome / 'include'}",
          f"-I{jhome / 'include' / 'linux'}", ROOT / "launcher" / "kilnjava.c", "-o", b / "kilnjava", "-ldl"])
 
@@ -310,9 +315,9 @@ def finish():
     for p in sorted(PACK.rglob("*")):
         if p.is_file() and p.name != "VERSION.json":
             files[p.relative_to(PACK).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
-    meta = {"version": VERSION, "kotlin": KOTLIN, "r8": R8, "files": files}
+    meta = {"version": VERSION, "abi": ABI, "kotlin": KOTLIN, "r8": R8, "files": files}
     (PACK / "VERSION.json").write_text(json.dumps(meta, indent=1))
-    z = OUT / f"kiln-toolchain-{VERSION}.zip"
+    z = OUT / f"kiln-toolchain-{VERSION}{SUFFIX}.zip"
     with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for p in sorted(PACK.rglob("*")):
             if p.is_file():

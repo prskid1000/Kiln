@@ -95,6 +95,11 @@ class Toolchain(private val paths: Paths) {
             }
             val meta = parseJson(File(staging, "VERSION.json").readText()) as JsonObject
             val version = meta.str("version") ?: error("pack has no version")
+            // The JDK, aapt2 and launcher are native: a pack only runs on its own ABI.
+            val abi = meta.str("abi") ?: "arm64-v8a"
+            check(abi == android.os.Build.SUPPORTED_ABIS.first()) {
+                "this pack is for $abi; this device needs ${android.os.Build.SUPPORTED_ABIS.first()}"
+            }
             val files = meta["files"] as JsonObject
             var checked = 0
             for ((rel, sha) in files) {

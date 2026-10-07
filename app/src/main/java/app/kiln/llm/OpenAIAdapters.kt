@@ -180,6 +180,12 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
         val calls = sortedMapOf<Int, Call>()
         var finish: String? = null
         var usage = Usage()
+        // Local reasoning models (Qwen, DeepSeek via llama.cpp-style proxies) put their
+        // reasoning inline as <think>…</think>; route it to thinking, not the reply.
+        val tags = ThinkTags()
+        fun emit(t: String, think: Boolean) {
+            if (think) { thinking.append(t); onEvent(ModelEvent.Thinking(t)) } else { text.append(t); onEvent(ModelEvent.Text(t)) }
+        }
         http.newCall(request("/chat/completions", buildBody(req))).execute().use { r ->
             check(r)
             sse(r) { _, data ->
@@ -194,7 +200,7 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
                 val choice = (j["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return@sse
                 choice.str("finish_reason")?.let { finish = it }
                 val d = choice["delta"] as? JsonObject ?: return@sse
-                d.str("content")?.let { text.append(it); onEvent(ModelEvent.Text(it)) }
+                d.str("content")?.let { tags.feed(it, ::emit) }
                 (d.str("reasoning_content") ?: d.str("reasoning"))?.let { thinking.append(it); onEvent(ModelEvent.Thinking(it)) }
                 (d["tool_calls"] as? JsonArray)?.forEach { tc ->
                     val o = tc as JsonObject
@@ -208,9 +214,10 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
                 }
             }
         }
+        tags.flush(::emit)
         val blocks = mutableListOf<JsonElement>()
         if (thinking.isNotEmpty()) blocks += obj("type" to "thinking", "thinking" to thinking.toString(), "kiln_display_only" to true)
-        if (text.isNotEmpty()) blocks += obj("type" to "text", "text" to text.toString())
+        if (text.isNotBlank()) blocks += obj("type" to "text", "text" to text.toString())
         calls.values.forEachIndexed { i, c ->
             val input = runCatching { parseJson(c.args.toString().ifBlank { "{}" }) }.getOrElse { obj("_invalid_json" to c.args.toString()) }
             blocks += obj("type" to "tool_use", "id" to c.id.ifBlank { "call_$i" }, "name" to c.name, "input" to input)
@@ -278,12 +285,14 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
     override suspend fun stream(req: ModelRequest, onEvent: (ModelEvent) -> Unit): ModelTurn = withContext(Dispatchers.IO) {
         var final: JsonObject? = null
         var incomplete: String? = null
+        val tags = ThinkTags()   // proxies for local models may inline <think>…</think> here too
+        val emit: (String, Boolean) -> Unit = { t, think -> onEvent(if (think) ModelEvent.Thinking(t) else ModelEvent.Text(t)) }
         http.newCall(request("/responses", buildBody(req))).execute().use { r ->
             check(r)
             sse(r) { event, data ->
                 val j = parseJson(data) as? JsonObject ?: return@sse
                 when (event ?: j.str("type")) {
-                    "response.output_text.delta" -> onEvent(ModelEvent.Text(j.str("delta") ?: ""))
+                    "response.output_text.delta" -> tags.feed(j.str("delta") ?: "", emit)
                     "response.reasoning_summary_text.delta" -> onEvent(ModelEvent.Thinking(j.str("delta") ?: ""))
                     "response.output_item.added" -> (j["item"] as? JsonObject)?.takeIf { it.str("type") == "function_call" }
                         ?.let { onEvent(ModelEvent.ToolStart(it.str("call_id") ?: "", it.str("name") ?: "")) }
@@ -294,6 +303,7 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
                 }
             }
         }
+        tags.flush(emit)
         val resp = final ?: throw ProviderException("stream ended without a response", retryable = true)
         val items = resp["output"] as? JsonArray ?: JsonArray(emptyList())
         val blocks = mutableListOf<JsonElement>()
@@ -321,6 +331,51 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
             input = ((u?.get("input_tokens") as? JsonPrimitive)?.content?.toLongOrNull() ?: 0) - cached,
             output = (u?.get("output_tokens") as? JsonPrimitive)?.content?.toLongOrNull() ?: 0, cacheRead = cached)
         val stop = if (calls > 0) Stop.TOOL_USE else if (incomplete != null) Stop.MAX_TOKENS else Stop.END_TURN
-        ModelTurn(JsonArray(blocks), stop, usage, providerState = obj("items" to items))
+        ModelTurn(splitThinkTags(JsonArray(blocks)), stop, usage, providerState = obj("items" to items))
     }
+}
+
+/**
+ * Moves inline `<think>…</think>` out of finished `text` blocks into a display-only thinking block,
+ * so the saved transcript (and a session reopened later) never shows the raw tags as reply text.
+ */
+fun splitThinkTags(content: JsonArray): JsonArray {
+    if (content.none { (it as? JsonObject)?.let { b -> b.str("type") == "text" && b.str("text")?.contains("<think>") == true } == true }) return content
+    val out = mutableListOf<JsonElement>()
+    for (e in content) {
+        val b = e as? JsonObject
+        val text = b?.takeIf { it.str("type") == "text" }?.str("text")
+        if (text == null || "<think>" !in text) { out += e; continue }
+        val think = StringBuilder(); val reply = StringBuilder()
+        ThinkTags().apply { feed(text) { t, inside -> (if (inside) think else reply).append(t) }; flush { t, inside -> (if (inside) think else reply).append(t) } }
+        if (think.isNotBlank()) out += obj("type" to "thinking", "thinking" to think.toString().trim(), "kiln_display_only" to true)
+        if (reply.isNotBlank()) out += obj("type" to "text", "text" to reply.toString().trim())
+    }
+    return JsonArray(out)
+}
+
+/** Splits a streamed reply into text and inline `<think>…</think>` reasoning; tags may straddle chunks. */
+class ThinkTags {
+    private val pending = StringBuilder()
+    private var inside = false
+
+    fun feed(chunk: String, out: (String, Boolean) -> Unit) {
+        pending.append(chunk)
+        while (true) {
+            val tag = if (inside) "</think>" else "<think>"
+            val at = pending.indexOf(tag)
+            if (at >= 0) {
+                if (at > 0) out(pending.substring(0, at), inside)
+                pending.delete(0, at + tag.length)
+                inside = !inside
+                continue
+            }
+            // Hold back a tail that could be the start of a tag.
+            val keep = (1 until tag.length).lastOrNull { pending.endsWith(tag.substring(0, it)) } ?: 0
+            if (pending.length > keep) { out(pending.substring(0, pending.length - keep), inside); pending.delete(0, pending.length - keep) }
+            return
+        }
+    }
+
+    fun flush(out: (String, Boolean) -> Unit) { if (pending.isNotEmpty()) out(pending.toString(), inside); pending.clear() }
 }

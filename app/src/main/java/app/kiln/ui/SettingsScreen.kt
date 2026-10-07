@@ -48,16 +48,17 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen(vm: KilnVM, onClose: () -> Unit) {
     var editing by remember { mutableStateOf<Profile?>(null) }
     editing?.let { ProfileEditor(it) { editing = null }; return }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Settings", style = T.h3, modifier = Modifier.weight(1f)); KButton("Done", Tone.Accent, onClick = onClose)
-        }
+    Column(Modifier.fillMaxSize()) {
+    KTopBar("Settings", onBack = onClose)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ToolchainCard(vm)
         ModelsCard { editing = it }
         LimitsCard()
         ToolsCard()
         McpCard()
         EvalsCard()
+    }
     }
 }
 
