@@ -501,8 +501,9 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
                     Text(current.progress.ifBlank { "$title…" }, style = T.bodySmall.copy(color = N.textLabel), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            // What the agent last saw on the device, as it tests.
-            if (shot != null) Screenshot(shot, Modifier.padding(top = 8.dp))
+            // What the agent last saw on the device — unless a step shown above already carries that picture.
+            val onStep = shown.any { (it.preview ?: it.images.firstOrNull()) === shot }
+            if (shot != null && !onStep) Screenshot(shot, Modifier.padding(top = 8.dp))
         }
         return
     }
