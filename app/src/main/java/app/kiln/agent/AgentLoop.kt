@@ -313,8 +313,14 @@ class AgentLoop(
                     else -> "Almost out of steps: stop changing code, make sure it builds, and report what works and what doesn't."
                 } + "</system-reminder>")
             }
+            // A passing qa_check is the finish line: run 8 kept re-testing for minutes after one.
+            val qaIds = uses.filter { it.str("name") == "qa_check" }.mapNotNull { it.str("id") }.toSet()
+            val qaPassed = results.any { r -> r.str("tool_use_id") in qaIds && r["is_error"] == null }
+            val finish = if (!qaPassed) null else obj("type" to "text", "text" to "<system-reminder>qa_check passed every criterion. " +
+                "Stop testing now: tick off the remaining todos, and finish with a short summary of what was built and how to use it. " +
+                "Don't re-run qa_check or re-test what it verified; change code only if the user asks.</system-reminder>")
             // Queued user messages ride along with the tool results: the model sees them at its next step.
-            session.append(Msg("user", JsonArray(results + listOfNotNull(budget) + (drainSteering() ?: emptyList()))))
+            session.append(Msg("user", JsonArray(results + listOfNotNull(budget, finish) + (drainSteering() ?: emptyList()))))
         }
     }
 
