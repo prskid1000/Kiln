@@ -2,6 +2,7 @@
 
 package app.kiln.kit
 
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -300,7 +301,7 @@ fun KThemePicker(selected: String, onSelect: (KTheme) -> Unit, modifier: Modifie
     androidx.compose.foundation.layout.FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         themes.forEach { t ->
             val on = t.name.equals(selected, ignoreCase = true)
-            Column(Modifier.width(swatch + 16.dp).clip(RoundedCornerShape(kr(12))).clickable { onSelect(t) }.padding(4.dp),
+            Column(Modifier.width(swatch + 16.dp).clip(RoundedCornerShape(kr(12))).selectable(on) { onSelect(t) }.padding(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(swatch).clip(CircleShape).background(t.palette.bg)
                     .border(if (on) 3.dp else 1.dp, if (on) Nocturne.accent else Nocturne.divider, CircleShape), contentAlignment = Alignment.Center) {

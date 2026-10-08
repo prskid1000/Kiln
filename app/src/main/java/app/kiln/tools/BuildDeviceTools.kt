@@ -552,6 +552,12 @@ internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.
         nodes.filter { it.text.isNotBlank() || it.desc.isNotBlank() }.map { it.label().take(60) }.distinct()
     val was = labels(before); val now = labels(after)
     val appeared = now.filter { it !in was }; val gone = was.filter { it !in now }
+    // Selection changes (a chip, a switch, a tab) keep the same labels: report the state instead.
+    val toggled = after.mapNotNull { a ->
+        val b = before.firstOrNull { it.label() == a.label() && it.checked != null } ?: return@mapNotNull null
+        if (a.checked != null && a.checked != b.checked) "“${a.label().take(40)}” is now ${if (a.checked) "selected" else "unselected"}" else null
+    }.distinct()
+    if (appeared.isEmpty() && gone.isEmpty() && toggled.isNotEmpty()) return toggled.take(6).joinToString(", ") + "."
     if (appeared.isEmpty() && gone.isEmpty()) {
         // Focusing a field changes nothing in the tree: say so, or the tap looks like it failed.
         if (x != null && y != null) before.filter { "EditText" in it.cls && x in it.left..it.right && y in it.top..it.bottom }

@@ -2,6 +2,7 @@
 
 package app.kiln.kit
 
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -248,7 +250,7 @@ fun KSegmented(
         options.forEachIndexed { i, o ->
             val on = i == selected
             Row(Modifier.then(if (fullWidth) Modifier.weight(1f) else Modifier).fillMaxWidth().clip(RoundedCornerShape(kr(9)))
-                .background(if (on) Nocturne.accent800 else Color.Transparent).clickable { onSelect(i) }
+                .background(if (on) Nocturne.accent800 else Color.Transparent).selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { onSelect(i) }
                 .padding(horizontal = 12.dp).height(size.height), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center) {
                 icons.getOrNull(i)?.let { Icon(it, null, tint = if (on) Nocturne.accent100 else Nocturne.textLabel, modifier = Modifier.size(size.icon)); Spacer(Modifier.width(6.dp)) }
@@ -266,7 +268,7 @@ fun KToggleGroup(options: List<String>, selected: Set<Int>, onChange: (Set<Int>)
     FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEachIndexed { i, o ->
             val on = i in selected
-            KButton(o, variant = if (on) KVariant.Tonal else KVariant.Outline, tone = if (on) KTone.Accent else KTone.Neutral, size = size,
+            KButton(o, modifier = Modifier.semantics { this.selected = on }, variant = if (on) KVariant.Tonal else KVariant.Outline, tone = if (on) KTone.Accent else KTone.Neutral, size = size,
                 icon = if (on) Icons.Filled.Check else null) { onChange(if (on) selected - i else selected + i) }
         }
     }
@@ -470,7 +472,7 @@ fun KCheckbox(checked: Boolean, onChange: (Boolean) -> Unit, label: String, modi
 fun KRadioGroup(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     Column(modifier) {
         options.forEachIndexed { i, o ->
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).clickable { onSelect(i) }.padding(vertical = 2.dp),
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).selectable(i == selected, role = androidx.compose.ui.semantics.Role.RadioButton) { onSelect(i) }.padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(i == selected, { onSelect(i) }, colors = RadioButtonDefaults.colors(selectedColor = Nocturne.accent))
                 Text(o, style = MaterialTheme.typography.bodyLarge)

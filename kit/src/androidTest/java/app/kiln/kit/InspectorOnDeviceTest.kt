@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertTrue
@@ -38,6 +39,27 @@ class InspectorOnDeviceTest {
     }
 
     private fun tree() = String(Base64.decode(ask(Intent(KilnInspector.ACTION)), Base64.DEFAULT))
+
+    /** Chips and segments report their selection as checked, so a tap on one can say what changed. */
+    @Test fun selectionIsReported() {
+        rule.setContent {
+            KilnTheme {
+                var pick by androidx.compose.runtime.remember { mutableStateOf(0) }
+                KSegmented(listOf("Food", "Bills"), pick, { pick = it })
+            }
+        }
+        rule.waitForIdle()
+        // The selected segment, by the text on it or on its child.
+        fun selected(xml: String) = Regex("""<node text="([^"]*)"[^>]*checkable="true" checked="true"""").findAll(xml)
+            .map { it.groupValues[1] }.filter { it.isNotEmpty() }.toList() +
+            Regex("""checkable="true" checked="true"[^>]*>\s*<node text="([^"]+)"""").findAll(xml).map { it.groupValues[1] }.toList()
+        val before = tree()
+        assertTrue("Food selected first: $before", "Food" in selected(before) && "Bills" !in selected(before))
+        rule.onNode(androidx.compose.ui.test.hasText("Bills")).performClick()
+        rule.waitForIdle()
+        val after = tree()
+        assertTrue("Bills selected after the tap: $after", "Bills" in selected(after) && "Food" !in selected(after))
+    }
 
     @Test fun dialogsAreVisibleAndTappable() {
         rule.runOnUiThread { KilnInspector.install(rule.activity) }

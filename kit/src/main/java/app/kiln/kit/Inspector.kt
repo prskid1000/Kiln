@@ -187,6 +187,7 @@ internal object KilnInspector {
         val desc = c.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" ").orEmpty()
         val role = c.getOrNull(SemanticsProperties.Role)
         val toggle = c.getOrNull(SemanticsProperties.ToggleableState)
+        val selected = c.getOrNull(SemanticsProperties.Selected)
         val cls = when {
             c.getOrNull(SemanticsProperties.EditableText) != null -> "android.widget.EditText"
             role == Role.Button -> "android.widget.Button"
@@ -201,7 +202,9 @@ internal object KilnInspector {
         out.append("<node text=\"").append(esc(text)).append("\" resource-id=\"").append(esc(c.getOrNull(SemanticsProperties.TestTag)))
             .append("\" class=\"").append(cls).append("\" package=\"").append(pkg)
             .append("\" content-desc=\"").append(esc(desc))
-            .append("\" checkable=\"").append(toggle != null).append("\" checked=\"").append(toggle == ToggleableState.On)
+            // Chips, segments and tabs are "selected" rather than toggled: report both as checked.
+            .append("\" checkable=\"").append(toggle != null || selected != null)
+            .append("\" checked=\"").append(toggle == ToggleableState.On || selected == true)
             .append("\" clickable=\"").append(SemanticsActions.OnClick in c)
             .append("\" enabled=\"").append(SemanticsProperties.Disabled !in c)
             .append("\" scrollable=\"").append(SemanticsActions.ScrollBy in c)
