@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -92,8 +93,13 @@ import java.time.format.DateTimeFormatter
 // ---------------------------------------------------------------- shared
 
 /** Small / Medium / Large: one knob for height, padding and text size. */
-enum class KSize(val height: Dp, val padH: Dp, val text: Int, val icon: Dp) {
-    Small(34.dp, 12.dp, 13, 16.dp), Medium(44.dp, 18.dp, 15, 18.dp), Large(54.dp, 24.dp, 17, 22.dp)
+enum class KSize(private val h: Int, private val pad: Int, private val txt: Int, private val ic: Int) {
+    Small(34, 12, 13, 16), Medium(44, 18, 15, 18), Large(54, 24, 17, 22);
+    // Scaled by the theme's density and text scale (KilnTheme `density`, `textScale`).
+    val height: Dp get() = (h * Nocturne.sizeScale).dp
+    val padH: Dp get() = (pad * Nocturne.sizeScale).dp
+    val text: Int get() = Math.round(txt * Nocturne.textScale)
+    val icon: Dp get() = (ic * Nocturne.sizeScale).dp
 }
 
 /** How strongly a button or card is drawn. */
@@ -103,14 +109,29 @@ enum class KVariant { Filled, Tonal, Outline, Ghost }
 fun Modifier.kSize(width: Dp? = null, height: Dp? = null): Modifier =
     this.then(if (width != null) Modifier.width(width) else Modifier).then(if (height != null) Modifier.height(height) else Modifier)
 
+/**
+ * One-off colours for a single component, over the theme: `colors = KColors(container = Color(0xFF2E7D32))`.
+ * Leave a field null to keep the theme's colour. For an app-wide change use [KilnTheme] instead.
+ */
+data class KColors(val container: Color? = null, val content: Color? = null, val border: Color? = null)
+
 /** Background / content colours for a tone at a variant. */
 internal fun toneColors(tone: KTone, variant: KVariant): Pair<Color, Color> {
     val c = tone.color()
+    val onFilled = if (Nocturne.isDark) Nocturne.bg else Color.White
     return when (variant) {
-        KVariant.Filled -> (if (tone == KTone.Neutral) Nocturne.surfaceHi else c) to (if (tone == KTone.Neutral) Nocturne.text else Nocturne.bg)
+        KVariant.Filled -> (if (tone == KTone.Neutral) Nocturne.surfaceHi else c) to (if (tone == KTone.Neutral) Nocturne.text else onFilled)
         KVariant.Tonal -> c.copy(alpha = 0.18f) to (if (tone == KTone.Neutral) Nocturne.text else c)
         KVariant.Outline, KVariant.Ghost -> Color.Transparent to (if (tone == KTone.Neutral) Nocturne.text else c)
     }
+}
+
+/** [toneColors] with a component's [KColors] applied; the third value is the border (null = none). */
+internal fun resolveColors(tone: KTone, variant: KVariant, colors: KColors?): Triple<Color, Color, Color?> {
+    val (bg, fg) = toneColors(tone, variant)
+    val content = colors?.content ?: fg
+    val border = colors?.border ?: if (variant == KVariant.Outline) content.copy(alpha = 0.6f) else null
+    return Triple(colors?.container ?: bg, content, border)
 }
 
 // ---------------------------------------------------------------- buttons
@@ -134,10 +155,14 @@ fun KButton(
     fullWidth: Boolean = false,
     width: Dp? = null,
     height: Dp? = null,
-    corner: Dp = 12.dp,
+    corner: Dp = kr(12),
+    colors: KColors? = null,
+    textStyle: TextStyle? = null,
+    border: Dp = 1.dp,
+    contentPadding: PaddingValues? = null,
     onClick: () -> Unit,
 ) {
-    val (bg, fg) = toneColors(tone, variant)
+    val (bg, fg, line) = resolveColors(tone, variant, colors)
     val shape = RoundedCornerShape(corner)
     val alpha = if (enabled) 1f else 0.4f
     Row(
@@ -145,15 +170,17 @@ fun KButton(
             .then(if (fullWidth) Modifier.fillMaxWidth() else Modifier)
             .kSize(width, height ?: size.height).heightIn(min = size.height)
             .clip(shape).background(bg.copy(alpha = bg.alpha * alpha))
-            .then(if (variant == KVariant.Outline) Modifier.border(1.dp, fg.copy(alpha = 0.6f * alpha), shape) else Modifier)
+            .then(if (line != null && border > 0.dp) Modifier.border(border, line.copy(alpha = line.alpha * alpha), shape) else Modifier)
             .clickable(enabled = enabled && !loading, onClick = onClick)
-            .padding(horizontal = size.padH),
+            .padding(contentPadding ?: PaddingValues(horizontal = size.padH)),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
         if (loading) { CircularProgressIndicator(Modifier.size(size.icon), color = fg, strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
         else if (icon != null) { Icon(icon, null, tint = fg.copy(alpha = alpha), modifier = Modifier.size(size.icon)); Spacer(Modifier.width(8.dp)) }
-        Text(text, color = fg.copy(alpha = alpha), fontSize = size.text.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(text, color = fg.copy(alpha = alpha), maxLines = 1,
+            style = (textStyle ?: TextStyle(fontSize = size.text.sp, fontWeight = FontWeight.Medium)).let { st ->
+                st.copy(fontFamily = st.fontFamily ?: Nocturne.sans) })
         if (trailingIcon != null) { Spacer(Modifier.width(8.dp)); Icon(trailingIcon, null, tint = fg.copy(alpha = alpha), modifier = Modifier.size(size.icon)) }
     }
 }
@@ -168,12 +195,13 @@ fun KIconButton(
     tone: KTone = KTone.Neutral,
     size: KSize = KSize.Medium,
     enabled: Boolean = true,
+    colors: KColors? = null,
     onClick: () -> Unit,
 ) {
-    val (bg, fg) = toneColors(tone, variant)
+    val (bg, fg, line) = resolveColors(tone, variant, colors)
     Box(
         modifier.size(size.height).clip(CircleShape).background(bg)
-            .then(if (variant == KVariant.Outline) Modifier.border(1.dp, fg.copy(alpha = 0.6f), CircleShape) else Modifier)
+            .then(if (line != null) Modifier.border(1.dp, line, CircleShape) else Modifier)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, description, tint = fg.copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(size.icon + 4.dp)) }
@@ -201,10 +229,10 @@ fun KSegmented(
     icons: List<ImageVector?> = emptyList(),
 ) {
     Row(modifier.then(if (fullWidth) Modifier.fillMaxWidth() else Modifier).height(size.height)
-        .clip(RoundedCornerShape(12.dp)).background(Nocturne.surface).border(1.dp, Nocturne.divider, RoundedCornerShape(12.dp)).padding(3.dp)) {
+        .clip(RoundedCornerShape(kr(12))).background(Nocturne.surface).border(1.dp, Nocturne.divider, RoundedCornerShape(kr(12))).padding(3.dp)) {
         options.forEachIndexed { i, o ->
             val on = i == selected
-            Row(Modifier.then(if (fullWidth) Modifier.weight(1f) else Modifier).fillMaxWidth().clip(RoundedCornerShape(9.dp))
+            Row(Modifier.then(if (fullWidth) Modifier.weight(1f) else Modifier).fillMaxWidth().clip(RoundedCornerShape(kr(9)))
                 .background(if (on) Nocturne.accent800 else Color.Transparent).clickable { onSelect(i) }
                 .padding(horizontal = 12.dp).height(size.height), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center) {
@@ -258,7 +286,9 @@ fun KTextField(
     readOnly: Boolean = false,
     width: Dp? = null,
     height: Dp? = null,
-    corner: Dp = 12.dp,
+    corner: Dp = kr(12),
+    colors: KColors? = null,
+    textStyle: TextStyle? = null,
 ) {
     var reveal by remember { mutableStateOf(false) }
     Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
@@ -281,13 +311,17 @@ fun KTextField(
             visualTransformation = if (password && !reveal) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password && keyboard == KeyboardType.Text) KeyboardType.Password else keyboard),
             shape = RoundedCornerShape(corner),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Nocturne.accent, unfocusedBorderColor = Nocturne.neutral700,
-                cursorColor = Nocturne.accent, focusedLabelColor = Nocturne.accent),
+            textStyle = textStyle ?: MaterialTheme.typography.bodyLarge,
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = colors?.border ?: Nocturne.accent,
+                unfocusedBorderColor = colors?.border?.copy(alpha = 0.6f) ?: Nocturne.neutral700,
+                cursorColor = colors?.border ?: Nocturne.accent, focusedLabelColor = colors?.border ?: Nocturne.accent,
+                focusedContainerColor = colors?.container ?: Color.Transparent, unfocusedContainerColor = colors?.container ?: Color.Transparent,
+                focusedTextColor = colors?.content ?: Nocturne.text, unfocusedTextColor = colors?.content ?: Nocturne.text),
         )
         val note = error ?: helper
         if (note != null || maxLength != null) Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, end = 4.dp)) {
-            Text(note.orEmpty(), color = if (error != null) Nocturne.danger else Nocturne.textMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            if (maxLength != null) Text("${value.length}/$maxLength", color = Nocturne.textMuted, fontSize = 12.sp)
+            Text(note.orEmpty(), color = if (error != null) Nocturne.danger else Nocturne.textMuted, fontSize = kt(12), modifier = Modifier.weight(1f))
+            if (maxLength != null) Text("${value.length}/$maxLength", color = Nocturne.textMuted, fontSize = kt(12))
         }
     }
 }
@@ -302,15 +336,15 @@ fun KTextArea(value: String, onChange: (String) -> Unit, modifier: Modifier = Mo
 /** Search bar with a clear button; [onSubmit] runs on the keyboard's search action. */
 @Composable
 fun KSearchBar(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier, hint: String = "Search",
-               trailing: (@Composable () -> Unit)? = null, height: Dp = 48.dp) {
-    Row(modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(50)).background(Nocturne.surface)
-        .border(1.dp, Nocturne.divider, RoundedCornerShape(50)).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+               trailing: (@Composable () -> Unit)? = null, height: Dp = ks(48), colors: KColors? = null) {
+    Row(modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(50)).background(colors?.container ?: Nocturne.surface)
+        .border(1.dp, colors?.border ?: Nocturne.divider, RoundedCornerShape(50)).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Filled.Search, null, tint = Nocturne.textMuted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Box(Modifier.weight(1f)) {
-            if (query.isEmpty()) Text(hint, color = Nocturne.textMuted, fontSize = 15.sp)
+            if (query.isEmpty()) Text(hint, color = Nocturne.textMuted, fontSize = kt(15))
             BasicTextField(query, onQuery, singleLine = true, cursorBrush = SolidColor(Nocturne.accent),
-                textStyle = TextStyle(color = Nocturne.text, fontSize = 15.sp), modifier = Modifier.fillMaxWidth())
+                textStyle = TextStyle(color = Nocturne.text, fontSize = kt(15)), modifier = Modifier.fillMaxWidth())
         }
         if (query.isNotEmpty()) IconButton({ onQuery("") }, Modifier.size(32.dp)) { Icon(Icons.Filled.Clear, "Clear search", tint = Nocturne.textMuted) }
         trailing?.invoke()
@@ -319,7 +353,7 @@ fun KSearchBar(query: String, onQuery: (String) -> Unit, modifier: Modifier = Mo
 
 /** One-time code: [length] boxes, digits only. */
 @Composable
-fun KOtpField(code: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, length: Int = 6, boxSize: Dp = 48.dp) {
+fun KOtpField(code: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, length: Int = 6, boxSize: Dp = ks(48)) {
     val focus = remember { FocusRequester() }
     Box(modifier) {
         BasicTextField(code, { v -> val d = v.filter(Char::isDigit).take(length); onChange(d) },
@@ -328,10 +362,10 @@ fun KOtpField(code: String, onChange: (String) -> Unit, modifier: Modifier = Mod
         Row(Modifier.clickable { focus.requestFocus() }, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             repeat(length) { i ->
                 val active = i == code.length
-                Box(Modifier.size(boxSize).clip(RoundedCornerShape(10.dp)).background(Nocturne.surface)
-                    .border(if (active) 2.dp else 1.dp, if (active) Nocturne.accent else Nocturne.neutral700, RoundedCornerShape(10.dp)),
+                Box(Modifier.size(boxSize).clip(RoundedCornerShape(kr(10))).background(Nocturne.surface)
+                    .border(if (active) 2.dp else 1.dp, if (active) Nocturne.accent else Nocturne.neutral700, RoundedCornerShape(kr(10))),
                     contentAlignment = Alignment.Center) {
-                    Text(code.getOrNull(i)?.toString() ?: "", color = Nocturne.text, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                    Text(code.getOrNull(i)?.toString() ?: "", color = Nocturne.text, fontSize = kt(20), fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -355,16 +389,16 @@ fun KStepper(value: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier,
 /** Dropdown select: tap to pick one of [options]. */
 @Composable
 fun KSelect(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier = Modifier,
-            label: String? = null, placeholder: String = "Choose…", width: Dp? = null, enabled: Boolean = true) {
+            label: String? = null, placeholder: String = "Choose…", width: Dp? = null, enabled: Boolean = true, colors: KColors? = null) {
     var open by remember { mutableStateOf(false) }
     Box(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         Column {
-            if (label != null) Text(label, color = Nocturne.textLabel, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
-            Row(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(12.dp)).background(Nocturne.surface)
-                .border(1.dp, if (open) Nocturne.accent else Nocturne.neutral700, RoundedCornerShape(12.dp))
+            if (label != null) Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+            Row(Modifier.fillMaxWidth().height(ks(52)).clip(RoundedCornerShape(kr(12))).background(colors?.container ?: Nocturne.surface)
+                .border(1.dp, colors?.border ?: if (open) Nocturne.accent else Nocturne.neutral700, RoundedCornerShape(kr(12)))
                 .clickable(enabled = enabled) { open = true }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(selected?.let { options.getOrNull(it) } ?: placeholder, color = if (selected == null) Nocturne.textMuted else Nocturne.text,
-                    fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                    fontSize = kt(15), modifier = Modifier.weight(1f), maxLines = 1)
                 Icon(Icons.Filled.KeyboardArrowDown, null, tint = Nocturne.textMuted)
             }
         }
@@ -398,7 +432,7 @@ fun KCombobox(options: List<String>, selected: String?, onSelect: (String) -> Un
 @Composable
 fun KCheckbox(checked: Boolean, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier,
               subtitle: String? = null, enabled: Boolean = true) {
-    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(enabled = enabled) { onChange(!checked) }.padding(vertical = 4.dp),
+    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).clickable(enabled = enabled) { onChange(!checked) }.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked, onChange, enabled = enabled, colors = CheckboxDefaults.colors(checkedColor = Nocturne.accent, checkmarkColor = Nocturne.bg))
         Column {
@@ -413,7 +447,7 @@ fun KCheckbox(checked: Boolean, onChange: (Boolean) -> Unit, label: String, modi
 fun KRadioGroup(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     Column(modifier) {
         options.forEachIndexed { i, o ->
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onSelect(i) }.padding(vertical = 2.dp),
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).clickable { onSelect(i) }.padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(i == selected, { onSelect(i) }, colors = RadioButtonDefaults.colors(selectedColor = Nocturne.accent))
                 Text(o, style = MaterialTheme.typography.bodyLarge)
@@ -475,7 +509,7 @@ fun KRangeSlider(value: ClosedFloatingPointRange<Float>, onChange: (ClosedFloati
 
 /** Star rating; [onChange] null makes it display-only. */
 @Composable
-fun KRating(value: Int, onChange: ((Int) -> Unit)? = null, modifier: Modifier = Modifier, max: Int = 5, starSize: Dp = 28.dp,
+fun KRating(value: Int, onChange: ((Int) -> Unit)? = null, modifier: Modifier = Modifier, max: Int = 5, starSize: Dp = ks(28),
             tone: KTone = KTone.Warn) {
     Row(modifier) {
         for (i in 1..max) Icon(if (i <= value) Icons.Filled.Star else Icons.Filled.StarBorder, "$i of $max",
@@ -513,11 +547,11 @@ fun KTimeField(time: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modifi
 @Composable
 private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Modifier, onClick: () -> Unit) =
     Column(modifier.fillMaxWidth()) {
-        Text(label, color = Nocturne.textLabel, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
-        Row(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(12.dp)).background(Nocturne.surface)
-            .border(1.dp, Nocturne.neutral700, RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp),
+        Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        Row(Modifier.fillMaxWidth().height(ks(52)).clip(RoundedCornerShape(kr(12))).background(Nocturne.surface)
+            .border(1.dp, Nocturne.neutral700, RoundedCornerShape(kr(12))).clickable(onClick = onClick).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(text, color = if (empty) Nocturne.textMuted else Nocturne.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(text, color = if (empty) Nocturne.textMuted else Nocturne.text, fontSize = kt(15), modifier = Modifier.weight(1f))
             Icon(Icons.Filled.KeyboardArrowDown, null, tint = Nocturne.textMuted)
         }
     }
@@ -526,7 +560,7 @@ private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Mo
 @Composable
 fun KField(label: String, modifier: Modifier = Modifier, error: String? = null, helper: String? = null, content: @Composable () -> Unit) =
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = Nocturne.textLabel, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp))
+        Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp))
         content()
-        (error ?: helper)?.let { Text(it, color = if (error != null) Nocturne.danger else Nocturne.textMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp)) }
+        (error ?: helper)?.let { Text(it, color = if (error != null) Nocturne.danger else Nocturne.textMuted, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp)) }
     }

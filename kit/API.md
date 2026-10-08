@@ -1,7 +1,7 @@
 # Kiln app kit — reference
 
 Every app Kiln builds is **Kotlin + Jetpack Compose + Material 3**, links the
-Kiln kit, and uses the **Nocturne** theme. Nothing else is available: there is no
+Kiln kit, and uses Kiln's **Nocturne** theme unless the user asks for another look. Nothing else is available: there is no
 Gradle and no Maven — only the libraries listed here (they are prebuilt).
 
 ## Project layout
@@ -25,7 +25,7 @@ class MainActivity : KilnActivity() {          // edge-to-edge, KilnTheme, crash
 }
 ```
 
-Never call `setContent`, `enableEdgeToEdge` or define a theme yourself.
+Never call `setContent` or `enableEdgeToEdge`. To change the look, override `Theme` (see Theming).
 
 ## Screens and navigation
 
@@ -88,13 +88,43 @@ Shared knobs, all with defaults: `modifier`, `width`/`height` (Dp; omitted = nat
 - Network: `KHttp.get<T>(url)` / `KHttp.post<B, T>(url, body)` throw `KHttpException`; show `KError(…) { retry }`.
 - Plain Material 3 is available too. Icons: `Icons.Filled.*`, `Icons.Outlined.*`, `Icons.Rounded.*`, `Icons.AutoMirrored.*` (extended set).
 
-## Theme tokens (`Nocturne`)
+## Theming
 
-`bg, surface, surfaceHi, text, textMuted, textLabel, divider, accent, accent2,
-accent100, accent300, accent800, accent900, neutral100/300/600/700/800, ok, warn,
-danger`; fonts `Nocturne.sans`, `Nocturne.mono`. Prefer
-`MaterialTheme.colorScheme.*` and `MaterialTheme.typography.*` in components.
-Dark only. Never hard-code other colours.
+**Default: Nocturne** (dark, soft violet). Keep it unless the user asks for a different look, colour,
+mood or brand. Then change it in one place — every K component, Material component and `Nocturne.*`
+read follows:
+
+```kotlin
+class MainActivity : KilnActivity() {
+    @Composable override fun Theme(content: @Composable () -> Unit) =
+        KilnTheme(theme = KThemes.OceanDepths, content = content)   // or any of the options below
+    @Composable override fun Content() { App() }
+}
+```
+
+- **Presets** (`KThemes.*`, also `KThemes.named("ocean depths")`, `KThemes.all`): `Nocturne` (default),
+  `ArcticFrost` (light, ice blue/steel), `BotanicalGarden` (light, fern green/marigold, serif),
+  `DesertRose` (light, dusty rose/clay, serif), `ForestCanopy` (light, forest green/sage),
+  `GoldenHour` (light, terracotta/mustard), `MidnightGalaxy` (dark, purple/lavender),
+  `ModernMinimalist` (light, charcoal/grey, sharp), `OceanDepths` (dark, navy/teal),
+  `SunsetBoulevard` (light, burnt orange/coral), `TechInnovation` (dark, electric blue/cyan, sharp).
+  Map the user's words to the closest ("calm", "techy", "warm", "natural", "minimal").
+- **Brand colour**: `KilnTheme(accent = Color(0xFFE91E63), dark = false)` — tints, selection and Material
+  roles are derived. Also `accent2`, `background`, or a full `palette = KPalette.from(…).copy(…)`.
+- **Look and feel**: `font = KFonts.Inter | System | Serif | Mono` (or a FontFamily from res/font),
+  `corners = KCorners.Sharp | Default | Soft | Round`, `density = KDensity.Compact | Default |
+  Comfortable | Large` (heights, padding, icons of every component), `textScale = 1.15f`,
+  `surfaceAlpha = 0.8f` (translucent cards/fields over a background image or gradient).
+- **Let the app's users choose**: `KThemePicker(selected, onSelect)` + `rememberStored("theme", …)` (see the theming skill).
+- **One component only** (rare; only when the user asks): `colors = KColors(container, content, border)`
+  on KButton, KIconButton, KCardBox, KChip, KTextField, KSearchBar, KSelect; `color =` on KAlert,
+  KProgressBar, KProgressRing, KBadge, KBarChart, KLineChart; `textStyle`, `border`, `contentPadding`,
+  `elevation` where they apply; `Modifier.alpha(…)` for transparency.
+
+Tokens, always of the active theme: `Nocturne.bg, surface, surfaceHi, text, textMuted, textLabel, divider,
+accent, accent2, accent100, accent300, accent800, accent900, neutral100/300/600/700/800, ok, warn, danger,
+isDark`; fonts `Nocturne.sans`, `Nocturne.mono`; sizes `kr(12)` (corner), `ks(48)` (size), `kt(14)` (text)
+scaled by the theme. Never hard-code colours in screens: read tokens, so a theme change restyles everything.
 
 ## App icon
 
@@ -102,15 +132,15 @@ Every app draws its own launcher icon in `res/drawable/ic_launcher.xml` (the
 manifest already points at it). It is a 108×108 vector drawable:
 
 - First path: the full-bleed background square `M0,0h108v108h-108z`, filled
-  `#161826` (bg) or `#232532` (surface).
+  with the theme's bg or surface (Nocturne: `#161826` / `#232532`).
 - Then one bold, simple glyph for what the app *does* (a drop for water, a
   check for todos, a flame for streaks…) drawn inside the centre safe zone
   x,y 30–78 — launchers crop to a circle or squircle, so keep it centred.
   Make it big: the glyph should span most of that zone (about 40–48 units
   wide), not a small mark in the middle.
-- Colours from the Nocturne palette only: `#9184D9` accent, `#A7A1DB`
+- Colours from the app's theme palette (Nocturne: `#9184D9` accent, `#A7A1DB`
   accent2, `#F5F4FF` accent100, `#423A6A` accent800, `#7FB69A` ok,
-  `#D9C48A` warn, `#D98A8A` danger. Use 1–3 of them; no gradients, no text.
+  `#D9C48A` warn, `#D98A8A` danger; a preset's are in `KThemes`). Use 1–3 of them; no text.
 - Use `android:pathData` with simple commands (M, L, H, V, C, A, Z) and
   `android:strokeWidth`/`android:strokeColor`/`android:strokeLineCap="round"`
   for line icons.

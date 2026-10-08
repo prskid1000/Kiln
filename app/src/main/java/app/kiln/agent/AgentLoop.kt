@@ -108,6 +108,7 @@ class AgentLoop(
     private val state = SessionState()
     /** How often this request pushed back on ending with a broken build (see the stop guard in [loop]). */
     private var stopGuards = 0
+    private var unfinishedGuards = 0
     private val approvalLock = kotlinx.coroutines.sync.Mutex()
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
@@ -183,7 +184,7 @@ class AgentLoop(
         if (!running.compareAndSet(expect = false, update = true)) return
         if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }
         startedAt = System.currentTimeMillis()
-        stopGuards = 0; goalChecks = 0
+        stopGuards = 0; unfinishedGuards = 0; goalChecks = 0
         this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
         // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
         closeDanglingToolUses()
@@ -253,6 +254,23 @@ class AgentLoop(
                 }
                 // Messages the user typed while the model was finishing: answer them, don't end.
                 drainSteering()?.let { session.append(Msg("user", arrOf(it))); continue }
+                // Unfinished guard: smaller models often end a turn with "Let me fix X…" and no call, or
+                // with todo items still open. Unless it's asking the user something, push it on (twice at most).
+                val said = turn.second.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }
+                    .joinToString("\n").trim()
+                val open = state.todos.filter { it.status != "completed" }
+                val announces = ANNOUNCES.containsMatchIn(said.takeLast(300))
+                if (mode == Mode.BUILD && unfinishedGuards < 2 && !said.trimEnd().endsWith("?") && (open.isNotEmpty() || announces)) {
+                    unfinishedGuards++
+                    next(Activity.Kind.NOTICE, if (open.isNotEmpty()) "${open.size} to-do item(s) still open — asking the agent to keep going."
+                        else "The agent said what it would do next but stopped — asking it to continue.")
+                    session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
+                        "<system-reminder>Nobody asked you to stop. " +
+                        (if (open.isNotEmpty()) "These to-do items are not done: ${open.joinToString("; ") { it.text }}. " else "") +
+                        "If you said you would do something next, do it now with a tool call. When everything is really " +
+                        "done, mark the to-dos completed and give the summary. If you can't continue, say why.</system-reminder>")))))
+                    continue
+                }
                 // Goal run: a separate check decides whether the done criteria are actually met.
                 val g = goal
                 if (g != null && mode == Mode.BUILD && goalChecks < 4) {
@@ -539,3 +557,6 @@ class AgentLoop(
 
 /** Marks a message the user sent while the agent was working (delivered at its next step). */
 private const val STEER_PREFIX = "[Message from the user while you were working] "
+
+/** A reply that ends by announcing a next step ("Let me fix the dialogs…") instead of taking it. */
+private val ANNOUNCES = Regex("""(?i)(\blet me\b|\bi'll\b|\bi will\b|\bnow i\b|\bnext,? i\b|\bi'm going to\b|\bgoing to\b)[^\n]{0,160}[.…:]?\s*$""")

@@ -75,7 +75,7 @@ fun KMap(
     route: List<KLatLng> = emptyList(),
     showMyLocation: Boolean = false,
     height: Dp? = 280.dp,
-    corner: Dp = 16.dp,
+    corner: Dp = kr(16),
     onTap: ((KLatLng) -> Unit)? = null,
     onLongPress: ((KLatLng) -> Unit)? = null,
 ) {
@@ -108,7 +108,7 @@ fun KMap(
         })
         if (route.size > 1) mv.overlays += Polyline(mv).apply {
             setPoints(route.map { GeoPoint(it.lat, it.lng) })
-            outlinePaint.color = android.graphics.Color.rgb(0x8B, 0x7C, 0xF6); outlinePaint.strokeWidth = 10f
+            outlinePaint.color = android.graphics.Color.argb((Nocturne.accent.alpha * 255).toInt(), (Nocturne.accent.red * 255).toInt(), (Nocturne.accent.green * 255).toInt(), (Nocturne.accent.blue * 255).toInt()); outlinePaint.strokeWidth = 10f
         }
         markers.forEach { m ->
             mv.overlays += Marker(mv).apply {

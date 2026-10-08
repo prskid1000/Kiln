@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -78,26 +79,35 @@ fun KCardBox(
     width: Dp? = null,
     height: Dp? = null,
     padding: Dp = 14.dp,
-    corner: Dp = 16.dp,
+    corner: Dp = kr(16),
     spacing: Dp = 8.dp,
+    colors: KColors? = null,
+    border: Dp = 1.dp,
+    elevation: Dp = 0.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(corner)
-    val bg = when (variant) {
+    val bg = colors?.container ?: when (variant) {
         KVariant.Filled -> if (tone == KTone.Neutral) Nocturne.surfaceHi else tone.color().copy(alpha = 0.30f)
         KVariant.Tonal -> if (tone == KTone.Neutral) Nocturne.surface else tone.color().copy(alpha = 0.14f)
         KVariant.Outline -> Nocturne.surface
         KVariant.Ghost -> Color.Transparent
     }
-    Column(
-        modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)).kSize(height = height)
-            .clip(shape).background(bg)
-            .then(if (variant == KVariant.Outline) Modifier.border(1.dp, if (tone == KTone.Neutral) Nocturne.neutral700 else tone.color().copy(alpha = 0.6f), shape) else Modifier)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(padding),
-        verticalArrangement = Arrangement.spacedBy(spacing), content = content,
-    )
+    val line = colors?.border ?: if (variant == KVariant.Outline) (if (tone == KTone.Neutral) Nocturne.neutral700 else tone.color().copy(alpha = 0.6f)) else null
+    val body = @Composable {
+        Column(
+            modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)).kSize(height = height)
+                .then(if (elevation > 0.dp) Modifier.shadow(elevation, shape) else Modifier)
+                .clip(shape).background(bg)
+                .then(if (line != null && border > 0.dp) Modifier.border(border, line, shape) else Modifier)
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(padding),
+            verticalArrangement = Arrangement.spacedBy(spacing), content = content,
+        )
+    }
+    if (colors?.content != null) androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides colors.content, content = body)
+    else body()
 }
 
 /** Divider, optionally with a centred label ("or"). */
@@ -106,7 +116,7 @@ fun KDivider(modifier: Modifier = Modifier, label: String? = null, thickness: Dp
     if (label == null) HorizontalDivider(modifier.padding(vertical = vertical), thickness = thickness, color = Nocturne.divider)
     else Row(modifier.fillMaxWidth().padding(vertical = vertical), verticalAlignment = Alignment.CenterVertically) {
         HorizontalDivider(Modifier.weight(1f), thickness = thickness, color = Nocturne.divider)
-        Text(label, color = Nocturne.textMuted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp))
+        Text(label, color = Nocturne.textMuted, fontSize = kt(12), modifier = Modifier.padding(horizontal = 10.dp))
         HorizontalDivider(Modifier.weight(1f), thickness = thickness, color = Nocturne.divider)
     }
 }
@@ -116,7 +126,7 @@ fun KDivider(modifier: Modifier = Modifier, label: String? = null, thickness: Dp
 fun KAccordion(title: String, modifier: Modifier = Modifier, subtitle: String? = null, initiallyOpen: Boolean = false,
                icon: ImageVector? = null, content: @Composable ColumnScope.() -> Unit) {
     var open by rememberSaveable { mutableStateOf(initiallyOpen) }
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nocturne.surface).border(1.dp, Nocturne.divider, RoundedCornerShape(14.dp))) {
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(14))).background(Nocturne.surface).border(1.dp, Nocturne.divider, RoundedCornerShape(kr(14)))) {
         Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) { Icon(icon, null, tint = Nocturne.accent2, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)) }
             Column(Modifier.weight(1f)) {
@@ -134,7 +144,7 @@ fun KAccordion(title: String, modifier: Modifier = Modifier, subtitle: String? =
 /** Avatar: an image URL, else initials from [name], else [icon]; optional online dot. */
 @Composable
 fun KAvatar(name: String = "", modifier: Modifier = Modifier, imageUrl: String? = null, icon: ImageVector? = null,
-            size: Dp = 40.dp, tone: KTone = KTone.Accent, online: Boolean? = null) {
+            size: Dp = ks(40), tone: KTone = KTone.Accent, online: Boolean? = null) {
     Box(modifier.size(size)) {
         Box(Modifier.size(size).clip(CircleShape).background(tone.color().copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
             when {
@@ -161,12 +171,13 @@ fun KAvatarGroup(names: List<String>, modifier: Modifier = Modifier, max: Int = 
 
 /** Count or dot badge on top of [content] (an icon, an avatar). count = 0 hides it; null shows a dot. */
 @Composable
-fun KBadge(count: Int?, modifier: Modifier = Modifier, tone: KTone = KTone.Danger, content: @Composable BoxScope.() -> Unit) {
+fun KBadge(count: Int?, modifier: Modifier = Modifier, tone: KTone = KTone.Danger, color: Color? = null, content: @Composable BoxScope.() -> Unit) {
+    val badge = color ?: tone.color()
     Box(modifier) {
         content()
-        if (count == null) Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(10.dp).clip(CircleShape).background(tone.color()))
-        else if (count > 0) Text(if (count > 99) "99+" else "$count", color = Nocturne.bg, fontSize = 10.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.align(Alignment.TopEnd).offset(x = 12.dp, y = (-8).dp).clip(RoundedCornerShape(50)).background(tone.color())
+        if (count == null) Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(10.dp).clip(CircleShape).background(badge))
+        else if (count > 0) Text(if (count > 99) "99+" else "$count", color = Nocturne.bg, fontSize = kt(10), fontWeight = FontWeight.Medium,
+            modifier = Modifier.align(Alignment.TopEnd).offset(x = 12.dp, y = (-8).dp).clip(RoundedCornerShape(50)).background(badge)
                 .padding(horizontal = 5.dp, vertical = 1.dp))
     }
 }
@@ -174,13 +185,13 @@ fun KBadge(count: Int?, modifier: Modifier = Modifier, tone: KTone = KTone.Dange
 /** Chip: label with optional icon; [onClose] adds an ✕ (input chip / tag you can remove). */
 @Composable
 fun KChip(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, tone: KTone = KTone.Neutral, selected: Boolean = false,
-          onClick: (() -> Unit)? = null, onClose: (() -> Unit)? = null) {
-    val (bg, fg) = toneColors(if (selected) KTone.Accent else tone, KVariant.Tonal)
-    Row(modifier.height(32.dp).clip(RoundedCornerShape(50)).background(bg).border(1.dp, fg.copy(alpha = 0.3f), RoundedCornerShape(50))
+          onClick: (() -> Unit)? = null, onClose: (() -> Unit)? = null, colors: KColors? = null) {
+    val (bg, fg, _) = resolveColors(if (selected) KTone.Accent else tone, KVariant.Tonal, colors)
+    Row(modifier.height(ks(32)).clip(RoundedCornerShape(50)).background(bg).border(1.dp, fg.copy(alpha = 0.3f), RoundedCornerShape(50))
         .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (icon != null) { Icon(icon, null, tint = fg, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)) }
-        Text(text, color = fg, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = fg, fontSize = kt(13), fontWeight = FontWeight.Medium)
         if (onClose != null) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Close, "Remove $text", tint = fg, modifier = Modifier.size(16.dp).clickable(onClick = onClose)) }
     }
 }
@@ -188,14 +199,14 @@ fun KChip(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null
 /** Keyboard key / shortcut cap ("Ctrl", "K"). */
 @Composable
 fun KKbd(key: String, modifier: Modifier = Modifier) =
-    Text(key, color = Nocturne.text, fontSize = 12.sp, fontFamily = Nocturne.mono,
-        modifier = modifier.clip(RoundedCornerShape(6.dp)).background(Nocturne.surfaceHi).border(1.dp, Nocturne.neutral700, RoundedCornerShape(6.dp))
+    Text(key, color = Nocturne.text, fontSize = kt(12), fontFamily = Nocturne.mono,
+        modifier = modifier.clip(RoundedCornerShape(kr(6))).background(Nocturne.surfaceHi).border(1.dp, Nocturne.neutral700, RoundedCornerShape(kr(6)))
             .padding(horizontal = 6.dp, vertical = 2.dp))
 
 /** Image from a URL with a rounded frame, aspect ratio and placeholder colour. */
 @Composable
 fun KImage(url: String, description: String, modifier: Modifier = Modifier, width: Dp? = null, height: Dp? = null,
-           aspectRatio: Float? = 16f / 9f, corner: Dp = 14.dp, crop: Boolean = true) =
+           aspectRatio: Float? = 16f / 9f, corner: Dp = kr(14), crop: Boolean = true) =
     AsyncImage(url, description, contentScale = if (crop) ContentScale.Crop else ContentScale.Fit,
         modifier = modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)).kSize(height = height)
             .then(if (aspectRatio != null && height == null) Modifier.aspectRatio(aspectRatio) else Modifier)
@@ -206,18 +217,19 @@ fun KImage(url: String, description: String, modifier: Modifier = Modifier, widt
 /** Banner message: info / success / warning / error, optional title, action and dismiss. Also the "notice bar". */
 @Composable
 fun KAlert(message: String, modifier: Modifier = Modifier, tone: KTone = KTone.Accent, title: String? = null,
-           icon: ImageVector? = null, actionLabel: String? = null, onAction: (() -> Unit)? = null, onDismiss: (() -> Unit)? = null) {
-    val c = tone.color()
+           icon: ImageVector? = null, actionLabel: String? = null, onAction: (() -> Unit)? = null, onDismiss: (() -> Unit)? = null,
+           color: Color? = null) {
+    val c = color ?: tone.color()
     val glyph = icon ?: when (tone) { KTone.Ok -> Icons.Filled.CheckCircle; KTone.Warn -> Icons.Filled.Warning
         KTone.Danger -> Icons.Filled.Error; else -> Icons.Filled.Info }
-    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.copy(alpha = 0.12f)).border(1.dp, c.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(12))).background(c.copy(alpha = 0.12f)).border(1.dp, c.copy(alpha = 0.4f), RoundedCornerShape(kr(12)))
         .padding(12.dp), verticalAlignment = Alignment.Top) {
         Icon(glyph, null, tint = c, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             if (title != null) Text(title, color = c, style = MaterialTheme.typography.titleSmall)
             Text(message, color = Nocturne.text, style = MaterialTheme.typography.bodyMedium)
-            if (actionLabel != null && onAction != null) Text(actionLabel, color = c, fontWeight = FontWeight.Medium, fontSize = 14.sp,
+            if (actionLabel != null && onAction != null) Text(actionLabel, color = c, fontWeight = FontWeight.Medium, fontSize = kt(14),
                 modifier = Modifier.padding(top = 4.dp).clickable(onClick = onAction))
         }
         if (onDismiss != null) Icon(Icons.Filled.Close, "Dismiss", tint = Nocturne.textMuted, modifier = Modifier.size(20.dp).clickable(onClick = onDismiss))
@@ -227,25 +239,26 @@ fun KAlert(message: String, modifier: Modifier = Modifier, tone: KTone = KTone.A
 /** Progress bar (0–1); [label] and the percentage above it; null [progress] = indeterminate. */
 @Composable
 fun KProgressBar(progress: Float?, modifier: Modifier = Modifier, label: String? = null, showPercent: Boolean = true,
-                 tone: KTone = KTone.Accent, height: Dp = 8.dp, width: Dp? = null) {
+                 tone: KTone = KTone.Accent, height: Dp = 8.dp, width: Dp? = null, color: Color? = null) {
+    val bar = color ?: tone.color()
     Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (label != null || (showPercent && progress != null)) Row(Modifier.fillMaxWidth()) {
             Text(label.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Nocturne.textLabel, modifier = Modifier.weight(1f))
-            if (showPercent && progress != null) Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = tone.color())
+            if (showPercent && progress != null) Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = bar)
         }
         val mod = Modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(50))
-        if (progress == null) LinearProgressIndicator(mod, color = tone.color(), trackColor = Nocturne.surfaceHi)
-        else LinearProgressIndicator({ progress.coerceIn(0f, 1f) }, mod, color = tone.color(), trackColor = Nocturne.surfaceHi,
+        if (progress == null) LinearProgressIndicator(mod, color = bar, trackColor = Nocturne.surfaceHi)
+        else LinearProgressIndicator({ progress.coerceIn(0f, 1f) }, mod, color = bar, trackColor = Nocturne.surfaceHi,
             strokeCap = StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
     }
 }
 
 /** Circular progress (0–1) with text in the middle (goal rings, timers). */
 @Composable
-fun KProgressRing(progress: Float, modifier: Modifier = Modifier, size: Dp = 120.dp, stroke: Dp = 10.dp, tone: KTone = KTone.Accent,
+fun KProgressRing(progress: Float, modifier: Modifier = Modifier, size: Dp = ks(120), stroke: Dp = 10.dp, tone: KTone = KTone.Accent, color: Color? = null,
                   center: (@Composable () -> Unit)? = { Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleLarge) }) {
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
-        val c = tone.color()
+        val c = color ?: tone.color()
         Canvas(Modifier.size(size)) {
             val s = stroke.toPx(); val d = this.size.minDimension - s
             drawArc(Nocturne.surfaceHi, 0f, 360f, false, Offset(s / 2, s / 2), Size(d, d), style = Stroke(s, cap = StrokeCap.Round))
@@ -262,7 +275,7 @@ fun KSpinner(modifier: Modifier = Modifier, size: Dp = 24.dp, tone: KTone = KTon
 
 /** Shimmering placeholder while content loads; [circle] for avatars. */
 @Composable
-fun KSkeleton(modifier: Modifier = Modifier, width: Dp? = null, height: Dp = 16.dp, corner: Dp = 8.dp, circle: Boolean = false) {
+fun KSkeleton(modifier: Modifier = Modifier, width: Dp? = null, height: Dp = 16.dp, corner: Dp = kr(8), circle: Boolean = false) {
     val t = rememberInfiniteTransition(label = "skeleton")
     val a by t.animateFloat(0.35f, 0.75f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "alpha")
     Box(modifier.then(if (width == null && !circle) Modifier.fillMaxWidth() else Modifier.width(width ?: height)).height(height)
@@ -284,9 +297,9 @@ fun KKeyValue(key: String, value: String, modifier: Modifier = Modifier, valueTo
 @Composable
 fun KTable(headers: List<String>, rows: List<List<String>>, modifier: Modifier = Modifier, weights: List<Float> = headers.map { 1f },
            zebra: Boolean = true) {
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, Nocturne.divider, RoundedCornerShape(12.dp))) {
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(12))).border(1.dp, Nocturne.divider, RoundedCornerShape(kr(12)))) {
         Row(Modifier.fillMaxWidth().background(Nocturne.surfaceHi).padding(horizontal = 12.dp, vertical = 10.dp)) {
-            headers.forEachIndexed { i, h -> Text(h, Modifier.weight(weights.getOrElse(i) { 1f }), color = Nocturne.textLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
+            headers.forEachIndexed { i, h -> Text(h, Modifier.weight(weights.getOrElse(i) { 1f }), color = Nocturne.textLabel, fontSize = kt(12), fontWeight = FontWeight.Medium) }
         }
         rows.forEachIndexed { r, row ->
             Row(Modifier.fillMaxWidth().background(if (zebra && r % 2 == 1) Nocturne.surface else Color.Transparent).padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -308,7 +321,7 @@ fun KTimeline(items: List<KTimelineItem>, modifier: Modifier = Modifier) {
             Row(Modifier.fillMaxWidth()) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(24.dp)) {
                     Box(Modifier.size(12.dp).clip(CircleShape).background(if (it.done) it.tone.color() else Nocturne.neutral700))
-                    if (i < items.lastIndex) Box(Modifier.width(2.dp).height(44.dp).background(Nocturne.divider))
+                    if (i < items.lastIndex) Box(Modifier.width(2.dp).height(ks(44)).background(Nocturne.divider))
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f).padding(bottom = 12.dp)) {
@@ -330,7 +343,7 @@ fun KSteps(steps: List<String>, current: Int, modifier: Modifier = Modifier) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f).height(2.dp).background(if (i == 0) Color.Transparent else if (i <= current) Nocturne.accent else Nocturne.divider))
                     Box(Modifier.size(28.dp).clip(CircleShape).background(if (i <= current) Nocturne.accent else Nocturne.surfaceHi), contentAlignment = Alignment.Center) {
-                        Text("${i + 1}", color = if (i <= current) Nocturne.bg else Nocturne.textLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("${i + 1}", color = if (i <= current) Nocturne.bg else Nocturne.textLabel, fontSize = kt(13), fontWeight = FontWeight.Medium)
                     }
                     Box(Modifier.weight(1f).height(2.dp).background(if (i == steps.lastIndex) Color.Transparent else if (i < current) Nocturne.accent else Nocturne.divider))
                 }

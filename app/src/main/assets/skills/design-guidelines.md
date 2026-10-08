@@ -12,7 +12,8 @@ Load this before designing any screen. Check every screen against it before call
 **Hierarchy and type**
 - Use `MaterialTheme.typography` roles: headlineSmall for the screen's hero number or title, titleMedium for cards,
   bodyLarge for content, bodySmall/labelSmall in `Nocturne.textMuted` for secondary text. At most 3 sizes per screen.
-- Colour means something: accent for the primary action and selection; Ok/Warn/Danger only for status. Never hard-code colours.
+- Colour means something: accent for the primary action and selection; Ok/Warn/Danger only for status. Never hard-code colours:
+  read `Nocturne.*` tokens. The look is the theme's job (Nocturne by default; `load_skill theming` if the user wants another).
 
 **Every state is designed**
 - Empty: `KEmptyState` with what to do next. Loading: `KSkeleton` shaped like the content (or `KLoading`).

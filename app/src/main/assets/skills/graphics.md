@@ -9,8 +9,8 @@
 - Launcher icon: `res/drawable/ic_launcher.xml`, viewBox `0 0 108 108`. Keep the motif inside the central 66×66
   (21..87): the outer ring gets cropped to a circle or squircle. Fill the full 108 square with the background.
   One bold, simple shape that reads at 48 px; no text, no thin lines.
-- Style: flat shapes, 2–3 colours from Nocturne (accent `#8B7CF6`, accent2 `#22D3EE`, ok `#34D399`, warn `#FBBF24`,
-  surface `#16161D`), rounded joins, consistent stroke width (2 in a 24 grid).
+- Style: flat shapes, 2–3 colours from the app's theme (Nocturne: accent `#9184D9`, accent2 `#A7A1DB`, ok `#7FB69A`,
+  warn `#D9C48A`, bg `#161826`; a preset's palette is in `KThemes`), rounded joins, consistent stroke width (2 in a 24 grid).
 - Illustrations for empty states: 160–200 dp wide, muted (accent at 30–60 % opacity), placed above `KEmptyState`'s text.
 - Vector drawables can't do filters, masks, text or patterns. The tool says what it left out; draw those shapes as paths
   or make a PNG instead.

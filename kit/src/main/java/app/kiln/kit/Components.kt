@@ -63,7 +63,7 @@ fun KCard(
 @Composable
 fun KSection(title: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
     Row(modifier.fillMaxWidth().padding(top = 16.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title.uppercase(), color = Nocturne.accent, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+        Text(title.uppercase(), color = Nocturne.accent, fontSize = kt(11), fontWeight = FontWeight.Medium,
             letterSpacing = 1.sp, modifier = Modifier.weight(1f))
         action?.invoke()
     }
@@ -80,7 +80,7 @@ fun KListRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+        modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8)))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -130,15 +130,15 @@ fun KTag(text: String, tone: KTone = KTone.Neutral, modifier: Modifier = Modifie
         KTone.Warn -> Nocturne.warn.copy(alpha = 0.16f) to Nocturne.warn
         KTone.Danger -> Nocturne.danger.copy(alpha = 0.16f) to Nocturne.danger
     }
-    Text(text, color = ink, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-        modifier = modifier.clip(RoundedCornerShape(6.dp)).background(ground).padding(horizontal = 10.dp, vertical = 3.dp))
+    Text(text, color = ink, fontSize = kt(11), fontWeight = FontWeight.Medium,
+        modifier = modifier.clip(RoundedCornerShape(kr(6))).background(ground).padding(horizontal = 10.dp, vertical = 3.dp))
 }
 
 /** Metric tile: label over a big value, optional caption. */
 @Composable
 fun KStat(label: String, value: String, modifier: Modifier = Modifier, caption: String? = null) =
     KCard(modifier) {
-        Text(label.uppercase(), color = Nocturne.textMuted, fontSize = 11.sp, letterSpacing = 1.sp)
+        Text(label.uppercase(), color = Nocturne.textMuted, fontSize = kt(11), letterSpacing = 1.sp)
         Text(value, style = MaterialTheme.typography.headlineMedium)
         if (caption != null) Text(caption, style = MaterialTheme.typography.bodySmall, color = Nocturne.textMuted)
     }
@@ -148,7 +148,7 @@ fun KStat(label: String, value: String, modifier: Modifier = Modifier, caption: 
 fun KSearchField(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier, hint: String = "Search") =
     OutlinedTextField(value = query, onValueChange = onQuery, singleLine = true, placeholder = { Text(hint) },
         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-        shape = RoundedCornerShape(8.dp), modifier = modifier.fillMaxWidth())
+        shape = RoundedCornerShape(kr(8)), modifier = modifier.fillMaxWidth())
 
 /** Full-area loading spinner. */
 @Composable

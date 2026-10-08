@@ -4,6 +4,8 @@ package app.kiln.kit
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -150,7 +152,7 @@ fun rememberKToast(): KToast {
 fun BoxScope.KToastHost(toast: KToast, modifier: Modifier = Modifier) =
     SnackbarHost(toast.host, modifier.align(Alignment.BottomCenter).padding(16.dp)) { data ->
         Snackbar(data, containerColor = Nocturne.surfaceHi, contentColor = if (toast.tone == KTone.Neutral) Nocturne.text else toast.tone.color(),
-            actionColor = Nocturne.accent, shape = RoundedCornerShape(12.dp))
+            actionColor = Nocturne.accent, shape = RoundedCornerShape(kr(12)))
     }
 
 // ---------------------------------------------------------------- gestures
@@ -169,7 +171,7 @@ fun KSwipeRow(modifier: Modifier = Modifier, onDelete: (() -> Boolean)? = null, 
     SwipeToDismissBox(state, modifier = modifier, enableDismissFromStartToEnd = onArchive != null, enableDismissFromEndToStart = onDelete != null,
         backgroundContent = {
             val toDelete = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background((if (toDelete) Nocturne.danger else Nocturne.ok).copy(alpha = 0.25f))
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(kr(12))).background((if (toDelete) Nocturne.danger else Nocturne.ok).copy(alpha = 0.25f))
                 .padding(horizontal = 20.dp), contentAlignment = if (toDelete) Alignment.CenterEnd else Alignment.CenterStart) {
                 Icon(if (toDelete) Icons.Filled.Delete else Icons.Filled.Archive, if (toDelete) "Delete" else "Archive",
                     tint = if (toDelete) Nocturne.danger else Nocturne.ok)
@@ -212,30 +214,31 @@ fun KGrid(modifier: Modifier = Modifier, columns: Int? = 2, minCellWidth: Dp = 1
 
 /** Bar chart: one bar per value, labels under them. */
 @Composable
-fun KBarChart(values: List<Float>, labels: List<String> = emptyList(), modifier: Modifier = Modifier, height: Dp = 160.dp,
-              tone: KTone = KTone.Accent, highlight: Int? = null, valueFormat: ((Float) -> String)? = null) {
+fun KBarChart(values: List<Float>, labels: List<String> = emptyList(), modifier: Modifier = Modifier, height: Dp = ks(160),
+              tone: KTone = KTone.Accent, highlight: Int? = null, valueFormat: ((Float) -> String)? = null, color: Color? = null) {
+    val bar = color ?: tone.color()
     val max = (values.maxOrNull() ?: 0f).coerceAtLeast(1e-6f)
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().height(height), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
             values.forEachIndexed { i, v ->
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                    if (valueFormat != null) Text(valueFormat(v), fontSize = 10.sp, color = Nocturne.textMuted)
+                    if (valueFormat != null) Text(valueFormat(v), fontSize = kt(10), color = Nocturne.textMuted)
                     Box(Modifier.fillMaxWidth().height(height * 0.85f * (v / max)).clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                        .background(if (highlight == null || highlight == i) tone.color() else tone.color().copy(alpha = 0.35f)))
+                        .background(if (highlight == null || highlight == i) bar else bar.copy(alpha = 0.35f)))
                 }
             }
         }
         if (labels.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            labels.forEach { Text(it, Modifier.weight(1f), fontSize = 11.sp, color = Nocturne.textMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 1) }
+            labels.forEach { Text(it, Modifier.weight(1f), fontSize = kt(11), color = Nocturne.textMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 1) }
         }
     }
 }
 
 /** Line chart / sparkline; [fill] shades the area under the line. */
 @Composable
-fun KLineChart(values: List<Float>, modifier: Modifier = Modifier, height: Dp = 140.dp, tone: KTone = KTone.Accent, fill: Boolean = true,
-               stroke: Dp = 2.5.dp, showDots: Boolean = false) {
-    val c = tone.color()
+fun KLineChart(values: List<Float>, modifier: Modifier = Modifier, height: Dp = ks(140), tone: KTone = KTone.Accent, fill: Boolean = true,
+               stroke: Dp = 2.5.dp, showDots: Boolean = false, color: Color? = null) {
+    val c = color ?: tone.color()
     Canvas(modifier.fillMaxWidth().height(height)) {
         if (values.size < 2) return@Canvas
         val min = values.min(); val max = values.max(); val span = (max - min).takeIf { it > 0f } ?: 1f
@@ -252,7 +255,7 @@ data class KSlice(val label: String, val value: Float, val tone: KTone)
 
 /** Donut / pie chart with a legend; [center] text in the hole. */
 @Composable
-fun KDonutChart(slices: List<KSlice>, modifier: Modifier = Modifier, size: Dp = 140.dp, stroke: Dp = 22.dp, center: String? = null,
+fun KDonutChart(slices: List<KSlice>, modifier: Modifier = Modifier, size: Dp = ks(140), stroke: Dp = 22.dp, center: String? = null,
                 legend: Boolean = true) {
     val total = slices.sumOf { it.value.toDouble() }.toFloat().coerceAtLeast(1e-6f)
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
@@ -274,3 +277,33 @@ fun KDonutChart(slices: List<KSlice>, modifier: Modifier = Modifier, size: Dp = 
     }
 }
 
+
+// ---------------------------------------------------------------- theming
+
+/**
+ * Lets the app's user choose a look: a swatch per theme. Keep the choice and feed it to KilnTheme:
+ * ```
+ * var themeName by rememberStored("theme", KThemes.Nocturne.name)
+ * KilnTheme(theme = KThemes.named(themeName) ?: KThemes.Nocturne) { … KThemePicker(themeName, { themeName = it.name }) … }
+ * ```
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun KThemePicker(selected: String, onSelect: (KTheme) -> Unit, modifier: Modifier = Modifier, themes: List<KTheme> = KThemes.all,
+                 swatch: Dp = ks(56)) {
+    androidx.compose.foundation.layout.FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        themes.forEach { t ->
+            val on = t.name.equals(selected, ignoreCase = true)
+            Column(Modifier.width(swatch + 16.dp).clip(RoundedCornerShape(kr(12))).clickable { onSelect(t) }.padding(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(swatch).clip(CircleShape).background(t.palette.bg)
+                    .border(if (on) 3.dp else 1.dp, if (on) Nocturne.accent else Nocturne.divider, CircleShape), contentAlignment = Alignment.Center) {
+                    Row { Box(Modifier.size(swatch * 0.28f).clip(CircleShape).background(t.palette.accent))
+                        Spacer(Modifier.width(3.dp)); Box(Modifier.size(swatch * 0.28f).clip(CircleShape).background(t.palette.accent2)) }
+                }
+                Text(t.name, style = MaterialTheme.typography.labelSmall, color = if (on) Nocturne.text else Nocturne.textMuted,
+                    maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+}
