@@ -272,6 +272,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
                         modifier = Modifier.widthIn(min = 28.dp).background(N.bg.copy(alpha = 0.4f)).padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 48.dp))
                     Box(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
                         BasicTextField(text, { text = it }, textStyle = style, cursorBrush = SolidColor(N.accent),
+                            visualTransformation = remember(o.path) { SyntaxHighlight.forPath(o.path) },
                             modifier = Modifier.widthIn(min = 600.dp).heightIn(min = 600.dp).fieldLabel("File contents")
                                 .padding(start = 10.dp, end = 24.dp, top = 12.dp, bottom = 48.dp))
                     }
