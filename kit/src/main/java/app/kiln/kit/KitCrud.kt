@@ -96,7 +96,7 @@ fun <T> KCrudList(
 
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (searchable && rows.isNotEmpty()) KSearchBar(query, { query = it }, hint = "Search ${itemName}s")
+            if (searchable && rows.isNotEmpty()) KSearchBar(query, { query = it }, placeholder = "Search ${itemName}s")
             when {
                 rows.isEmpty() -> KEmptyState(emptyTitle, emptyBody, actionLabel = "Add $itemName", onAction = { state.add() })
                 visible.isEmpty() -> KEmptyState("Nothing matches “$query”", "Try another search.")

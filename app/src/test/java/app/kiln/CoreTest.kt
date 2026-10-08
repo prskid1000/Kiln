@@ -45,9 +45,20 @@ class CoreTest {
         assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+        // Coordinates (run 10).
+        assertEquals(listOf("""{"tap":"250,289"}"""), steps("""{"tap":{"x":250,"y":289}}"""))
+        assertEquals(listOf("""{"swipe_by":"800,300,-300,0"}"""), steps("""{"swipe":{"x":800,"y":300,"dx":-300,"dy":0}}"""))
         // Grouped steps with a description (run 9).
         assertEquals(listOf("""{"tap":"Add"}""", """{"type":"500","into":"Amount"}"""),
             steps("""{"desc":"Add food expense","actions":[{"tap":{"target":"Add"}},{"type_text":"500","field":"Amount"}]}"""))
+    }
+
+    @Test fun `a symbol target finds the button, not text that contains the symbol`() {
+        fun node(text: String, desc: String, clickable: Boolean) = app.kiln.device.UiNode(text, desc, "", "View", clickable, false, null, true, 0, 0, 10, 10)
+        val hint = node("Tap + to add your first expense.", "", false)
+        val fab = node("", "Add expense", true)
+        assertEquals(fab, app.kiln.device.findNode(listOf(hint, fab), "+"))
+        assertEquals(hint, app.kiln.device.findNode(listOf(hint), "+"))            // no such button: fall back to text
     }
 
     @Test fun `a helper agent's steps read as one line each`() {

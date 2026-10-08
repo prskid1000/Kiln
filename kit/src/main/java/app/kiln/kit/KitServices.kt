@@ -591,6 +591,10 @@ object KFormat {
         value >= 1_000 -> "%.1fK".format(value / 1e3); else -> value.toString() }
     fun percent(fraction: Double, decimals: Int = 0): String = NumberFormat.getPercentInstance().apply { maximumFractionDigits = decimals }.format(fraction)
     fun date(date: LocalDate, pattern: String = "d MMM yyyy"): String = date.format(DateTimeFormatter.ofPattern(pattern))
+    fun date(date: LocalDate, formatter: DateTimeFormatter): String = date.format(formatter)
+    /** An ISO date string ("2026-10-08", or the date part of "2026-10-08T09:30"); shown as-is if it isn't one. */
+    fun date(iso: String, pattern: String = "d MMM yyyy"): String =
+        runCatching { date(LocalDate.parse(iso.take(10)), pattern) }.getOrDefault(iso)
     fun dateTime(millis: Long, pattern: String = "d MMM, HH:mm"): String =
         Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern(pattern))
     /** "just now", "5 min ago", "yesterday", "3 days ago", or a date. */

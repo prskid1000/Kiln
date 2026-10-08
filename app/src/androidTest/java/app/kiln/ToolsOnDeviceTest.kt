@@ -178,6 +178,13 @@ class ToolsOnDeviceTest {
             // A capitalised package segment (run 9: Kiln.app…) is named as the root cause.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nval broken: Kiln.app.tooltest.Nothing? = null\n"}"""),
             Case("check", "{}", expectError = true, expect = "Package names are lowercase"),
+            // Import mistakes from runs 2–9, all fixed by Kiln: a library class from the wrong package, a wrong
+            // inline qualifier, and items(list) without its import (read as items(count: Int)).
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.Composable\nimport kotlinx.datetime.YearMonth\n\n@Composable\nfun Imports(names: List<String>) {\n    val month = YearMonth.now()\n    val kb = app.kiln.kit.KeyboardType.Number\n    LazyColumn { items(names) { Text(it.uppercase() + month + kb) } }\n}\n"}"""),
+            Case("check", "{}", expect = "import java.time.YearMonth (was kotlinx.datetime.YearMonth)"),
+            Case("check", "{}", expect = "BUILD OK"),
+            Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.foundation.lazy.items"),
+            Case("grep", """{"pattern":"app.kiln.kit.KeyboardType","glob":"**/Bad.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad.kt"}"""),
             // Kotlin outside src/ is refused before it's written.
             Case("write_file", """{"path":"ui/Stray.kt","content":"package x\n"}""", expectError = true, expect = "must be under src/"),

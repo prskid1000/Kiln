@@ -467,6 +467,19 @@ private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Outlined|R
  * Plain-language hints for compile errors that trap models in loops: one line per kind of mistake,
  * with what to do instead. Seen in benchmark runs; each cost a local model dozens of steps.
  */
+/** The constructor properties of a class declared in the project (`data class AppSettings(val budget: …)`), or null if it isn't one. */
+internal fun projectFields(project: app.kiln.build.Project, type: String): List<String>? {
+    val head = Regex("""\bclass\s+${Regex.escape(type)}\s*(?:<[^>]*>)?\s*\(""")
+    for (f in project.files().filter { it.extension == "kt" }) {
+        val text = f.readText()
+        val start = head.find(text)?.range?.last ?: continue
+        var depth = 1; var i = start + 1
+        while (i < text.length && depth > 0) { when (text[i]) { '(' -> depth++; ')' -> depth-- }; i++ }
+        return Regex("""\b(?:val|var)\s+(\w+)""").findAll(text.substring(start + 1, (i - 1).coerceAtLeast(start + 1))).map { it.groupValues[1] }.toList()
+    }
+    return null
+}
+
 fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Project, index: ClassIndex? = null): String {
     if (build.ok) return ""
     val out = linkedSetOf<String>()
@@ -516,6 +529,30 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 out += "Give KCollection/KStore its item type: KCollection<Expense>(context, \"expenses\"), KStore(context, \"settings\", Settings()). Without it every later use fails to infer."
             else out += "Kotlin can't infer a type here: add the type explicitly (val x: List<Expense> = …, map<Expense, String> { … }) — usually one missing type causes the rest of these errors."
         }
+        // Text styles are on MaterialTheme, not the Typography class (runs 2, 5, 7).
+        if (Regex("""\bTypography\.(display|headline|title|body|label)\w*""").containsMatchIn(src))
+            out += "Text styles come from the theme: `style = MaterialTheme.typography.bodyMedium` (import androidx.compose.material3.MaterialTheme), not `Typography.bodyMedium`."
+        // Inside LazyColumn { }, `x.items` means LazyListScope.items(…) (runs 4, 8).
+        if ("function invocation 'items(...)' expected" in m)
+            out += "Inside LazyColumn { … }, `something.items` is read as the list-building items(…) function. Read the list before the LazyColumn: `val list = Repo.x.items` (or collect `.rows`), then `items(list) { … }` inside."
+        // A property the app's own data class doesn't have (settings.currency, settings.reminderHour …).
+        Regex("unresolved reference '([a-z]\\w*)' on receiver of type '([A-Z]\\w*)'").find(m)?.let { r ->
+            val (prop, type) = r.destructured
+            val fields = projectFields(project, type)
+            if (fields != null) out += "$type has no `$prop`." + (if (fields.isEmpty()) "" else " Its properties: ${fields.joinToString()}.") +
+                " Use one of those, or add `$prop` to $type (with a default value, so stored data still loads)."
+        }
+        // Number types don't convert implicitly.
+        Regex("actual type is '(Int|Long|Float|Double)', but '(Int|Long|Float|Double)\\??' was expected").find(m)?.let { r ->
+            out += "Kotlin doesn't convert numbers implicitly: add `.to${r.groupValues[2]}()` to the ${r.groupValues[1]} value."
+        }
+        // Dates stored as String fight every LocalDate API (33 date errors over runs 2–7).
+        if (Regex("actual type is 'String', but 'LocalDate\\??' was expected|actual type is 'LocalDate', but 'String\\??' was expected").containsMatchIn(m))
+            out += "Store dates as dates: in a @Serializable data class use `val date: KDate = LocalDate.now()` (kit; saved as ISO text), " +
+                "then `KFormat.date(item.date)`. A date already kept as a String: `KFormat.date(\"2026-10-08\")` or `LocalDate.parse(s)`."
+        // Comparisons and mutableStateOf on an unknown type are follow-on errors.
+        if ("'operator' modifier is required on 'fun <T> Comparable<T>.compareTo" in m || m.startsWith("inapplicable candidate(s): fun <T> mutableStateOf"))
+            out += "This comparison/state works on a value whose type Kotlin couldn't work out — usually a follow-on error. Fix the earlier errors in this file, or give the value an explicit type (`var idx: Int? by remember { mutableStateOf(null) }`)."
         if ("actual type is 'Modifier'" in m && Regex("'Dp\\??' was expected").containsMatchIn(m))
             out += "Kit `width`/`height` take a size, not a Modifier: `width = 200.dp`. To fill the row use `modifier = Modifier.fillMaxWidth()` (or `.weight(1f)` inside a Row)."
         if ("'return' is prohibited here" in m || "Label must be named" in m)

@@ -30,6 +30,20 @@ class ServicesOnDeviceTest {
     @Serializable data class Note(val title: String, val body: String = "")
     @Serializable data class Post(val id: Int, val title: String)
     @Serializable data class NewPost(val title: String)
+    @Serializable data class Dated(val note: String, val day: KDate, val at: KTime, val stamp: KDateTime)
+
+    /** Dates go into stored data as real dates (models stored them as String and fought type mismatches). */
+    @Test fun datesInStoredData() {
+        val name = "t_dates_" + System.nanoTime()
+        val day = LocalDate.of(2026, 10, 8); val at = java.time.LocalTime.of(9, 30); val stamp = day.atTime(at)
+        KCollection<Dated>(ctx, name).add(Dated("rent", day, at, stamp))
+        KCollection.open.clear()                          // a fresh instance reads it back from disk
+        val back = KCollection<Dated>(ctx, name).items.single()
+        assertEquals(Dated("rent", day, at, stamp), back)
+        assertEquals("8 Oct 2026", KFormat.date(back.day))
+        assertEquals("8 Oct 2026", KFormat.date("2026-10-08"))
+        assertEquals("not a date", KFormat.date("not a date"))
+    }
 
     @Test fun kstorePersistsAcrossInstances() {
         val name = "t_store_" + System.nanoTime()

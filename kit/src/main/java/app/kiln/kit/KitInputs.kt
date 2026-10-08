@@ -356,20 +356,20 @@ fun KTextArea(value: String, onChange: (String) -> Unit, modifier: Modifier = Mo
               width: Dp? = null, error: String? = null, helper: String? = null, enabled: Boolean = true) =
     KTextField(value, onChange, modifier, label = label, placeholder = placeholder, singleLine = false,
         minLines = minLines, maxLines = maxLines, maxLength = maxLength, height = height, keyboard = keyboard, keyboardOptions = keyboardOptions, width = width, error = error, helper = helper, enabled = enabled)
-
+/** Search bar with a clear button. Parameter names follow Material: `KSearchBar(query, onQueryChange = { query = it }, placeholder = "Search notes")`. */
 /** Search bar with a clear button; [onSubmit] runs on the keyboard's search action. */
 @Composable
-fun KSearchBar(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier, hint: String = "Search",
+fun KSearchBar(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "Search",
                trailing: (@Composable () -> Unit)? = null, height: Dp = ks(48), colors: KColors? = null) {
     Row(modifier.fillMaxWidth().height(height).kSurface(RoundedCornerShape(50), colors?.container ?: Nocturne.surface, colors?.border ?: Nocturne.divider).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Filled.Search, null, tint = Nocturne.textMuted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Box(Modifier.weight(1f)) {
-            if (query.isEmpty()) Text(hint, color = Nocturne.textMuted, fontSize = kt(15))
-            BasicTextField(query, onQuery, singleLine = true, cursorBrush = SolidColor(Nocturne.accent),
-                textStyle = TextStyle(color = Nocturne.text, fontSize = kt(15)), modifier = Modifier.fillMaxWidth().semantics { contentDescription = hint })
+            if (query.isEmpty()) Text(placeholder, color = Nocturne.textMuted, fontSize = kt(15))
+            BasicTextField(query, onQueryChange, singleLine = true, cursorBrush = SolidColor(Nocturne.accent),
+                textStyle = TextStyle(color = Nocturne.text, fontSize = kt(15)), modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder })
         }
-        if (query.isNotEmpty()) IconButton({ onQuery("") }, Modifier.size(32.dp)) { Icon(Icons.Filled.Clear, "Clear search", tint = Nocturne.textMuted) }
+        if (query.isNotEmpty()) IconButton({ onQueryChange("") }, Modifier.size(32.dp)) { Icon(Icons.Filled.Clear, "Clear search", tint = Nocturne.textMuted) }
         trailing?.invoke()
     }
 }

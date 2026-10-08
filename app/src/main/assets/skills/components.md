@@ -91,7 +91,7 @@ fun ComponentGallery() {
                     error = if (name.length == 1) "Too short" else null, maxLength = 40)
                 KTextField(pin, { pin = it }, label = "PIN", password = true, keyboard = KeyboardType.NumberPassword, maxLength = 6, width = 200.dp)
                 KTextArea(notes, { notes = it }, label = "Notes", minLines = 3)
-                KSearchBar(query, { query = it }, hint = "Search recipes")
+                KSearchBar(query, { query = it }, placeholder = "Search recipes")
                 KOtpField(otp, { otp = it }, length = 4)
                 KStepper(qty, { qty = it }, min = 1, max = 10, label = "Servings")
                 KSelect(listOf("Berlin", "Delhi", "Lagos"), city, { city = it }, label = "City")

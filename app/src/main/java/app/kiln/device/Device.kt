@@ -340,7 +340,21 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
  * `Button "Add 250ml"`, `the Save button`, `'Reset'` — so roles, quotes and filler words are
  * stripped, then exact, contains, and best word-overlap matches are tried; clickable wins ties.
  */
+/** Icon-like targets and the words their buttons are labelled with. */
+private val SYMBOLS = mapOf(
+    "+" to listOf("add", "new", "create"), "＋" to listOf("add", "new", "create"),
+    "×" to listOf("close", "clear", "dismiss"), "✕" to listOf("close", "clear", "dismiss"), "x" to listOf("close", "clear", "dismiss"),
+    "←" to listOf("back", "navigate up"), "<" to listOf("back", "navigate up"),
+    "⋮" to listOf("more", "options", "menu"), "..." to listOf("more", "options", "menu"), "☰" to listOf("menu", "navigation"),
+    "✓" to listOf("done", "save", "confirm"), "✔" to listOf("done", "save", "confirm"),
+    "🔍" to listOf("search"), "✏" to listOf("edit"), "✎" to listOf("edit"), "🗑" to listOf("delete", "remove"),
+)
+
 fun findNode(nodes: List<UiNode>, target: String): UiNode? {
+    // A symbol names a button by its icon (run 10: "+" matched the text "Tap + to add…", not the + button).
+    SYMBOLS[target.trim()]?.let { words ->
+        nodes.filter { it.clickable }.firstOrNull { n -> words.any { w -> "${n.desc} ${n.text}".lowercase().contains(w) } }?.let { return it }
+    }
     val filler = setOf("button", "btn", "text", "textview", "view", "image", "imageview", "icon", "the", "a", "an",
         "tab", "label", "field", "edittext", "switch", "checkbox", "item", "element", "on", "labeled", "labelled", "called")
     val quoted = Regex("[\"'“”‘’]([^\"'“”‘’]+)[\"'“”‘’]").find(target)?.groupValues?.get(1)

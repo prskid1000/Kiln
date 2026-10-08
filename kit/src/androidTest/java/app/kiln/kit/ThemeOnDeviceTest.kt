@@ -152,7 +152,7 @@ class ThemeOnDeviceTest {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             KButton("Primary") {}; KButton("Tonal", variant = KVariant.Tonal) {}; KButton("Outline", variant = KVariant.Outline) {}
                         }
-                        KSearchBar("", {}, hint = "Search")
+                        KSearchBar("", {}, placeholder = "Search")
                         KSegmented(listOf("Day", "Week", "Month"), 1, {})
                         KSelect(listOf("One"), null, {}, label = "Select")
                         KAlert("An alert", tone = KTone.Warn)

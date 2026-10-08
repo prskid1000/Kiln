@@ -105,6 +105,14 @@ class SetAppMetaTool : Tool {
  * rewritten in place; missing ones are added. Ambiguous or unknown names are left alone and
  * reported with hints. Returns the result and a note of what was changed.
  */
+/** [text] with `import [fq]` after its last import (or its package line). */
+internal fun addImport(text: String, fq: String): String {
+    val lastImport = Regex("(?m)^import .*$").findAll(text).lastOrNull()
+    val pkg = Regex("(?m)^package .*$").find(text)
+    val at = lastImport?.range?.last ?: pkg?.range?.last ?: -1
+    return if (at < 0) "import $fq\n$text" else text.substring(0, at + 1) + (if (lastImport == null) "\n" else "") + "\nimport $fq" + text.substring(at + 1)
+}
+
 suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: ToolContext, checkOnly: Boolean): Pair<BuildResult, String> {
     var r = builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) }
     fun linted(b: BuildResult) = b.copy(diagnostics = b.diagnostics + app.kiln.build.Lint.run(ctx.project))
@@ -121,7 +129,10 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         // Imports between the project's own files: point a broken import at where the symbol really is.
         val imported = Regex("""^\s*import\s+([\w.]+)""").find(e.source.orEmpty())?.groupValues?.get(1)
         if (imported != null && "unresolved reference" in e.message) {
-            val real = decls[imported.substringAfterLast('.')]?.singleOrNull()
+            // The project's own class, or a library class imported from the wrong package
+            // (kotlinx.datetime.YearMonth → java.time.YearMonth).
+            val simple = imported.substringAfterLast('.')
+            val real = decls[simple]?.singleOrNull() ?: simple.takeIf { it[0].isUpperCase() }?.let { index.uniqueClass(it, "") }
             val path0 = e.file
             val f0 = path0?.let { File(it).let { x -> if (x.isAbsolute) x else ctx.project.resolve(it) } }
             if (real != null && real != imported && f0 != null && f0.isFile) {
@@ -152,24 +163,42 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val own = decls[name]?.singleOrNull()?.takeIf { it.substringBeforeLast('.') != filePkg }
         val fq = (if (icon != null) "androidx.compose.material.icons." + (if (icon.groupValues[1].isNotEmpty()) "automirrored." else "") +
             icon.groupValues[2].lowercase() + "." + name else own ?: index.uniqueClass(name, e.source ?: "")) ?: continue
-        val text = f.readText()
+        var text = f.readText()
+        // A wrong package written inline (app.kiln.kit.KeyboardType.Number, …layout.Alignment): drop the
+        // qualifier, the import below supplies the right one.
+        // Only qualifiers on the failing line, and never on import/package lines.
+        val wrongQualified = Regex("""(?<![\w.])(?:[a-z]\w*\.){2,}${Regex.escape(name)}\b""")
+        val inline = wrongQualified.findAll(e.source.orEmpty().removePrefix(">").trim()).map { it.value }.filter { it != fq }.toSet()
+        if (inline.isNotEmpty()) text = text.lines().joinToString("\n") { l ->
+            if (l.trimStart().startsWith("import ") || l.trimStart().startsWith("package ")) l
+            else inline.fold(l) { acc, q -> Regex("""(?<![\w.])${Regex.escape(q)}\b""").replace(acc, name) }
+        }
         val stale = Regex("(?m)^import\\s+[\\w.]+\\.$name\\s*$")
         val fixed = when {
-            Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text) -> continue
+            Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text) -> if (inline.isEmpty()) continue else text
             stale.containsMatchIn(text) -> text.replace(stale, "import $fq")
-            else -> {
-                val lastImport = Regex("(?m)^import .*$").findAll(text).lastOrNull()
-                val pkg = Regex("(?m)^package .*$").find(text)
-                val at = lastImport?.range?.last ?: pkg?.range?.last ?: -1
-                if (at < 0) "import $fq\n$text" else text.substring(0, at + 1) + (if (lastImport == null) "\n" else "") + "\nimport $fq" + text.substring(at + 1)
-            }
+            else -> addImport(text, fq)
         }
         val rel = ctx.project.rel(f)
         val readCurrent = ctx.state.readStamps[rel] == f.lastModified()
         f.writeText(fixed)
-        // Only import lines changed: a model that had read the file may keep editing it.
+        // Only import lines (and wrong package qualifiers) changed: a model that had read the file may keep editing it.
         if (readCurrent) ctx.state.readStamps[rel] = f.lastModified()
-        fixes += "$rel: import $fq"
+        fixes += "$rel: import $fq" + if (inline.isNotEmpty()) " (and ${inline.joinToString { "$it → $name" }})" else ""
+    }
+    // `items(list) { … }` without its import compiles as items(count: Int): every row is an Int, and
+    // the errors say "… on receiver of type 'Int'" instead of naming the missing import.
+    for (path in r.errors.filter { "on receiver of type 'Int'" in it.message }.mapNotNull { it.file }.toSet()) {
+        val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
+        if (!f.isFile) continue
+        val text = f.readText()
+        val fq = "androidx.compose.foundation.lazy.items"
+        if (!Regex("""\bitems\s*\(""").containsMatchIn(text) || Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text)) continue
+        val rel = ctx.project.rel(f)
+        val readCurrent = ctx.state.readStamps[rel] == f.lastModified()
+        f.writeText(addImport(text, fq))
+        if (readCurrent) ctx.state.readStamps[rel] = f.lastModified()
+        fixes += "$rel: import $fq (without it, items(list) was read as items(count: Int))"
     }
     if (fixes.size == before) break
     ctx.progress("fixed imports, rebuilding")
@@ -630,7 +659,18 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
     private suspend fun step(ctx: ToolContext, pkg: String, st: JsonObject, visible: suspend (String) -> Boolean): Pair<Boolean, String> {
         fun s(k: String) = st.str(k)?.takeIf { it.isNotBlank() }
         val before = device.uiTree(pkg)
+        // A raw swipe: "x,y,dx,dy".
+        s("swipe_by")?.split(',')?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 4 }?.let { (x, y, dx, dy) ->
+            device.swipe(x, y, x + dx, y + dy, ms = 250); delay(600)
+            return true to "swipe from $x,$y by $dx,$dy → ${screenChange(ctx, before)}"
+        }
         s("tap")?.let { t ->
+            // "250,289" is a point, not a label.
+            Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(t)?.let { c ->
+                val (x, y) = c.groupValues[1].toInt() to c.groupValues[2].toInt()
+                device.tap(x, y); delay(600)
+                return true to "tap $x,$y → ${screenChange(ctx, before, x, y)}"
+            }
             val node = device.find(before, t) ?: return false to "tap “$t”: not on screen (${before.filter { it.clickable }.take(8).joinToString { "“${it.label()}”" }} …)"
             val (x, y) = reachable(node) ?: return false to "tap “$t”: ${offScreen(node, t)}"
             device.tap(x, y); delay(600)
@@ -705,6 +745,13 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         for ((k0, v) in st) {
             val k = alias[k0] ?: if (k0 == "target" && !typing) "tap" else if (k0 == "back") "key" else k0
             if (k !in actions) continue
+            // Coordinates (run 10): {"tap": {"x": 250, "y": 289}} → "250,289"; {"swipe": {"x":…, "y":…, "dx":…, "dy":…}}.
+            if (v is JsonObject && v.str("x") != null && v.str("y") != null && listOf("text", "target", "label", "direction").none { v.str(it) != null }) {
+                val xy = "${v.str("x")},${v.str("y")}"
+                out += if (k == "swipe") JsonObject(mapOf("swipe_by" to JsonPrimitive("$xy,${v.str("dx") ?: "0"},${v.str("dy") ?: "0"}")))
+                    else JsonObject(mapOf(k to JsonPrimitive(xy)))
+                continue
+            }
             val values: List<String> = when (v) {
                 is JsonObject -> {
                     opt(v)

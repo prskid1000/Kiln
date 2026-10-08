@@ -101,13 +101,15 @@ fun KEmptyState(title: String, body: String, icon: ImageVector? = null,
     }
 }
 
-enum class KTone { Accent, Neutral, Ok, Warn, Danger }
+/** Colour roles: the theme's two accents, a neutral, and the status colours. */
+enum class KTone { Accent, Accent2, Neutral, Ok, Warn, Danger }
 
 /** Small status pill. */
 @Composable
 fun KTag(text: String, tone: KTone = KTone.Neutral, modifier: Modifier = Modifier) {
     val (ground, ink) = when (tone) {
         KTone.Accent -> Nocturne.accent800 to Nocturne.accent100
+        KTone.Accent2 -> Nocturne.accent2.copy(alpha = 0.16f) to Nocturne.ink(Nocturne.accent2)
         KTone.Neutral -> Nocturne.neutral800 to Nocturne.neutral100
         KTone.Ok -> Nocturne.ok.copy(alpha = 0.16f) to Nocturne.ok
         KTone.Warn -> Nocturne.warn.copy(alpha = 0.16f) to Nocturne.warn
@@ -166,6 +168,6 @@ fun KConfirm(open: Boolean, title: String, body: String, confirmLabel: String = 
 
 /** Colour for a tone, for custom drawing. */
 fun KTone.color(): Color = when (this) {
-    KTone.Accent -> Nocturne.accent; KTone.Neutral -> Nocturne.neutral300
+    KTone.Accent -> Nocturne.accent; KTone.Accent2 -> Nocturne.accent2; KTone.Neutral -> Nocturne.neutral300
     KTone.Ok -> Nocturne.ok; KTone.Warn -> Nocturne.warn; KTone.Danger -> Nocturne.danger
 }

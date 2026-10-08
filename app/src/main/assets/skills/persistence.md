@@ -1,41 +1,52 @@
 # persistence — keep data across restarts (lists, settings, counters, daily totals)
 
-- Collections and app data: `KStore(context, "name", default)` — a JSON file with `state: StateFlow<T>`,
-  `update { }` and `set()`. Types must be `@Serializable`. Create it once (remember / ViewModel / object).
-- Small settings (a toggle, a goal number): the same KStore with a settings data class is simplest.
+- Lists that grow (expenses, notes, logs): `KCollection<T>("name")` — a small database table with
+  `add`, `update(id, …)`, `delete(id)`, `items` (plain values) and `rows` (live `KRow<T>`: `row.id`, `row.value`).
+- One value (settings, a goal, a small list): `KStore("name", default)` — `state: StateFlow<T>`, `update { }`, `set()`.
+- Create stores once, in an `object Repo` — no Context needed. Types must be `@Serializable`.
+- Dates in stored data: `KDate` (also `KTime`, `KDateTime`) — a real `LocalDate`, saved as ISO text.
+  Don't store dates as String; every screen then has to parse them.
+- New fields need a default value, so data saved by an older version still loads.
 - Daily totals: store the date with the value and reset when it isn't today (don't schedule a reset).
+- A list screen with add / edit / delete / search: use `KCrudList` (see architecture) instead of building it.
 
 ```kotlin
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.kiln.kit.KCollection
+import app.kiln.kit.KDate
+import app.kiln.kit.KFormat
 import app.kiln.kit.KListRow
 import app.kiln.kit.KStore
 import kotlinx.serialization.Serializable
 import java.time.LocalDate
 
-@Serializable data class SkillTodo(val id: Long, val text: String, val done: Boolean = false)
-@Serializable data class SkillDaily(val date: String = "", val total: Int = 0)
+@Serializable data class SkillTodo(val text: String, val done: Boolean = false, val due: KDate = LocalDate.now())
+@Serializable data class SkillDaily(val date: KDate = LocalDate.now(), val total: Int = 0)
+@Serializable data class SkillSettings(val dailyGoal: Int = 8, val name: String = "")
+
+object SkillRepo {
+    val todos = KCollection<SkillTodo>("todos")
+    val daily = KStore("daily", SkillDaily())
+    val settings = KStore("settings", SkillSettings())
+}
 
 @Composable
 fun SkillTodoList() {
-    val context = LocalContext.current
-    val store = remember { KStore(context, "todos", emptyList<SkillTodo>()) }
-    val todos by store.state.collectAsStateWithLifecycle()
+    val rows by SkillRepo.todos.rows.collectAsStateWithLifecycle()
     LazyColumn {
-        items(todos, key = { it.id }) { t ->
-            KListRow(title = t.text, onClick = { store.update { list -> list.map { if (it.id == t.id) it.copy(done = !it.done) else it } } })
+        items(rows, key = { it.id }) { row ->
+            KListRow(title = row.value.text, subtitle = "Due " + KFormat.date(row.value.due),
+                onClick = { SkillRepo.todos.update(row.id, row.value.copy(done = !row.value.done)) })
         }
     }
 }
 
-fun skillAddToday(store: KStore<SkillDaily>, amount: Int) {
-    val today = LocalDate.now().toString()
-    store.update { d -> if (d.date == today) d.copy(total = d.total + amount) else SkillDaily(today, amount) }
+fun skillAddToday(amount: Int) {
+    val today = LocalDate.now()
+    SkillRepo.daily.update { d -> if (d.date == today) d.copy(total = d.total + amount) else SkillDaily(today, amount) }
 }
 ```
