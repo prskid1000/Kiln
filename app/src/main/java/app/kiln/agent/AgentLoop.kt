@@ -197,10 +197,18 @@ class AgentLoop(
             runCatching { Turns.snapshot(session, project, session.messages.size) }
             val id = next(Activity.Kind.USER, userText)
             update(id) { it.copy(msgIndex = session.messages.size) }
+            // A new app made in Kiln: the user picks its look before the agent writes any UI.
+            val pending = File(project.kilnDir, app.kiln.tools.Looks.PENDING)
+            val look = if (mode == Mode.BUILD && role == "agent" && pending.isFile) {
+                val (note, summary) = app.kiln.tools.Looks.instruction(askLook(project.meta().label))
+                pending.delete()
+                next(Activity.Kind.NOTICE, summary)
+                obj("type" to "text", "text" to "<system-reminder>Before you started, the user picked this app's look. $note</system-reminder>")
+            } else null
             val extra = Attachments.blocks(project, attachments)
             update(id) { it.copy(files = attachments.filterNot { a -> a.mime.startsWith("image/") }.map { a -> a.name },
                 images = attachments.filter { a -> a.mime.startsWith("image/") }.map { a -> a.bytes }) }
-            val blocks = listOfNotNull(userText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra +
+            val blocks = listOfNotNull(userText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra + listOfNotNull(look) +
                 listOfNotNull(if (mode == Mode.PLAN) obj("type" to "text", "text" to PLAN_REMINDER) else null) +
                 listOfNotNull(this.goal?.let { obj("type" to "text", "text" to "<system-reminder>This is a goal run. The turn ends only " +
                     "when these done criteria are verified on the device:\n$it</system-reminder>") })
@@ -295,6 +303,13 @@ class AgentLoop(
             // Queued user messages ride along with the tool results: the model sees them at its next step.
             session.append(Msg("user", JsonArray(results + (drainSteering() ?: emptyList()))))
         }
+    }
+
+    /** Show the look picker and wait for the user's choice. */
+    private suspend fun askLook(appName: String?): String {
+        val q = Question("Pick a look for ${appName ?: "this app"}", emptyList(), CompletableDeferred(), kind = "look")
+        question.value = q
+        return try { q.answer.await() } finally { question.value = null }
     }
 
     /** User messages typed during the run, as text blocks (null when there are none). */
@@ -438,11 +453,7 @@ class AgentLoop(
             val parts = raw.split(ANSWER_SEP)
             return questions.indices.map { parts.getOrNull(it)?.trim().orEmpty() }
         }
-        override suspend fun chooseLook(appName: String?): String {
-            val q = Question("Pick a look for ${appName ?: "this app"}", emptyList(), CompletableDeferred(), kind = "look")
-            this@AgentLoop.question.value = q
-            return try { q.answer.await() } finally { this@AgentLoop.question.value = null }
-        }
+        override suspend fun chooseLook(appName: String?): String = askLook(appName)
         override fun spill(text: String, maxChars: Int): String {
             if (text.length <= maxChars) return text
             val id = "out-${spillN.incrementAndGet()}"

@@ -163,6 +163,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             val base = slug(label)
             val name = generateSequence(1) { it + 1 }.map { if (it == 1) base else "${base}_$it" }.first { it !in taken }
             Project.create(Graph.paths.projects, name, label.trim(), File(Graph.toolchain.templates(), "compose"))
+                .also { File(it.kilnDir, app.kiln.tools.Looks.PENDING).writeText("") }
             projects.value = listProjects()
             launch(Dispatchers.Main) { then(name) }
             if (!prompt.isNullOrBlank()) send(name, prompt)

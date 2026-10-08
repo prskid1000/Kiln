@@ -30,6 +30,34 @@ object Looks {
 
     /** The answer the picker sends: "theme=Ocean Depths; style=Glass". */
     fun answer(theme: String, style: String) = "theme=$theme; style=$style"
+
+    /** Marks a project created in Kiln whose look the user hasn't picked yet (asked at its first run). */
+    const val PENDING = "look-pending"
+
+    /** What the agent should do with the picker's answer, and a short summary. */
+    fun instruction(answer: String): Pair<String, String> {
+        val raw = answer.trim()
+        val theme = Regex("theme=([^;]+)").find(raw)?.groupValues?.get(1)?.trim()
+        val style = Regex("style=([^;]+)").find(raw)?.groupValues?.get(1)?.trim() ?: "Flat"
+        val t = themes.firstOrNull { it.name.equals(theme, true) }
+        val keepDefault = raw.equals(DEFAULT, true) || raw.isBlank() || raw.startsWith("no user", true) ||
+            (t?.code == "Nocturne" && style == "Flat")
+        fun hex(c: Long) = "%06X".format(c and 0xFFFFFF)
+        return when {
+            keepDefault -> "Keep Kiln's default look (Nocturne, Flat): don't override Theme in MainActivity." to "Look: Kiln default"
+            t != null -> {
+                val args = listOfNotNull("theme = KThemes.${t.code}", if (style != "Flat") "style = KStyle.$style" else null).joinToString(", ")
+                ("The user chose ${t.name} (${t.mood})${if (style != "Flat") " with the $style style" else ""}. In MainActivity add:\n" +
+                    "    @Composable override fun Theme(content: @Composable () -> Unit) = KilnTheme($args, content = content)\n" +
+                    "Read colours only from Nocturne.* tokens in screens. Draw the launcher icon in this palette " +
+                    "(bg #${hex(t.bg)}, accent #${hex(t.accent)}, accent2 #${hex(t.accent2)}).") to
+                    "Look: ${t.name}${if (style != "Flat") " · $style" else ""}"
+            }
+            else -> ("The user described the look in their own words: \"$raw\". Map it to the closest KThemes preset, " +
+                "or KilnTheme(accent = …, dark = …) for a specific colour, plus a KStyle if they mention one (load_skill theming). " +
+                "Then override Theme in MainActivity.") to "Look: \"${raw.take(40)}\""
+        }
+    }
 }
 
 /**
@@ -38,34 +66,15 @@ object Looks {
  */
 class ChooseLookTool : Tool {
     override val name = "choose_look"
-    override val description = "Show the user a visual picker for a NEW app's look (theme + surface style such as glass or " +
-        "neumorphic) and get their choice with the exact code. Call it once at the start of a new app when the user hasn't " +
-        "described the look; not for edits, and not if they already said (then map their words yourself, see the theming skill)."
+    override val description = "Show the user a visual picker for the app's look (theme + surface style such as glass or " +
+        "neumorphic) and get their choice with the exact code. Kiln already asks at the start of a new app; call this only " +
+        "when the user asks to pick or change the look and hasn't said what they want."
     override val schema = schema { str("app", "What the app is, in a few words (shown on the picker).", required = false) }
     override val traits = setOf(Trait.READ_ONLY)
     override val timeoutMs = 24 * 3_600_000L
 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val raw = ctx.chooseLook(input.str("app")).trim()
-        val theme = Regex("theme=([^;]+)").find(raw)?.groupValues?.get(1)?.trim()
-        val style = Regex("style=([^;]+)").find(raw)?.groupValues?.get(1)?.trim() ?: "Flat"
-        val t = Looks.themes.firstOrNull { it.name.equals(theme, true) }
-        val keepDefault = raw.equals(Looks.DEFAULT, true) || raw.isBlank() || raw.startsWith("no user", true) ||
-            (t?.code == "Nocturne" && style == "Flat")
-        return when {
-            keepDefault -> ToolResult.ok("Keep Kiln's default look (Nocturne, Flat): don't override Theme in MainActivity.", "Look: Kiln default")
-            t != null -> {
-                val args = listOfNotNull("theme = KThemes.${t.code}", if (style != "Flat") "style = KStyle.$style" else null).joinToString(", ")
-                ToolResult.ok("The user chose ${t.name} (${t.mood})${if (style != "Flat") " with the $style style" else ""}. In MainActivity add:\n" +
-                    "    @Composable override fun Theme(content: @Composable () -> Unit) = KilnTheme($args, content = content)\n" +
-                    "Read colours only from Nocturne.* tokens in screens. Draw the launcher icon in this palette " +
-                    "(bg #${hex(t.bg)}, accent #${hex(t.accent)}, accent2 #${hex(t.accent2)}).", "Look: ${t.name}${if (style != "Flat") " · $style" else ""}")
-            }
-            else -> ToolResult.ok("The user described the look in their own words: \"$raw\". Map it to the closest KThemes preset, " +
-                "or KilnTheme(accent = …, dark = …) for a specific colour, plus a KStyle if they mention one (load_skill theming). " +
-                "Then override Theme in MainActivity.", "Look: \"${raw.take(40)}\"")
-        }
+        val (text, summary) = Looks.instruction(ctx.chooseLook(input.str("app")))
+        return ToolResult.ok(text, summary)
     }
-
-    private fun hex(c: Long) = "%06X".format(c and 0xFFFFFF)
 }
