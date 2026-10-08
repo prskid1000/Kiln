@@ -196,7 +196,7 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
             check(r)
             sse(r) { _, data ->
                 val j = parseJson(data) as? JsonObject ?: return@sse
-                (j["error"] as? JsonObject)?.let { throw ProviderException(it.str("message") ?: data, retryable = false) }
+                (j["error"] as? JsonObject)?.let { throw streamError(it, data) }
                 (j["usage"] as? JsonObject)?.let { u ->
                     val cached = ((u["prompt_tokens_details"] as? JsonObject)?.get("cached_tokens") as? JsonPrimitive)?.content?.toLongOrNull() ?: 0
                     usage = Usage(
