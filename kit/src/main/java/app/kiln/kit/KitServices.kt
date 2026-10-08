@@ -137,11 +137,18 @@ class KCollection<T>(context: Context, private val name: String, private val ser
     val size: Int get() = flow.value.size
 
     companion object {
+        /** One collection per name: every screen sees the same rows and updates. */
+        @PublishedApi internal val open = java.util.concurrent.ConcurrentHashMap<String, KCollection<*>>()
+
+        @Suppress("UNCHECKED_CAST")
+        @PublishedApi internal fun <T> shared(context: Context, name: String, serializer: KSerializer<T>, newestFirst: Boolean): KCollection<T> =
+            open.getOrPut("$name/$newestFirst") { KCollection(context, name, serializer, newestFirst) } as KCollection<T>
+
         inline operator fun <reified T> invoke(context: Context, name: String, newestFirst: Boolean = true): KCollection<T> =
-            KCollection(context, name, serializer(), newestFirst)
+            shared(context, name, serializer(), newestFirst)
         /** No Context needed: `val notes = KCollection<Note>("notes")` (uses [KApp.context]). */
         inline operator fun <reified T> invoke(name: String, newestFirst: Boolean = true): KCollection<T> =
-            KCollection(KApp.context, name, serializer(), newestFirst)
+            shared(KApp.context, name, serializer(), newestFirst)
     }
 }
 

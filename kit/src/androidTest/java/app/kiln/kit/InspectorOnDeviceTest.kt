@@ -70,7 +70,8 @@ class InspectorOnDeviceTest {
         assertTrue(ask(Intent(KilnInspector.INPUT).putExtra("op", "text").putExtra("text", "5").putExtra("replace", true)).contains("“5”"))
         rule.waitForIdle()
         assertTrue("field value $amount", amount == "5")
-        // Tap Save by its bounds, as Kiln's tap tool does.
+        // Tap Save by its bounds, as Kiln's tap tool does — read fresh: the keyboard moved the dialog.
+        xml = tree()
         val save = Regex("""text="Save"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"""").find(xml) ?: error("no Save button in $xml")
         val (l, t, r, b) = save.destructured
         val res = ask(Intent(KilnInspector.INPUT).putExtra("op", "tap")

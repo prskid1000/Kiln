@@ -89,7 +89,7 @@ class Kiln(
         StopAppTool(warden, device), ClearDataTool(warden, device), GrantPermissionTool(warden, device),
         LogcatTool(warden, device), LastCrashTool(warden, device), ScreenshotTool(warden, device),
         UiTreeTool(warden, device), TapTool(warden, device), TypeTool(warden, device), SwipeTool(warden, device),
-        KeyTool(warden, device), WaitForTool(warden, device), DumpsysTool(warden, device), ShellTool(warden, device),
+        KeyTool(warden, device), WaitForTool(warden, device), app.kiln.tools.TestFlowTool(warden, device), DumpsysTool(warden, device), ShellTool(warden, device),
         SdkLookupTool(classIndex), KitDocsTool(toolchain, skills), WebFetchTool(), app.kiln.tools.MakeGraphicTool(),
         app.kiln.tools.LoadSkillTool(skills), app.kiln.tools.ProposeRuleTool(), app.kiln.tools.SecurityCheckTool(),
         app.kiln.tools.CompareScreenTool(warden, device), app.kiln.tools.UiCheckTool(warden, device), app.kiln.tools.SaveScreenshotTool(warden, device),

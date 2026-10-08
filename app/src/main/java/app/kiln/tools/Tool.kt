@@ -90,6 +90,8 @@ class SchemaBuilder {
     private val props = linkedMapOf<String, JsonElement>()
     private val required = mutableListOf<String>()
     private fun add(name: String, spec: JsonObject, req: Boolean) { props[name] = spec; if (req) required += name }
+    /** A property with a hand-written JSON schema (arrays of objects with free-form keys, …). */
+    fun raw(name: String, spec: JsonObject, required: Boolean = true) = add(name, spec, required)
     fun str(name: String, desc: String, required: Boolean = true, enum: List<String>? = null) =
         add(name, obj("type" to "string", "description" to desc, "enum" to enum), required)
     fun int(name: String, desc: String, required: Boolean = true) = add(name, obj("type" to "integer", "description" to desc), required)

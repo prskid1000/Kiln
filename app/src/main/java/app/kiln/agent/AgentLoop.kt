@@ -304,8 +304,17 @@ class AgentLoop(
                 return
             }
             val results = runTools(uses, cfg, truncated = turn.second.stop == Stop.MAX_TOKENS)
+            // Step budget: past 60/80/90 % the agent hears how many steps are left, so it finishes and
+            // reports instead of being cut off mid-test.
+            val budget = listOf(0.6, 0.8, 0.9).firstOrNull { f -> steps == (cfg.maxSteps * f).toInt() }?.let { f ->
+                obj("type" to "text", "text" to "<system-reminder>Step $steps of ${cfg.maxSteps} used. " + when (f) {
+                    0.6 -> "Prioritise: finish the features, then test the main journeys with test_flow."
+                    0.8 -> "Wrap up: fix only what blocks the main journeys, then summarise what works."
+                    else -> "Almost out of steps: stop changing code, make sure it builds, and report what works and what doesn't."
+                } + "</system-reminder>")
+            }
             // Queued user messages ride along with the tool results: the model sees them at its next step.
-            session.append(Msg("user", JsonArray(results + (drainSteering() ?: emptyList()))))
+            session.append(Msg("user", JsonArray(results + listOfNotNull(budget) + (drainSteering() ?: emptyList()))))
         }
     }
 

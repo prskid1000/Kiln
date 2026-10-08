@@ -216,9 +216,9 @@ class CleanTool(private val builds: BuildEngine) : Tool {
 }
 
 /** Shared base for device tools: Warden must be ready. */
-abstract class DeviceTool(protected val warden: Warden, protected val device: Device) : Tool {
+abstract class DeviceTool(protected val warden: Warden, internal val device: Device) : Tool {
     override val traits: Set<Trait> get() = setOf(Trait.NEEDS_BROKER)
-    protected fun pkg(ctx: ToolContext) = ctx.project.meta().`package`
+    internal fun pkg(ctx: ToolContext) = ctx.project.meta().`package`
     final override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         if (warden.status() != Warden.Status.READY)
             return ToolResult.error("Warden is ${warden.status().name.lowercase().replace('_', ' ')} — device tools need it (start Warden and grant Kiln).")
@@ -402,16 +402,16 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
         // "640, 1427" in target is a coordinate, not a label.
         val coord = Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(input.str("target") ?: "")
         val target = input.str("target")?.takeIf { it.isNotBlank() && coord == null }
+        val before = device.uiTree(pkg(ctx))
         val (x, y) = if (target != null) {
-            val nodes = device.uiTree(pkg(ctx))
-            val n = device.find(nodes, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
-                treeText(nodes.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
+            val n = device.find(before, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
+                treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
             n.cx to n.cy
         } else if (coord != null) coord.groupValues[1].toInt() to coord.groupValues[2].toInt()
         else (input.int("x") ?: 0) to (input.int("y") ?: 0)
         device.tap(x, y)
         delay(600)
-        return ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}")
+        return ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}. " + screenChange(ctx, before))
     }
 }
 
@@ -429,16 +429,31 @@ class TypeTool(w: Warden, d: Device) : DeviceTool(w, d) {
 class SwipeTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val inputTool = true
     override val name = "swipe"
-    override val description = "Swipe/scroll the screen: direction up | down | left | right (content moves the other way, like a finger)."
-    override val schema = schema { str("direction", "Finger direction.", enum = listOf("up", "down", "left", "right")) }
+    override val description = "Swipe like a finger: direction up | down | left | right. Without a target it scrolls the screen; " +
+        "with a target it swipes along that element (swipe a list row left to delete it, a carousel to change page)."
+    override val schema = schema {
+        str("direction", "Finger direction.", enum = listOf("up", "down", "left", "right"))
+        str("target", "Element to swipe on, as ui_tree shows it (e.g. a list row's text); empty for the whole screen.", required = false)
+    }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val (w, h) = device.screenSize()
-        val (x1, y1, x2, y2) = when (input.req("direction")) {
+        val before = device.uiTree(pkg(ctx))
+        val dir = input.req("direction")
+        val target = input.str("target")?.takeIf { it.isNotBlank() }
+        val (x1, y1, x2, y2) = if (target != null) {
+            val n = device.find(before, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
+                treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
+            // Along the element, edge to edge across the screen at its height (a row's swipe needs distance and speed).
+            when (dir) {
+                "left" -> listOf(w * 9 / 10, n.cy, w / 10, n.cy); "right" -> listOf(w / 10, n.cy, w * 9 / 10, n.cy)
+                "up" -> listOf(n.cx, n.bottom - 4, n.cx, maxOf(0, n.top - (n.bottom - n.top))); else -> listOf(n.cx, n.top + 4, n.cx, n.bottom + (n.bottom - n.top))
+            }
+        } else when (dir) {
             "up" -> listOf(w / 2, h * 3 / 4, w / 2, h / 4); "down" -> listOf(w / 2, h / 4, w / 2, h * 3 / 4)
             "left" -> listOf(w * 4 / 5, h / 2, w / 5, h / 2); else -> listOf(w / 5, h / 2, w * 4 / 5, h / 2)
         }
-        device.swipe(x1, y1, x2, y2); delay(500)
-        return ToolResult.ok("swiped ${input.str("direction")}")
+        device.swipe(x1, y1, x2, y2, ms = if (target != null) 180 else 300); delay(600)
+        return ToolResult.ok("swiped $dir${target?.let { " on \"$it\"" } ?: ""}. " + screenChange(ctx, before))
     }
 }
 
@@ -447,7 +462,11 @@ class KeyTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val name = "press_key"
     override val description = "Press a key: BACK, HOME, ENTER, TAB, DEL, APP_SWITCH."
     override val schema = schema { str("key", "Key name.", enum = listOf("BACK", "HOME", "ENTER", "TAB", "DEL", "APP_SWITCH")) }
-    override suspend fun exec(ctx: ToolContext, input: JsonObject) = device.key(input.req("key")).let { delay(400); ToolResult.ok("pressed ${input.str("key")}") }
+    override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
+        val before = device.uiTree(pkg(ctx))
+        device.key(input.req("key")); delay(500)
+        return ToolResult.ok("pressed ${input.str("key")}. " + screenChange(ctx, before))
+    }
 }
 
 class WaitForTool(w: Warden, d: Device) : DeviceTool(w, d) {
@@ -517,4 +536,107 @@ internal fun projectDeclarations(project: app.kiln.build.Project): Map<String, L
             }
     }
     return out.mapValues { it.value.distinct() }
+}
+
+/**
+ * What an action did, from the screen before and after: "No change on screen", what appeared and
+ * disappeared, or that the app stopped — so a tap doesn't need a screenshot to know if it worked.
+ */
+internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.kiln.device.UiNode>): String {
+    val pkg = pkg(ctx)
+    val after = device.uiTree(pkg)
+    if (after.isEmpty() && device.pid(pkg) == null) return "The app is no longer running — it may have crashed: call last_crash."
+    fun labels(nodes: List<app.kiln.device.UiNode>) =
+        nodes.filter { it.text.isNotBlank() || it.desc.isNotBlank() }.map { it.label().take(60) }.distinct()
+    val was = labels(before); val now = labels(after)
+    val appeared = now.filter { it !in was }; val gone = was.filter { it !in now }
+    if (appeared.isEmpty() && gone.isEmpty()) {
+        val moved = before.map { it.label() to it.top } != after.map { it.label() to it.top }
+        return if (moved) "The screen scrolled or moved; same items." else "No change on screen."
+    }
+    return buildString {
+        if (appeared.isNotEmpty()) append("Appeared: ").append(appeared.take(10).joinToString(", ") { "“$it”" })
+            .append(if (appeared.size > 10) " (+${appeared.size - 10} more)" else "").append(". ")
+        if (gone.isNotEmpty()) append("Gone: ").append(gone.take(8).joinToString(", ") { "“$it”" })
+            .append(if (gone.size > 8) " (+${gone.size - 8} more)" else "").append(".")
+    }.trim()
+}
+
+/**
+ * A whole user journey in one call: taps, typing, swipes, keys and expectations, with a one-line
+ * result per step. Replaces a dozen tap → screenshot → ui_tree round trips, and re-runs after a fix.
+ */
+class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
+    override val inputTool = true
+    override val name = "test_flow"
+    override val description = "Run a user journey on the device in one call and get a pass/fail line per step. Steps: " +
+        "{\"tap\": \"Add expense\"}, {\"type\": \"500\", \"into\": \"Amount\"} (taps the field first; \"replace\": true to overwrite), " +
+        "{\"swipe\": \"left\", \"on\": \"Lunch\"}, {\"key\": \"BACK\"}, {\"expect\": \"₹500\"}, {\"expect_gone\": \"New expense\"}, {\"wait_ms\": 1000}. " +
+        "Stops at the first failed step unless keep_going is true. Launch the app first (run_app)."
+    override val schema = schema {
+        raw("steps", app.kiln.core.obj("type" to "array", "description" to "The steps, in order.", "items" to app.kiln.core.obj("type" to "object")))
+        bool("keep_going", "Continue after a failed step.", required = false)
+    }
+
+    override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
+        val steps = input.a("steps")?.mapNotNull { it as? JsonObject } ?: return ToolResult.error("give steps")
+        val keepGoing = input["keep_going"]?.toString() == "true"
+        val pkg = pkg(ctx)
+        val report = StringBuilder(); var failed = 0
+        suspend fun visible(text: String) = device.find(device.uiTree(pkg), text) != null
+        for ((i, st) in steps.withIndex()) {
+            val n = i + 1
+            val (ok, what) = runCatching { step(ctx, pkg, st, ::visible) }.getOrElse { false to "error: ${it.message}" }
+            report.append(if (ok) "$n ✓ " else "$n ✗ ").append(what).append('\n')
+            if (!ok) { failed++; if (!keepGoing) { report.append("stopped at step $n of ${steps.size}\n"); break } }
+        }
+        val shot = device.screenshot()
+        val summary = if (failed == 0) "all ${steps.size} steps passed" else "$failed step${if (failed > 1) "s" else ""} failed"
+        return ToolResult(report.append(summary).toString(), listOfNotNull(shot), isError = failed > 0, summary = summary)
+    }
+
+    private suspend fun step(ctx: ToolContext, pkg: String, st: JsonObject, visible: suspend (String) -> Boolean): Pair<Boolean, String> {
+        fun s(k: String) = st.str(k)?.takeIf { it.isNotBlank() }
+        val before = device.uiTree(pkg)
+        s("tap")?.let { t ->
+            val node = device.find(before, t) ?: return false to "tap “$t”: not on screen (${before.filter { it.clickable }.take(8).joinToString { "“${it.label()}”" }} …)"
+            device.tap(node.cx, node.cy); delay(600)
+            return true to "tap “$t” → ${screenChange(ctx, before)}"
+        }
+        s("type")?.let { text ->
+            s("into")?.let { field ->
+                val node = device.find(before, field) ?: return false to "type into “$field”: no such field on screen"
+                device.tap(node.cx, node.cy); delay(400)
+            }
+            val r = device.type(text, replace = st["replace"]?.toString() == "true")
+            return r.ok to (if (r.ok) r.out.ifBlank { "typed “$text”" } else "type “$text”: ${r.err}")
+        }
+        s("swipe")?.let { dir ->
+            val (w, h) = device.screenSize()
+            val on = s("on")?.let { t -> device.find(before, t) ?: return false to "swipe on “$t”: not on screen" }
+            val (x1, y1, x2, y2) = if (on != null) when (dir) {
+                "left" -> listOf(w * 9 / 10, on.cy, w / 10, on.cy); "right" -> listOf(w / 10, on.cy, w * 9 / 10, on.cy)
+                "up" -> listOf(on.cx, on.bottom - 4, on.cx, maxOf(0, on.top - (on.bottom - on.top))); else -> listOf(on.cx, on.top + 4, on.cx, on.bottom + (on.bottom - on.top))
+            } else when (dir) {
+                "up" -> listOf(w / 2, h * 3 / 4, w / 2, h / 4); "down" -> listOf(w / 2, h / 4, w / 2, h * 3 / 4)
+                "left" -> listOf(w * 4 / 5, h / 2, w / 5, h / 2); else -> listOf(w / 5, h / 2, w * 4 / 5, h / 2)
+            }
+            device.swipe(x1, y1, x2, y2, ms = if (on != null) 180 else 300); delay(600)
+            return true to "swipe $dir${s("on")?.let { " on “$it”" } ?: ""} → ${screenChange(ctx, before)}"
+        }
+        s("key")?.let { k -> device.key(k); delay(500); return true to "key $k → ${screenChange(ctx, before)}" }
+        s("expect")?.let { t ->
+            val until = System.currentTimeMillis() + (st["timeout_ms"]?.toString()?.toLongOrNull() ?: 3000)
+            while (System.currentTimeMillis() < until) { if (visible(t)) return true to "“$t” is on screen"; delay(300) }
+            val now = device.uiTree(pkg).filter { it.text.isNotBlank() || it.desc.isNotBlank() }.take(12).joinToString { "“${it.label()}”" }
+            return false to "expected “$t” — not on screen. Showing: $now"
+        }
+        s("expect_gone")?.let { t ->
+            val until = System.currentTimeMillis() + (st["timeout_ms"]?.toString()?.toLongOrNull() ?: 3000)
+            while (System.currentTimeMillis() < until) { if (!visible(t)) return true to "“$t” is gone"; delay(300) }
+            return false to "expected “$t” to be gone — still on screen"
+        }
+        st["wait_ms"]?.toString()?.toLongOrNull()?.let { ms -> delay(ms.coerceIn(0, 10_000)); return true to "waited ${ms}ms" }
+        return false to "unknown step ${st}"
+    }
 }

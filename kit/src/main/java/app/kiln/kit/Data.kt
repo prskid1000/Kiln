@@ -58,10 +58,17 @@ class KStore<T>(context: Context, name: String, private val default: T, private 
     }
 
     companion object {
+        /** One store per name: two screens reading "settings" must see the same value, not two copies. */
+        @PublishedApi internal val open = java.util.concurrent.ConcurrentHashMap<String, KStore<*>>()
+
+        @Suppress("UNCHECKED_CAST")
+        @PublishedApi internal fun <T> shared(context: Context, name: String, default: T, serializer: KSerializer<T>): KStore<T> =
+            open.getOrPut(name) { KStore(context, name, default, serializer) } as KStore<T>
+
         inline operator fun <reified T> invoke(context: Context, name: String, default: T): KStore<T> =
-            KStore(context, name, default, serializer())
+            shared(context, name, default, serializer())
         /** No Context needed: `val settings = KStore("settings", Settings())` (uses [KApp.context]). */
         inline operator fun <reified T> invoke(name: String, default: T): KStore<T> =
-            KStore(KApp.context, name, default, serializer())
+            shared(KApp.context, name, default, serializer())
     }
 }
