@@ -94,15 +94,19 @@ data class KTab(val label: String, val icon: ImageVector, val badge: String? = n
 fun KilnTabs(
     tabs: List<KTab>,
     initial: Int = 0,
+    /** Control the tab from outside (e.g. jump to "Expenses" after saving): pass [selected] and [onSelect]. */
+    selected: Int? = null,
+    onSelect: ((Int) -> Unit)? = null,
     content: @Composable (index: Int) -> Unit,
 ) {
-    var selected by rememberSaveable { mutableIntStateOf(initial) }
+    var own by rememberSaveable { mutableIntStateOf(initial) }
+    val current = selected ?: own
     NavigationSuiteScaffold(
         navigationSuiteItems = {
             tabs.forEachIndexed { i, tab ->
                 item(
-                    selected = i == selected,
-                    onClick = { selected = i },
+                    selected = i == current,
+                    onClick = { own = i; onSelect?.invoke(i) },
                     icon = { Icon(tab.icon, contentDescription = tab.label) },
                     label = { Text(tab.label) },
                     badge = tab.badge?.let { b -> { Text(b) } },
@@ -111,7 +115,7 @@ fun KilnTabs(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) {
-        Box(Modifier.fillMaxSize()) { content(selected) }
+        Box(Modifier.fillMaxSize()) { content(current) }
     }
 }
 

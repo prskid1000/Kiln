@@ -139,6 +139,9 @@ class KCollection<T>(context: Context, private val name: String, private val ser
     companion object {
         inline operator fun <reified T> invoke(context: Context, name: String, newestFirst: Boolean = true): KCollection<T> =
             KCollection(context, name, serializer(), newestFirst)
+        /** No Context needed: `val notes = KCollection<Note>("notes")` (uses [KApp.context]). */
+        inline operator fun <reified T> invoke(name: String, newestFirst: Boolean = true): KCollection<T> =
+            KCollection(KApp.context, name, serializer(), newestFirst)
     }
 }
 

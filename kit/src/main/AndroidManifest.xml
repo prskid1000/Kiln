@@ -6,6 +6,12 @@
     <!-- KHaptics. A normal permission: granted at install, never asked. -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <application>
+        <!-- Gives KApp.context from process start, so stores need no Context. -->
+        <provider
+            android:name="app.kiln.kit.KitInitProvider"
+            android:authorities="${applicationId}.kiln.init"
+            android:exported="false"
+            android:initOrder="1000" />
         <!-- KFiles.share hands files to other apps through this. -->
         <provider
             android:name="androidx.core.content.FileProvider"

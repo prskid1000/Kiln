@@ -68,6 +68,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -343,9 +344,10 @@ fun KTextField(
 @Composable
 fun KTextArea(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, label: String? = null,
               placeholder: String? = null, minLines: Int = 4, maxLines: Int = 10, maxLength: Int? = null, height: Dp? = null,
-              keyboard: KeyboardType = KeyboardType.Text, keyboardOptions: KeyboardOptions? = null) =
+              keyboard: KeyboardType = KeyboardType.Text, keyboardOptions: KeyboardOptions? = null,
+              width: Dp? = null, error: String? = null, helper: String? = null, enabled: Boolean = true) =
     KTextField(value, onChange, modifier, label = label, placeholder = placeholder, singleLine = false,
-        minLines = minLines, maxLines = maxLines, maxLength = maxLength, height = height, keyboard = keyboard, keyboardOptions = keyboardOptions)
+        minLines = minLines, maxLines = maxLines, maxLength = maxLength, height = height, keyboard = keyboard, keyboardOptions = keyboardOptions, width = width, error = error, helper = helper, enabled = enabled)
 
 /** Search bar with a clear button; [onSubmit] runs on the keyboard's search action. */
 @Composable
@@ -402,7 +404,8 @@ fun KStepper(value: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier,
 /** Dropdown select: tap to pick one of [options]. */
 @Composable
 fun KSelect(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier = Modifier,
-            label: String? = null, placeholder: String = "Choose…", width: Dp? = null, enabled: Boolean = true, colors: KColors? = null) {
+            label: String? = null, placeholder: String = "Choose…", width: Dp? = null, enabled: Boolean = true, colors: KColors? = null,
+            error: String? = null, helper: String? = null) {
     var open by remember { mutableStateOf(false) }
     Box(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         Column {
@@ -413,6 +416,7 @@ fun KSelect(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modi
                     fontSize = kt(15), modifier = Modifier.weight(1f), maxLines = 1)
                 Icon(Icons.Filled.KeyboardArrowDown, null, tint = Nocturne.textMuted)
             }
+            KNote(error, helper)
         }
         DropdownMenu(open, { open = false }, containerColor = Nocturne.surfaceHi) {
             options.forEachIndexed { i, o ->
@@ -426,12 +430,13 @@ fun KSelect(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modi
 /** Combobox: a select you can type into to filter long lists. */
 @Composable
 fun KCombobox(options: List<String>, selected: String?, onSelect: (String) -> Unit, modifier: Modifier = Modifier,
-              label: String? = null, placeholder: String = "Type to search…", maxShown: Int = 8) {
+              label: String? = null, placeholder: String = "Type to search…", maxShown: Int = 8, width: Dp? = null,
+              error: String? = null, helper: String? = null, enabled: Boolean = true) {
     var query by remember(selected) { mutableStateOf(selected ?: "") }
     var open by remember { mutableStateOf(false) }
-    Box(modifier.fillMaxWidth()) {
+    Box(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         KTextField(query, { query = it; open = true }, label = label, placeholder = placeholder, trailingIcon = Icons.Filled.KeyboardArrowDown,
-            onTrailingClick = { open = !open })
+            onTrailingClick = { open = !open }, error = error, helper = helper, enabled = enabled)
         DropdownMenu(open, { open = false }, containerColor = Nocturne.surfaceHi) {
             options.filter { it.contains(query, ignoreCase = true) || query == selected }.take(maxShown).forEach { o ->
                 DropdownMenuItem(text = { Text(o) }, onClick = { open = false; query = o; onSelect(o) })
@@ -533,9 +538,10 @@ fun KRating(value: Int, onChange: ((Int) -> Unit)? = null, modifier: Modifier = 
 /** Date field: shows [value], opens a calendar picker; like every input, `value` + `onChange`. */
 @Composable
 fun KDateField(value: LocalDate?, onChange: (LocalDate) -> Unit, modifier: Modifier = Modifier, label: String = "Date",
-               format: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")) {
+               format: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy"), width: Dp? = null,
+               error: String? = null, helper: String? = null, enabled: Boolean = true) {
     var open by remember { mutableStateOf(false) }
-    KPickerBox(label, value?.format(format) ?: "Pick a date", value == null, modifier) { open = true }
+    KPickerBox(label, value?.format(format) ?: "Pick a date", value == null, modifier, width, error, helper, enabled) { open = true }
     if (open) {
         val state = rememberDatePickerState(initialSelectedDateMillis = value?.atStartOfDay()?.toInstant(ZoneOffset.UTC)?.toEpochMilli())
         DatePickerDialog(onDismissRequest = { open = false },
@@ -546,9 +552,11 @@ fun KDateField(value: LocalDate?, onChange: (LocalDate) -> Unit, modifier: Modif
 
 /** Time field: shows [value], opens a picker. */
 @Composable
-fun KTimeField(value: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modifier = Modifier, label: String = "Time", is24h: Boolean = true) {
+fun KTimeField(value: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modifier = Modifier, label: String = "Time", is24h: Boolean = true,
+               width: Dp? = null, error: String? = null, helper: String? = null, enabled: Boolean = true) {
     var open by remember { mutableStateOf(false) }
-    KPickerBox(label, value?.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm a")) ?: "Pick a time", value == null, modifier) { open = true }
+    KPickerBox(label, value?.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm a")) ?: "Pick a time", value == null, modifier,
+        width, error, helper, enabled) { open = true }
     if (open) {
         val state = rememberTimePickerState(value?.hour ?: 9, value?.minute ?: 0, is24h)
         KDialog(open = true, title = label, onDismiss = { open = false }, confirmLabel = "OK",
@@ -557,14 +565,17 @@ fun KTimeField(value: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modif
 }
 
 @Composable
-private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Modifier, onClick: () -> Unit) =
-    Column(modifier.fillMaxWidth()) {
+private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Modifier, width: Dp?, error: String?, helper: String?,
+                       enabled: Boolean, onClick: () -> Unit) =
+    Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)).alpha(if (enabled) 1f else 0.5f)) {
         Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
-        Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), Nocturne.surface, Nocturne.neutral700).clickable(onClick = onClick).padding(horizontal = 14.dp),
+        Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), Nocturne.surface, if (error != null) Nocturne.danger else Nocturne.neutral700)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = if (empty) Nocturne.textMuted else Nocturne.text, fontSize = kt(15), modifier = Modifier.weight(1f))
             Icon(Icons.Filled.KeyboardArrowDown, null, tint = Nocturne.textMuted)
         }
+        KNote(error, helper)
     }
 
 /** A label above any custom input and an error/helper below it (KTextField already has its own label). */
@@ -575,3 +586,10 @@ fun KLabeled(label: String, modifier: Modifier = Modifier, error: String? = null
         content()
         (error ?: helper)?.let { Text(it, color = if (error != null) Nocturne.danger else Nocturne.textMuted, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp)) }
     }
+
+/** The error (red) or helper text under an input. */
+@Composable
+internal fun KNote(error: String?, helper: String?) {
+    val t = error ?: helper ?: return
+    Text(t, color = if (error != null) Nocturne.danger else Nocturne.textMuted, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+}

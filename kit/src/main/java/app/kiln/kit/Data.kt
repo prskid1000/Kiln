@@ -60,5 +60,8 @@ class KStore<T>(context: Context, name: String, private val default: T, private 
     companion object {
         inline operator fun <reified T> invoke(context: Context, name: String, default: T): KStore<T> =
             KStore(context, name, default, serializer())
+        /** No Context needed: `val settings = KStore("settings", Settings())` (uses [KApp.context]). */
+        inline operator fun <reified T> invoke(name: String, default: T): KStore<T> =
+            KStore(KApp.context, name, default, serializer())
     }
 }

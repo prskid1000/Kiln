@@ -14,7 +14,7 @@ Load this before starting any app with more than one screen or any saved data.
 
 **Files** (package = the app's package)
 - `MainActivity.kt` — the entry point and navigation only.
-- `data/` — @Serializable models and the stores (`object Repo { lateinit var notes: KCollection<Note> }` initialised in MainActivity).
+- `data/` — @Serializable models and the stores as plain values: `object Repo { val notes = KCollection<Note>("notes"); val settings = KStore("settings", Settings()) }`. No Context, no lateinit, no setup call (the kit knows the app's context from process start), so it works from screens, workers and receivers alike.
 - `ui/<Feature>Screen.kt` — one file per screen: the stateful `XScreen()` plus a stateless `XContent(state, events)`.
 - `ui/components/` — composables reused by two or more screens.
 - Keep files under ~300 lines; split by feature, not by layer, once a feature grows.
@@ -44,20 +44,23 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kiln.kit.*
 import kotlinx.serialization.Serializable
 
-// data/Note.kt
+// data/Note.kt — models first, then the stores, then screens, then MainActivity
 @Serializable data class Note(val title: String, val body: String = "")
+
+// data/Repo.kt
+object Repo {
+    val notes = KCollection<Note>("notes")
+}
 
 // ui/NotesScreen.kt — stateful: owns the store, turns events into writes
 @Composable
 fun NotesScreen() {
-    val context = LocalContext.current
-    val notes = remember { KCollection<Note>(context, "notes") }
-    val rows by notes.rows.collectAsStateWithLifecycle()
+    val rows by Repo.notes.rows.collectAsStateWithLifecycle()
     var adding by remember { mutableStateOf(false) }
     KilnScreen("Notes", floatingAction = { KFab(Icons.Filled.Add, "Add note") { adding = true } }) { padding ->
-        NotesContent(rows, onDelete = { notes.delete(it) }, modifier = Modifier.screenPadding(padding))
+        NotesContent(rows, onDelete = { Repo.notes.delete(it) }, modifier = Modifier.screenPadding(padding))
     }
-    AddNoteDialog(adding, onDismiss = { adding = false }, onSave = { notes.add(Note(it)) })
+    AddNoteDialog(adding, onDismiss = { adding = false }, onSave = { Repo.notes.add(Note(it)) })
 }
 
 // stateless: values in, events out

@@ -132,7 +132,7 @@ class EditFileTool : Tool {
         val count = occurrences(text, old)
         val all = input["replace_all"]?.toString() == "true"
         when {
-            count == 0 -> return ToolResult.error("old_text not found in $rel (check whitespace/indentation; re-read the file)")
+            count == 0 -> return ToolResult.error("old_text not found in $rel." + closestMatch(text, old))
             count > 1 && !all -> return ToolResult.error("old_text matches $count places in $rel — add surrounding lines to make it unique, or set replace_all")
         }
         val edited = if (all) text.replace(old, new) else text.replaceFirst(old, new)
@@ -162,7 +162,8 @@ class MultiEditTool : Tool {
             val o = e as JsonObject
             val old = o.req("old_text").replace("\r\n", "\n")
             val n = occurrences(text, old)
-            if (n != 1) return ToolResult.error("edit #${i + 1}: old_text matches $n places (must be exactly 1); nothing written")
+            if (n != 1) return ToolResult.error("edit #${i + 1}: old_text matches $n places (must be exactly 1); nothing written." +
+                (if (n == 0) closestMatch(text, old) else " Add surrounding lines to make it unique."))
             text = text.replaceFirst(old, (o.str("new_text") ?: "").replace("\r\n", "\n"))
         }
         f.writeText(if (crlf) text.replace("\n", "\r\n") else text)
@@ -237,4 +238,34 @@ internal fun misplacedSource(path: String?): String? {
     if (!p.endsWith(".kt") || p.startsWith("src/")) return null
     return "Kotlin sources must be under src/ (the app's package directory, e.g. src/kiln/app/<name>/$p) or they won't be compiled. " +
         "Write it there instead — project_info shows the package."
+}
+
+/**
+ * Where [old] most nearly appears in [text] — the lines to copy exactly — so a failed edit costs one
+ * retry instead of a re-read of the whole file. Empty when nothing is close.
+ */
+internal fun closestMatch(text: String, old: String): String {
+    val lines = text.lines()
+    val want = old.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    if (want.isEmpty() || lines.isEmpty()) return ""
+    fun sim(a: String, b: String): Double {
+        if (a == b) return 1.0
+        val x = a.windowed(2).toSet(); val y = b.windowed(2).toSet()
+        return if (x.isEmpty() || y.isEmpty()) 0.0 else 2.0 * (x intersect y).size / (x.size + y.size)
+    }
+    var best = -1; var bestScore = 0.0
+    for (i in lines.indices) {
+        var score = 0.0; var j = i; var k = 0
+        while (k < want.size && j < lines.size) {
+            val l = lines[j].trim()
+            if (l.isEmpty()) { j++; continue }
+            score += sim(l, want[k]); j++; k++
+        }
+        if (score / want.size > bestScore) { bestScore = score / want.size; best = i }
+    }
+    if (best < 0 || bestScore < 0.5) return " Nothing similar found — read the file again."
+    val end = minOf(lines.size, best + want.size + 2)
+    val sameIgnoringIndent = lines.subList(best, end).map { it.trim() }.filter { it.isNotEmpty() }.take(want.size) == want
+    return (if (sameIgnoringIndent) " The text is there with different indentation." else " Closest match") +
+        " (lines ${best + 1}–$end) — copy it exactly:\n" + (best until end).joinToString("\n") { "${it + 1}\t${lines[it]}" }
 }

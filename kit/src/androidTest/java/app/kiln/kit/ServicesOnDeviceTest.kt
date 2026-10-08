@@ -64,6 +64,14 @@ class ServicesOnDeviceTest {
         assertEquals(listOf("a", "b"), oldestFirst.items.map { it.title })
     }
 
+    object Repo { val items = KCollection<Note>("t_noctx_" + System.nanoTime()); val prefs = KStore("t_noctx_store", Note("x")) }
+
+    @Test fun storesNeedNoContext() {
+        val id = Repo.items.add(Note("from a plain object"))
+        assertEquals("from a plain object", Repo.items.get(id)?.title)
+        assertEquals("x", Repo.prefs.value.title)
+    }
+
     @Test fun prefsReadWrite() {
         KPrefs.of(ctx).edit().putInt("t_runs", 7).commit()
         assertEquals(7, KPrefs.of(ctx).getInt("t_runs", 0))

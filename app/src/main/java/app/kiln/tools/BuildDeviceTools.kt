@@ -18,16 +18,42 @@ import java.io.File
 
 private fun JsonObject.req(k: String) = str(k) ?: throw IllegalArgumentException("missing '$k'")
 
-/** Diagnostics as compact text: one per line, errors first, with the offending source line. */
+/**
+ * Diagnostics as compact text. Root causes come first (a missing name or import makes dozens of
+ * follow-on errors), and an error repeated at several places is listed once with all its places,
+ * so a model fixes the cause instead of chasing each symptom.
+ */
 fun BuildResult.report(maxItems: Int = 40): String = buildString {
     appendLine(if (ok) "BUILD OK in ${totalMs} ms" else "BUILD FAILED (${errors.size} error${if (errors.size == 1) "" else "s"})")
     appendLine("steps: " + steps.joinToString(", ") { "${it.step}${if (it.skipped) " (cached)" else " ${it.ms}ms"}" })
-    (errors + warnings.sortedBy { if (it.tool == "kiln-lint") 0 else 1 }).take(maxItems).forEach { d ->
+    fun rootRank(d: app.kiln.build.Diagnostic) = when {
+        "unresolved reference" in d.message || d.tool == "aapt2" -> 0
+        "no parameter with name" in d.message || "no value passed" in d.message -> 1
+        "cannot infer" in d.message || "uninferred" in d.message || "type mismatch" in d.message -> 3
+        else -> 2
+    }
+    val groups = errors.groupBy { it.message }.values.sortedWith(compareBy({ rootRank(it.first()) }, { -it.size }))
+    var shown = 0
+    for (g in groups) {
+        if (shown >= maxItems) break
+        val d = g.first()
         val where = listOfNotNull(d.file, d.line?.toString(), d.col?.toString()).joinToString(":")
-        appendLine("${d.severity.uppercase()} [${d.tool}] ${if (where.isNotBlank()) "$where " else ""}${d.message}")
+        appendLine("ERROR [${d.tool}] ${if (where.isNotBlank()) "$where " else ""}${d.message}")
+        d.source?.let { appendLine("    > $it") }
+        if (g.size > 1) appendLine("    (same error at ${g.size - 1} more place${if (g.size == 2) "" else "s"}: " +
+            g.drop(1).take(6).joinToString(", ") { "${it.file?.substringAfterLast('/')}:${it.line}" } + (if (g.size > 7) ", …" else "") + ")")
+        shown++
+    }
+    if (groups.size > shown) appendLine("… ${groups.size - shown} more distinct errors")
+    if (errors.any { rootRank(it) == 0 } && errors.any { rootRank(it) == 3 })
+        appendLine("Fix the unresolved names first: the type errors below them are usually caused by those.")
+    val ws = warnings.sortedBy { if (it.tool == "kiln-lint") 0 else 1 }.take((maxItems - shown).coerceAtLeast(5))
+    ws.forEach { d ->
+        val where = listOfNotNull(d.file, d.line?.toString(), d.col?.toString()).joinToString(":")
+        appendLine("WARNING [${d.tool}] ${if (where.isNotBlank()) "$where " else ""}${d.message}")
         d.source?.let { appendLine("    > $it") }
     }
-    if (errors.size + warnings.size > maxItems) appendLine("… ${errors.size + warnings.size - maxItems} more")
+    if (warnings.size > ws.size) appendLine("… ${warnings.size - ws.size} more warnings")
 }
 
 class ProjectInfoTool : Tool {
