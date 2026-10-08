@@ -486,6 +486,11 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
         val m = e.message; val src = e.source.orEmpty()
         Regex("unresolved reference '([A-Z]\\w*)'").find(m)?.groupValues?.get(1)?.let { n ->
             outside[n]?.let { f -> out += "$n is declared in ${project.rel(f)}, which is outside src/ so it isn't compiled: move it under src/ (the package directory)." }
+            // `Kiln.app.x.Foo`: a capitalised package segment. The type goes unknown and every use of it fails too.
+            val pkg = runCatching { project.meta().`package` }.getOrNull().orEmpty()
+            if (pkg.isNotEmpty() && pkg.split('.').any { it == n.lowercase() } && "$n." in src)
+                out += "Package names are lowercase: write `${pkg.split('.').first()}.…`, not `$n.…` (in ${e.file ?: "this file"}). " +
+                    "Fix this first — the type it names is unknown until then, which causes the other errors that use it."
             // A K… name that's neither in the project nor in the kit was invented: say what exists instead.
             if (n.startsWith("K") && n.length > 2 && n[1].isUpperCase() && index?.kitSignature(n) == null && n !in declared && n !in outside) {
                 val alt = index?.similarKitNames(n).orEmpty()

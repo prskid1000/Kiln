@@ -172,15 +172,12 @@ class ToolsOnDeviceTest {
             Case("delete", """{"path":"$src/data"}"""),
             Case("delete", """{"path":"$src/ui"}"""),
             // An invented kit component is named as such, with what the kit has instead.
-            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest
-
-import androidx.compose.runtime.Composable
-
-@Composable
-fun Bar() { KToolbar(title = \"x\") }
-"}"""),
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun Bar() { KToolbar(title = \"x\") }\n"}"""),
             Case("check", "{}", expectError = true, expect = "KToolbar isn't in the kit. Closest:"),
             Case("check", "{}", expectError = true, expect = "KilnScreen"),
+            // A capitalised package segment (run 9: Kiln.app…) is named as the root cause.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nval broken: Kiln.app.tooltest.Nothing? = null\n"}"""),
+            Case("check", "{}", expectError = true, expect = "Package names are lowercase"),
             Case("delete", """{"path":"$src/Bad.kt"}"""),
             // Kotlin outside src/ is refused before it's written.
             Case("write_file", """{"path":"ui/Stray.kt","content":"package x\n"}""", expectError = true, expect = "must be under src/"),
