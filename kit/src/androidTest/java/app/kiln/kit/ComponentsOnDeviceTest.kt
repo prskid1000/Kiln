@@ -202,7 +202,7 @@ class ComponentsOnDeviceTest {
         show {
             KDateField(date, { date = it }, label = "Due")
             KTimeField(time, { time = it }, label = "Reminder")
-            KField("Custom", error = "Required") { Text("inside") }
+            KLabeled("Custom", error = "Required") { Text("inside") }
         }
         rule.onNodeWithText("8 Oct 2026").assertIsDisplayed(); rule.onNodeWithText("Required").assertIsDisplayed()
         rule.onNodeWithText("8 Oct 2026").performClick(); shot("date_picker")

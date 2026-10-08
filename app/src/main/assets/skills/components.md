@@ -105,7 +105,7 @@ fun ComponentGallery() {
                 KRating(stars, { stars = it })
                 KDateField(date, { date = it }, label = "Due date")
                 KTimeField(time, { time = it }, label = "Reminder")
-                KField("Custom", helper = "Any input inside a labelled field") { KSwitch(on, { on = it }) }
+                KLabeled("Custom", helper = "Any input inside a labelled field") { KSwitch(on, { on = it }) }
 
                 KSection("Display")
                 KCardBox(variant = KVariant.Tonal, tone = KTone.Accent, height = 96.dp, onClick = {}) { Text("A tonal card") }

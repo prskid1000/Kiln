@@ -187,6 +187,15 @@ fun KButton(
     }
 }
 
+/**
+ * An icon in the theme's colours: `KIcon(Icons.Filled.Savings, "Savings", tone = KTone.Ok, size = KSize.Large)`.
+ * [description] is read by TalkBack; pass null for purely decorative icons. [color] overrides the tone.
+ */
+@Composable
+fun KIcon(icon: ImageVector, description: String?, modifier: Modifier = Modifier, tone: KTone = KTone.Neutral,
+          size: KSize = KSize.Medium, color: Color? = null) =
+    Icon(icon, description, modifier.size(size.icon + 4.dp), tint = color ?: if (tone == KTone.Neutral) Nocturne.text else tone.color())
+
 /** Icon-only button; [description] is read by TalkBack (always give one). */
 @Composable
 fun KIconButton(
@@ -518,27 +527,27 @@ fun KRating(value: Int, onChange: ((Int) -> Unit)? = null, modifier: Modifier = 
     }
 }
 
-/** Date field: shows the date, opens a calendar picker. */
+/** Date field: shows [value], opens a calendar picker; like every input, `value` + `onChange`. */
 @Composable
-fun KDateField(date: LocalDate?, onChange: (LocalDate) -> Unit, modifier: Modifier = Modifier, label: String = "Date",
+fun KDateField(value: LocalDate?, onChange: (LocalDate) -> Unit, modifier: Modifier = Modifier, label: String = "Date",
                format: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")) {
     var open by remember { mutableStateOf(false) }
-    KPickerBox(label, date?.format(format) ?: "Pick a date", date == null, modifier) { open = true }
+    KPickerBox(label, value?.format(format) ?: "Pick a date", value == null, modifier) { open = true }
     if (open) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = date?.atStartOfDay()?.toInstant(ZoneOffset.UTC)?.toEpochMilli())
+        val state = rememberDatePickerState(initialSelectedDateMillis = value?.atStartOfDay()?.toInstant(ZoneOffset.UTC)?.toEpochMilli())
         DatePickerDialog(onDismissRequest = { open = false },
             confirmButton = { TextButton({ state.selectedDateMillis?.let { onChange(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }; open = false }) { Text("OK") } },
             dismissButton = { TextButton({ open = false }) { Text("Cancel") } }) { DatePicker(state) }
     }
 }
 
-/** Time field: shows the time, opens a picker. */
+/** Time field: shows [value], opens a picker. */
 @Composable
-fun KTimeField(time: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modifier = Modifier, label: String = "Time", is24h: Boolean = true) {
+fun KTimeField(value: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modifier = Modifier, label: String = "Time", is24h: Boolean = true) {
     var open by remember { mutableStateOf(false) }
-    KPickerBox(label, time?.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm a")) ?: "Pick a time", time == null, modifier) { open = true }
+    KPickerBox(label, value?.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm a")) ?: "Pick a time", value == null, modifier) { open = true }
     if (open) {
-        val state = rememberTimePickerState(time?.hour ?: 9, time?.minute ?: 0, is24h)
+        val state = rememberTimePickerState(value?.hour ?: 9, value?.minute ?: 0, is24h)
         KDialog(open = true, title = label, onDismiss = { open = false }, confirmLabel = "OK",
             onConfirm = { onChange(LocalTime.of(state.hour, state.minute)) }) { TimeInput(state) }
     }
@@ -555,9 +564,9 @@ private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Mo
         }
     }
 
-/** Wraps a form field with a label above it and an error below (for custom inputs). */
+/** A label above any custom input and an error/helper below it (KTextField already has its own label). */
 @Composable
-fun KField(label: String, modifier: Modifier = Modifier, error: String? = null, helper: String? = null, content: @Composable () -> Unit) =
+fun KLabeled(label: String, modifier: Modifier = Modifier, error: String? = null, helper: String? = null, content: @Composable () -> Unit) =
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp))
         content()

@@ -23,14 +23,22 @@ private fun JsonObject.req(k: String) = str(k) ?: throw IllegalArgumentException
 class ClassIndex(private val toolchain: Toolchain) {
     private var built: String? = null
     private val where = HashMap<String, File>(200_000)       // a.b.C → jar
+    /** Top-level Kotlin symbols, from file facades: pkg.IconKt → pkg.Icon (Compose functions, icon properties). */
+    private val topLevel = HashSet<String>(60_000)
 
     @Synchronized private fun ensure() {   // parallel sdk_lookup calls share one index
         val dir = toolchain.dir ?: error("toolchain not installed")
         if (built == dir.path) return
-        where.clear()
+        where.clear(); topLevel.clear()
         for (jar in listOf(toolchain.androidJar(dir)) + toolchain.kitClasspath(dir)) ZipFile(jar).use { z ->
-            for (e in z.entries()) if (e.name.endsWith(".class") && !e.name.endsWith("module-info.class"))
-                where.putIfAbsent(e.name.removeSuffix(".class").replace('/', '.'), jar)
+            for (e in z.entries()) if (e.name.endsWith(".class") && !e.name.endsWith("module-info.class")) {
+                val fq = e.name.removeSuffix(".class").replace('/', '.')
+                where.putIfAbsent(fq, jar)
+                // Kotlin puts a file's top-level functions/properties in FileNameKt; a file is usually
+                // named after its main symbol (IconKt → Icon, filled/SettingsKt → Icons.Filled.Settings).
+                if (fq.endsWith("Kt") && '$' !in fq && (fq.startsWith("androidx.") || fq.startsWith("app.kiln.kit.")))
+                    topLevel += fq.removeSuffix("Kt")
+            }
         }
         built = dir.path
     }
@@ -73,7 +81,7 @@ class ClassIndex(private val toolchain: Toolchain) {
         ensure()
         val rank = listOf("app.kiln.kit.", "androidx.compose.", "androidx.", "kotlinx.", "kotlin.", "android.", "java.")
         val lines = names.mapNotNull { n ->
-            val hits = where.keys.filter { '$' !in it && it.substringAfterLast('.') == n }
+            val hits = (where.keys.asSequence() + topLevel.asSequence()).filter { '$' !in it && it.substringAfterLast('.') == n && !it.contains(".internal.") }.distinct().toList()
                 .sortedBy { fq -> rank.indexOfFirst { fq.startsWith(it) }.let { if (it < 0) 99 else it } }.take(3)
             if (hits.isEmpty()) null else "  $n → " + hits.joinToString(" or ") { "import $it" }
         }
@@ -85,12 +93,23 @@ class ClassIndex(private val toolchain: Toolchain) {
      * Only app-facing namespaces count, and the first group (kit, Compose, AndroidX, …) that has
      * candidates must have exactly one.
      */
-    fun uniqueClass(name: String): String? {
+    fun uniqueClass(name: String, line: String = ""): String? {
         ensure()
         val groups = listOf("app.kiln.kit.", "androidx.compose.", "androidx.", "kotlinx.", "kotlin.", "android.")
-        val all = where.keys.filter { '$' !in it && it.substringAfterLast('.') == name && !it.contains(".internal.") }
+        val all = (where.keys.asSequence() + topLevel.asSequence())
+            .filter { '$' !in it && it.substringAfterLast('.') == name && !it.contains(".internal.") }.distinct().toList()
+        // Icons.Filled.X / Icons.Outlined.X …: the icon's style package comes from the code line.
+        ICON_STYLE.find(line)?.let { m ->
+            val pkg = "androidx.compose.material.icons." + (if (m.groupValues[1] == "AutoMirrored") "automirrored." else "") +
+                m.groupValues[2].lowercase() + "."
+            return all.firstOrNull { it == pkg + name }
+        }
         for (g in groups) {
             val hits = all.filter { it.startsWith(g) }
+            // A Compose call (Icon(…), Text(…)) never means an old android.* class of the same name.
+            if (g == "android." && Regex("""\b${Regex.escape(name)}\s*\(""").containsMatchIn(line) && "@Composable" !in line) {
+                if (hits.isNotEmpty()) return null
+            }
             if (hits.isNotEmpty()) return hits.singleOrNull()
         }
         return null
@@ -353,4 +372,54 @@ private fun type(t: String): String = when {
         when (it) { "java.lang.String" -> "String"; "java.lang.Object" -> "Any"; "kotlin.jvm.functions.Function0" -> "() -> …"; else -> it } }
     else -> when (t) { "V" -> "Unit"; "Z" -> "Boolean"; "I" -> "Int"; "J" -> "Long"; "F" -> "Float"; "D" -> "Double"
         "B" -> "Byte"; "C" -> "Char"; "S" -> "Short"; else -> t }
+}
+
+private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.""")
+
+/**
+ * Plain-language hints for compile errors that trap models in loops: one line per kind of mistake,
+ * with what to do instead. Seen in benchmark runs; each cost a local model dozens of steps.
+ */
+fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Project): String {
+    if (build.ok) return ""
+    val out = linkedSetOf<String>()
+    val declared by lazy {
+        project.files().filter { it.extension == "kt" }.flatMap { f ->
+            Regex("""(?m)^\s*(?:@\w+\s+)*(?:(?:private|internal|data|sealed|enum|abstract|open)\s+)*(?:fun|class|object|interface|val|var)\s+([A-Z]\w*)""")
+                .findAll(f.readText()).map { it.groupValues[1] }
+        }.toSet()
+    }
+    for (e in build.errors) {
+        val m = e.message; val src = e.source.orEmpty()
+        Regex("unresolved reference '([A-Z]\\w*)'").find(m)?.groupValues?.get(1)?.let { n ->
+            if (!src.contains("Icons.")) {
+                val similar = declared.filter { it != n && (it.startsWith(n.take(4)) || n.startsWith(it.take(4)) || similarity(it, n) >= 0.6) }.take(3)
+                if (similar.isNotEmpty()) out += "'$n' isn't declared in this project. Did you mean ${similar.joinToString(" or ") { "'$it'" }}? Use the existing name, or declare $n."
+            }
+        }
+        if ("AutoMirrored" in src && ("receiver type mismatch" in m || "unresolved reference" in m))
+            out += "Icons.AutoMirrored.Filled.* only has direction-sensitive icons (ArrowBack, ArrowForward, List, Send, Logout, Undo…). Use Icons.Filled.X for everything else — the deprecation warning on Icons.Filled.List etc. is harmless."
+        if ("cannot infer type for type parameter" in m || "uninferred" in m) {
+            if (Regex("""K(Collection|Store)\s*\(""").containsMatchIn(src) || "rows" in src)
+                out += "Give KCollection/KStore its item type: KCollection<Expense>(context, \"expenses\"), KStore(context, \"settings\", Settings()). Without it every later use fails to infer."
+            else out += "Kotlin can't infer a type here: add the type explicitly (val x: List<Expense> = …, map<Expense, String> { … }) — usually one missing type causes the rest of these errors."
+        }
+        if ("'return' is prohibited here" in m || "Label must be named" in m)
+            out += "Inside a lambda, `return` can't leave the composable: use `return@onClick` (the lambda's label) or restructure with if/else."
+        if ("no parameter with name" in m) Regex("no parameter with name '(\\w+)'").find(m)?.groupValues?.get(1)?.let { p ->
+            out += "No parameter '$p' there: call kit_search with the component's name for its exact signature."
+        }
+        if ("@Composable invocations can only happen" in m)
+            out += "A composable is called from a plain lambda (onClick, LaunchedEffect body, a callback): compute values in composition and pass them in, or move the call into the UI tree."
+        if ("too many arguments for 'constructor(): Icon'" in m || "android.graphics.drawable.Icon" in m)
+            out += "That Icon is android.graphics.drawable.Icon: import androidx.compose.material3.Icon instead."
+    }
+    return if (out.isEmpty()) "" else "\nHints:\n" + out.joinToString("\n") { "  • $it" } + "\n"
+}
+
+/** Share of matching character bigrams (0..1), for "did you mean". */
+private fun similarity(a: String, b: String): Double {
+    fun grams(s: String) = s.lowercase().windowed(2).toSet()
+    val x = grams(a); val y = grams(b)
+    return if (x.isEmpty() || y.isEmpty()) 0.0 else 2.0 * (x intersect y).size / (x.size + y.size)
 }

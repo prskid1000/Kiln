@@ -88,7 +88,7 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val path = e.file ?: continue
         val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
         if (!f.isFile || f.extension != "kt") continue
-        val fq = index.uniqueClass(name) ?: continue
+        val fq = index.uniqueClass(name, e.source ?: "") ?: continue
         val text = f.readText()
         val stale = Regex("(?m)^import\\s+[\\w.]+\\.$name\\s*$")
         val fixed = when {
@@ -101,13 +101,17 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
                 if (at < 0) "import $fq\n$text" else text.substring(0, at + 1) + (if (lastImport == null) "\n" else "") + "\nimport $fq" + text.substring(at + 1)
             }
         }
+        val rel = ctx.project.rel(f)
+        val readCurrent = ctx.state.readStamps[rel] == f.lastModified()
         f.writeText(fixed)
-        fixes += "${ctx.project.rel(f)}: import $fq"
+        // Only import lines changed: a model that had read the file may keep editing it.
+        if (readCurrent) ctx.state.readStamps[rel] = f.lastModified()
+        fixes += "$rel: import $fq"
     }
     if (fixes.isEmpty()) return linted(r) to ""
     ctx.progress("fixed imports, rebuilding")
     r = linted(builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) })
-    return r to "Kiln auto-fixed imports (re-read these files before editing them):\n" + fixes.joinToString("\n") { "  $it" } + "\n"
+    return r to "Kiln auto-fixed imports (only import lines changed; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n"
 }
 
 class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) : Tool {
@@ -119,7 +123,7 @@ class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = true)
         ctx.state.lastBuild = r
-        return ToolResult(fixed + r.report() + index.importHints(r), isError = !r.ok,
+        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project), isError = !r.ok,
             summary = if (r.ok) (if (fixed.isEmpty()) "check OK" else "check OK · auto-fixed imports") else "${r.errors.size} errors")
     }
 }
@@ -133,7 +137,7 @@ class BuildTool(private val builds: BuildEngine, private val index: ClassIndex) 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        return ToolResult(fixed + r.report() + index.importHints(r) + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
+        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project) + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
             isError = !r.ok, summary = if (r.ok) "build OK ${r.totalMs}ms" else "${r.errors.size} errors")
     }
 }
@@ -193,7 +197,7 @@ class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device, private 
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        if (!r.ok) return ToolResult(fixed + r.report() + index.importHints(r), isError = true, summary = "${r.errors.size} build errors")
+        if (!r.ok) return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project), isError = true, summary = "${r.errors.size} build errors")
         val pkg = pkg(ctx)
         ctx.progress("install")
         val inst = device.install(File(r.apk!!))
