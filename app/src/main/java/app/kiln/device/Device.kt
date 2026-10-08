@@ -29,7 +29,8 @@ data class UiNode(
  * screenshot) targets that invisible display instead of the user's screen — that's the instance
  * the agent's tools get. Install, logs, data and permissions are per-app and work the same.
  */
-class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
+class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
+             /** Remembers the user's crash-dialog setting across a Kiln restart. */ private val dialogsFile: java.io.File? = null) {
     private fun displayArgs(flag: String) = testDisplay?.let { listOf(flag, it.id().toString()) } ?: emptyList()
     private fun input(vararg args: String) = listOf("input") + displayArgs("-d") + args
 
@@ -54,9 +55,33 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null) {
 
     suspend fun uninstall(pkg: String): ExecResult { guard(pkg); return warden.exec(listOf("pm", "uninstall", pkg)) }
 
+    /** The user's hide_error_dialogs value before Kiln hid crash dialogs for a test run (null = not hidden by Kiln). */
+    private var dialogsBefore: String? = null
+
+    /**
+     * While an app is tested on the hidden display its crashes must not pop "keeps stopping" over the
+     * user's screen (it also blocks the next test): hide crash/ANR dialogs, remembering the user's setting.
+     */
+    private suspend fun hideCrashDialogs() {
+        if (testDisplay == null || dialogsBefore != null) return
+        dialogsBefore = warden.exec(listOf("settings", "get", "global", "hide_error_dialogs")).out.trim().ifBlank { "null" }
+        dialogsFile?.writeText(dialogsBefore!!)
+        warden.exec(listOf("settings", "put", "global", "hide_error_dialogs", "1"))
+    }
+
+    /** Put the user's crash-dialog setting back (when a run ends). */
+    suspend fun restoreCrashDialogs() {
+        val before = dialogsBefore ?: dialogsFile?.takeIf { it.isFile }?.readText()?.trim() ?: return
+        dialogsBefore = null
+        dialogsFile?.delete()
+        if (before == "null") warden.exec(listOf("settings", "delete", "global", "hide_error_dialogs"))
+        else warden.exec(listOf("settings", "put", "global", "hide_error_dialogs", before))
+    }
+
     /** Launch the app's launcher activity and wait for it to draw. */
     suspend fun launch(pkg: String): ExecResult {
         guard(pkg)
+        runCatching { hideCrashDialogs() }
         val resolve = warden.exec(listOf("cmd", "package", "resolve-activity", "--brief",
             "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", pkg))
         val component = resolve.out.lines().lastOrNull { '/' in it }?.trim()

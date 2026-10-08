@@ -51,7 +51,7 @@ object Graph {
         toolchain.beforeSwitch = { toolHost.shutdown() }
         warden = Warden(app)
         device = Device(warden)
-        testDevice = Device(warden, TestDisplay(app))
+        testDevice = Device(warden, TestDisplay(app), java.io.File(app.filesDir, "crash-dialogs-before"))
         secrets = Secrets(app)
         providers = Providers(paths.files, secrets)
         settings = SettingsStore(paths.files)
@@ -60,6 +60,8 @@ object Graph {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
             .launch {
                 toolchain.syncBundled(app.assets); runCatching { Schedules.armAll(app) }
+                // A run that ended with Kiln killed left crash dialogs hidden: put the user's setting back.
+                runCatching { testDevice.restoreCrashDialogs() }
                 // The MCP server is a setting: switched on, it runs whenever Kiln's process does.
                 if (settings.value.mcpServe) runCatching { McpServer.start(settings.value.mcpPort) }
             }

@@ -119,7 +119,11 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                     app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
                     s.stopping.value = false
-                    if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
+                    if (active.decrementAndGet() == 0) {
+                        ctx.stopService(Intent(ctx, RunService::class.java))
+                        // The last run is over: the user's crash dialogs come back.
+                        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
+                    }
                     onFinish()
                 }
             }
