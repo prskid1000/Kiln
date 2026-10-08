@@ -251,6 +251,9 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
     override val traits: Set<Trait> get() = setOf(Trait.NEEDS_BROKER)
     internal fun pkg(ctx: ToolContext) = ctx.project.meta().`package`
 
+    /** [r] with a small screenshot of the screen now, for the chat only (the model doesn't receive it). */
+    internal suspend fun withPreview(r: ToolResult): ToolResult = r.copy(preview = runCatching { device.screenshot(720) }.getOrNull())
+
     /**
      * Where to tap [n]: its centre, or the middle of its visible part when it's cut off by the screen
      * edge. Null when none of it is on screen — a tap there would silently do nothing (run 9 tapped a
@@ -462,7 +465,7 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
         else (input.int("x") ?: 0) to (input.int("y") ?: 0)
         device.tap(x, y)
         delay(600)
-        return ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}. " + screenChange(ctx, before, x, y))
+        return withPreview(ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}. " + screenChange(ctx, before, x, y)))
     }
 }
 
@@ -473,7 +476,7 @@ class TypeTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val schema = schema { str("text", "Text to type."); bool("replace", "Replace the field's text instead of adding to it.", required = false) }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val r = device.type(input.req("text"), replace = input.str("replace") == "true")
-        return if (r.ok) ToolResult.ok(r.out.ifBlank { "typed" }) else ToolResult.error(r.err.ifBlank { "couldn't type" })
+        return if (r.ok) withPreview(ToolResult.ok(r.out.ifBlank { "typed" })) else ToolResult.error(r.err.ifBlank { "couldn't type" })
     }
 }
 
@@ -504,7 +507,7 @@ class SwipeTool(w: Warden, d: Device) : DeviceTool(w, d) {
             "left" -> listOf(w * 4 / 5, h / 2, w / 5, h / 2); else -> listOf(w / 5, h / 2, w * 4 / 5, h / 2)
         }
         device.swipe(x1, y1, x2, y2, ms = if (target != null) 180 else 300); delay(600)
-        return ToolResult.ok("swiped $dir${target?.let { " on \"$it\"" } ?: ""}. " + screenChange(ctx, before))
+        return withPreview(ToolResult.ok("swiped $dir${target?.let { " on \"$it\"" } ?: ""}. " + screenChange(ctx, before)))
     }
 }
 
@@ -516,7 +519,7 @@ class KeyTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val before = device.uiTree(pkg(ctx))
         device.key(input.req("key")); delay(500)
-        return ToolResult.ok("pressed ${input.str("key")}. " + screenChange(ctx, before))
+        return withPreview(ToolResult.ok("pressed ${input.str("key")}. " + screenChange(ctx, before)))
     }
 }
 

@@ -24,6 +24,8 @@ data class ToolResult(
     val video: String? = null,
     /** Shown to the user when the step is expanded, never sent to the model (e.g. the QA agent's own steps). */
     val detail: String? = null,
+    /** What the screen looked like after this step, shown in the chat only (never sent to the model). */
+    val preview: ByteArray? = null,
 ) {
     /** Anthropic-shaped tool_result content blocks. */
     fun blocks(): JsonArray = arrOf(listOf(obj("type" to "text", "text" to text.ifBlank { "(no output)" })) +
@@ -57,6 +59,8 @@ interface ToolContext {
     val state: SessionState
     /** Live progress line on the tool's activity card. */
     fun progress(line: String)
+    /** The steps a helper agent is taking inside this call (qa_check), shown nested under it in the chat. */
+    fun children(steps: List<app.kiln.agent.Activity>) {}
     /** Ask the user a question with options (blocks until answered). */
     suspend fun ask(question: String, options: List<String>): String
     /** Ask up to 4 structured questions at once (Claude Code style); one answer per question, multi-select answers joined by ", ". */

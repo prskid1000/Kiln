@@ -62,6 +62,12 @@ data class Activity(
     val video: String? = null,
     /** Extra text for the user when the step is opened (the QA agent's steps); not part of the transcript. */
     val detail: String? = null,
+    /** The screen after this step (display only). */
+    val preview: ByteArray? = null,
+    /** Steps a helper agent took inside this tool call (qa_check); the chat shows them as ordinary steps after it. */
+    val children: List<Activity> = emptyList(),
+    /** Which helper agent did this ("QA"), shown as a tag; null for the main agent. */
+    val agent: String? = null,
     /** Transcript index of a USER message (for rewind / fork / change review); -1 if none. */
     val msgIndex: Int = -1,
 ) {
@@ -482,6 +488,7 @@ class AgentLoop(
         override val state = this@AgentLoop.state
         override val spillDir = session.spillDir
         override fun progress(line: String) = update(activityId) { it.copy(progress = line) }
+        override fun children(steps: List<Activity>) = update(activityId) { it.copy(children = steps) }
         override fun addCost(usd: Double) {
             cost.value += usd
             session.updateMeta { it.copy(costUsd = cost.value) }
@@ -535,7 +542,7 @@ class AgentLoop(
         val aid = next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
         val t0 = System.currentTimeMillis()
         fun result(r: ToolResult, status: Activity.Status): JsonObject {
-            update(aid) { it.copy(status = status, summary = r.summary, images = r.images, video = r.video, detail = r.detail, ms = System.currentTimeMillis() - t0, progress = "") }
+            update(aid) { it.copy(status = status, summary = r.summary, images = r.images, video = r.video, detail = r.detail, preview = r.preview, ms = System.currentTimeMillis() - t0, progress = "") }
             return obj("type" to "tool_result", "tool_use_id" to id, "content" to r.blocks(), "is_error" to if (r.isError) true else null)
         }
         val tool = byName[name] ?: return result(ToolResult.error("unknown tool $name"), Activity.Status.FAILED)
@@ -615,15 +622,19 @@ class AgentLoop(
             finished: Regex? = null, unfinished: String = "",
             /** Called with one line per tool call the helper finishes ("tap “Save” → …"), so its work is visible. */
             onStep: ((String) -> Unit)? = null,
+            /** The helper's whole activity feed (tool calls, results, notes), as it changes: shown nested in the chat. */
+            onFeed: ((List<Activity>) -> Unit)? = null,
         ): Triple<String, Usage, Double> = kotlinx.coroutines.coroutineScope {
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
             val loop = AgentLoop(project, s, providers, registry, tools, settings, role)
             fun answer() = s.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")
             val reported = mutableSetOf<Int>()
-            val watcher = if (onStep == null) null else this.launch {
+            val watcher = if (onStep == null && onFeed == null) null else this.launch {
                 loop.feed.collect { feed ->
-                    for (a in feed) if (a.kind == Activity.Kind.TOOL && a.status != Activity.Status.RUNNING && reported.add(a.id))
+                    // The task prompt is ours, not the helper's work.
+                    onFeed?.invoke(feed.filter { it.kind != Activity.Kind.USER })
+                    if (onStep != null) for (a in feed) if (a.kind == Activity.Kind.TOOL && a.status != Activity.Status.RUNNING && reported.add(a.id))
                         onStep(stepLine(a))
                 }
             }

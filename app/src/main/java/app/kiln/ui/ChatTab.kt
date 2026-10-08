@@ -113,6 +113,22 @@ private sealed interface Row_ { val key: String }
 private data class Msg_(val a: Activity) : Row_ { override val key get() = "m${a.id}" }
 private data class Steps_(val items: List<Activity>) : Row_ { override val key get() = "s${items.first().id}" }
 
+/** A small label for work a helper agent did ("QA"). */
+@Composable
+private fun AgentTag(label: String) {
+    Text(label, style = T.label.copy(color = N.accent100, fontWeight = FontWeight.SemiBold),
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(N.accent800).padding(horizontal = 6.dp, vertical = 1.dp))
+}
+
+/** [feed] with each helper agent's activities right after the tool call that ran it, tagged with who did them. */
+private fun withHelperSteps(feed: List<Activity>): List<Activity> = feed.flatMap { a ->
+    if (a.children.isEmpty()) listOf(a)
+    else listOf(a) + a.children.map { c ->
+        // Negative ids can't collide with the main feed's (list keys).
+        c.copy(id = -(a.id * 100_000 + c.id + 1), agent = if (a.tool == "qa_check") "QA" else "Helper")
+    }
+}
+
 private fun group(feed: List<Activity>): List<Row_> {
     val out = mutableListOf<Row_>()
     var run = mutableListOf<Activity>()
@@ -212,7 +228,8 @@ private fun ChatList(vm: KilnVM, ps: ProjectState, loop: AgentLoop, feed: List<A
     var review by remember { mutableStateOf<Int?>(null) }
     val snapshots = remember(feed.size, running) { app.kiln.agent.Turns.indexes(loop.session).toSet() }
     review?.let { ChangesSheet(vm, ps, it) { review = null } }
-    val rows = remember(feed) { group(feed) }
+    // A helper agent's steps (qa_check) follow the call that started them, as ordinary steps with a tag.
+    val rows = remember(feed) { group(withHelperSteps(feed)) }
     val todos by loop.todos.collectAsStateWithLifecycle()
     val list = rememberLazyListState()
     // Follow the stream only while the user is at the bottom.
@@ -273,7 +290,10 @@ private fun Message(a: Activity, hasSnapshot: Boolean = false, onAction: ((TurnA
                 }
             }
         }
-        Activity.Kind.ASSISTANT -> Markdown(a.text.trim(), Modifier.fillMaxWidth())
+        Activity.Kind.ASSISTANT -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            a.agent?.let { AgentTag(it) }
+            Markdown(a.text.trim(), Modifier.fillMaxWidth())
+        }
         Activity.Kind.NOTICE -> Banner(Icons.Rounded.Warning, a.text, N.warn, onContinue?.let { "Continue" to it })
         Activity.Kind.ERROR -> Banner(Icons.Rounded.ErrorOutline, a.text, N.danger, onContinue?.let { "Retry" to it })
         else -> {}
@@ -397,6 +417,7 @@ private fun ThoughtCard(a: Activity, live: Boolean) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BrainIcon(thinking)
             Spacer(Modifier.width(8.dp))
+            a.agent?.let { AgentTag(it); Spacer(Modifier.width(6.dp)) }
             if (thinking) ShimmerText("Thinking", Modifier.weight(1f))
             else Text(if (a.ms >= 100) "Thought for %.1fs".format(a.ms / 1000.0) else "Thought",
                 style = T.bodySmall.copy(color = N.textLabel, fontWeight = FontWeight.Medium), modifier = Modifier.weight(1f))
@@ -541,14 +562,17 @@ private fun StepRow(a: Activity) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f).clip(N.shapeSm).clickable { open = !open }.padding(top = 2.dp, bottom = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                a.agent?.let { AgentTag(it); Spacer(Modifier.width(6.dp)) }
                 Text(title, style = T.bodySmall.copy(color = color), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (a.ms >= 100) Text("%.1fs".format(a.ms / 1000.0), style = T.monoSmall)
             }
             val detail = if (a.kind == Activity.Kind.THINKING) a.text else a.summary
             if (detail.isNotBlank()) Text(detail.trim(), style = T.label.copy(color = N.textMuted), maxLines = if (open) 40 else 1,
                 overflow = TextOverflow.Ellipsis)
-            // Steps a helper agent took (qa_check): a collapsed hint, the full list when opened.
-            a.detail?.takeIf { it.isNotBlank() }?.let { d ->
+            // What the screen looked like after this step (tap to enlarge).
+            (a.preview ?: a.images.firstOrNull())?.let { Screenshot(it, Modifier.padding(top = 6.dp).heightIn(max = 180.dp)) }
+            // A helper agent's step list, when its steps aren't shown inline (e.g. after reopening the chat).
+            a.detail?.takeIf { it.isNotBlank() && a.children.isEmpty() }?.let { d ->
                 if (open) Text(d, style = T.monoSmall.copy(color = N.textLabel), modifier = Modifier.padding(top = 6.dp).fillMaxWidth().vInset().padding(8.dp))
                 else Text("${d.lines().size} QA steps · tap to see them", style = T.label.copy(color = N.accent2), maxLines = 1)
             }
