@@ -103,7 +103,7 @@ class WriteFileTool : Tool {
         val f = ctx.project.resolveWritable(rel)
         val existed = f.exists()
         f.parentFile?.mkdirs()
-        f.writeText(input.req("content"))
+        f.writeText(formatted(f, input.req("content")))
         ctx.state.readStamps[ctx.project.rel(f)] = f.lastModified()
         return ToolResult.ok("${if (existed) "replaced" else "created"} ${ctx.project.rel(f)} (${f.length()} B)")
     }
@@ -131,12 +131,15 @@ class EditFileTool : Tool {
         val old = input.req("old_text").replace("\r\n", "\n"); val new = (input.str("new_text") ?: "").replace("\r\n", "\n")
         val count = occurrences(text, old)
         val all = input["replace_all"]?.toString() == "true"
+        // Files are formatted on save, so the agent's copy may be indented differently: match ignoring indentation.
+        val loose = if (count == 0) replaceIgnoringIndent(text, old, new) else null
         when {
-            count == 0 -> return ToolResult.error("old_text not found in $rel." + closestMatch(text, old))
+            count == 0 && loose == null -> return ToolResult.error("old_text not found in $rel." + closestMatch(text, old))
             count > 1 && !all -> return ToolResult.error("old_text matches $count places in $rel — add surrounding lines to make it unique, or set replace_all")
         }
-        val edited = if (all) text.replace(old, new) else text.replaceFirst(old, new)
-        f.writeText(if (crlf) edited.replace("\n", "\r\n") else edited)
+        val edited = loose ?: if (all) text.replace(old, new) else text.replaceFirst(old, new)
+        val saved = formatted(f, edited)
+        f.writeText(if (crlf) saved.replace("\n", "\r\n") else saved)
         ctx.state.readStamps[rel] = f.lastModified()
         return ToolResult.ok("edited $rel (${if (all) count else 1} replacement${if (all && count > 1) "s" else ""})")
     }
@@ -162,10 +165,13 @@ class MultiEditTool : Tool {
             val o = e as JsonObject
             val old = o.req("old_text").replace("\r\n", "\n")
             val n = occurrences(text, old)
-            if (n != 1) return ToolResult.error("edit #${i + 1}: old_text matches $n places (must be exactly 1); nothing written." +
+            val replacement = (o.str("new_text") ?: "").replace("\r\n", "\n")
+            val loose = if (n == 0) replaceIgnoringIndent(text, old, replacement) else null
+            if (n != 1 && loose == null) return ToolResult.error("edit #${i + 1}: old_text matches $n places (must be exactly 1); nothing written." +
                 (if (n == 0) closestMatch(text, old) else " Add surrounding lines to make it unique."))
-            text = text.replaceFirst(old, (o.str("new_text") ?: "").replace("\r\n", "\n"))
+            text = loose ?: text.replaceFirst(old, replacement)
         }
+        text = formatted(f, text)
         f.writeText(if (crlf) text.replace("\n", "\r\n") else text)
         ctx.state.readStamps[rel] = f.lastModified()
         return ToolResult.ok("applied ${input.a("edits")?.size ?: 0} edits to $rel")
@@ -268,4 +274,28 @@ internal fun closestMatch(text: String, old: String): String {
     val sameIgnoringIndent = lines.subList(best, end).map { it.trim() }.filter { it.isNotEmpty() }.take(want.size) == want
     return (if (sameIgnoringIndent) " The text is there with different indentation." else " Closest match") +
         " (lines ${best + 1}–$end) — copy it exactly:\n" + (best until end).joinToString("\n") { "${it + 1}\t${lines[it]}" }
+}
+
+/** Kotlin files are formatted on every save (KotlinFormat); anything else is written as given. */
+internal fun formatted(f: java.io.File, text: String): String =
+    if (f.extension == "kt") runCatching { app.kiln.build.KotlinFormat.format(text) }.getOrDefault(text) else text
+
+/**
+ * [old] as whole lines, compared without their leading whitespace: when that finds exactly one place,
+ * replace it with [new], re-indented by the same offset. Null when there's no single such place.
+ */
+internal fun replaceIgnoringIndent(text: String, old: String, new: String): String? {
+    val want = old.trimEnd('\n').split("\n")
+    if (want.all { it.isBlank() }) return null
+    val lines = text.split("\n")
+    val hits = (0..lines.size - want.size).filter { s0 -> want.indices.all { k -> lines[s0 + k].trim() == want[k].trim() } }
+    if (hits.size != 1) return null
+    val at = hits[0]
+    fun indentOf(l: String) = l.length - l.trimStart().length
+    val firstWanted = want.indexOfFirst { it.isNotBlank() }
+    val delta = indentOf(lines[at + firstWanted]) - indentOf(want[firstWanted])
+    val replacement = new.trimEnd('\n').split("\n").map { l ->
+        if (l.isBlank()) "" else " ".repeat(maxOf(0, indentOf(l) + delta)) + l.trimStart()
+    }
+    return (lines.subList(0, at) + (if (new.isEmpty()) emptyList() else replacement) + lines.subList(at + want.size, lines.size)).joinToString("\n")
 }

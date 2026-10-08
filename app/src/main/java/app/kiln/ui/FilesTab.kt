@@ -244,13 +244,15 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
     }
     val dirty = original != null && text != original
     fun save() = scope.launch {
+        // Kotlin is formatted on save; the editor then shows the formatted text.
+        val out = if (o is Open.Source) app.kiln.tools.formatted(o.file, text) else text
         val ok = withContext(Dispatchers.IO) {
             when (o) {
-                is Open.Source -> runCatching { o.file.writeText(text) }.isSuccess
-                is Open.Data -> Graph.device.writeData(ps.pkg, o.path, text.toByteArray()).ok
+                is Open.Source -> runCatching { o.file.writeText(out) }.isSuccess
+                is Open.Data -> Graph.device.writeData(ps.pkg, o.path, out.toByteArray()).ok
             }
         }
-        if (ok) original = text
+        if (ok) { text = out; original = out }
         vm.message.value = if (ok) (if (o is Open.Data) "Saved — restart the app to reload it" else "Saved") else "Save failed"
     }
     Column(Modifier.fillMaxSize()) {
