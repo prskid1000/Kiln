@@ -244,6 +244,7 @@ class AgentLoop(
         val cfg = settings.value.merged(project.dir)
         var steps = 0
         var lastTodoStep = 0
+        var singleStreak = 0
         while (true) {
             if (++steps > cfg.maxSteps) { stoppedWith("Stopped after ${cfg.maxSteps} steps (limit in Settings)."); return }
             if (cost.value >= cfg.sessionUsd) { next(Activity.Kind.NOTICE, "Session spending cap reached (\$${"%.2f".format(cfg.sessionUsd)})."); return }
@@ -334,8 +335,19 @@ class AgentLoop(
                     "\nIf you've finished some of these, send the updated list with todo now (one item in_progress at a time). " +
                     "Don't mention this reminder.</system-reminder>")
             }
+            // Single taps add up: runs 7–10 used 30–47 of them where a few test_flow calls would do.
+            // After 8 single interactions in a row, suggest batching.
+            val single = setOf("tap", "type_text", "swipe", "press_key")
+            singleStreak = if (uses.isNotEmpty() && uses.all { it.str("name") in single }) singleStreak + uses.size
+                else if (uses.any { it.str("name") == "test_flow" }) 0 else singleStreak
+            val flowNudge = if (singleStreak >= 8 && "test_flow" in tools.map { it.name }) {
+                singleStreak = 0
+                obj("type" to "text", "text" to "<system-reminder>That's 8+ single taps/types in a row. Put the rest of this journey in ONE " +
+                    "test_flow call (steps: tap / type + into / swipe + on / key / expect) — it runs them all and reports each step. " +
+                    "Don't mention this reminder.</system-reminder>")
+            } else null
             // Queued user messages ride along with the tool results: the model sees them at its next step.
-            session.append(Msg("user", JsonArray(results + listOfNotNull(budget, finish, todoNudge) + (drainSteering() ?: emptyList()))))
+            session.append(Msg("user", JsonArray(results + listOfNotNull(budget, finish, todoNudge, flowNudge) + (drainSteering() ?: emptyList()))))
         }
     }
 
