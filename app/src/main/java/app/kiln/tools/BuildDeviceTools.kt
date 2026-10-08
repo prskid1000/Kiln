@@ -139,6 +139,10 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val delegate = Regex("""has no method '(getValue|setValue)\(""").find(e.message)?.groupValues?.get(1)
         val name = delegate ?: icon?.groupValues?.get(3) ?: unresolved.find(e.message)?.groupValues?.get(1) ?: continue
         if (name[0].isLowerCase() && name !in COMMON_FUNCTIONS) continue
+        // A lower-case name is imported only where it's called (items(…), Modifier.size(…)): `list.items`
+        // or `x.size` are properties of something else. dp/sp/viewModelScope and by-delegates are the exceptions.
+        if (name[0].isLowerCase() && delegate == null && name !in setOf("dp", "sp", "viewModelScope") &&
+            !Regex("""${Regex.escape(name)}\s*[({]""").containsMatchIn(e.source.orEmpty())) continue
         val path = e.file ?: continue
         val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
         if (!f.isFile || f.extension != "kt") continue

@@ -495,6 +495,8 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             if (pkgLines.isNotEmpty()) out += "Package lines don't match their folders — imports use the package line: " + pkgLines.take(4).joinToString("; ") +
                 ". Make each file's package match its folder."
         }
+        if ("'none' is incompatible with attribute" in m)
+            out += "Vector drawables have no \"none\" (that's SVG): leave fillColor/strokeColor out for no fill, or use #00000000. Easier: draw it with make_graphic from SVG."
         if ("attribute android:fillMode not found" in m)
             out += "Vector drawables have android:fillType (nonZero | evenOdd), not fillMode. Easier: draw icons with make_graphic from SVG."
         if (Regex("attribute android:\\w+ not found").containsMatchIn(m) && e.file?.contains("drawable") == true && "fillMode" !in m)
