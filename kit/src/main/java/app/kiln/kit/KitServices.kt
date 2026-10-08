@@ -463,22 +463,35 @@ fun rememberDictation(prompt: String = "Speak now", onText: (String) -> Unit): (
 
 /**
  * The device's location, once. Needs ACCESS_COARSE_LOCATION or ACCESS_FINE_LOCATION (in kiln.json
- * permissions, granted with [rememberPermission]); returns null when it's off or not allowed.
+ * permissions, granted with [rememberPermission]); returns null when location is off or not allowed.
+ *
+ * A fix newer than [maxAgeMillis] is returned at once; otherwise it asks fused, network, then GPS
+ * for a fresh one (each up to [timeoutMillis]), and falls back to the newest known fix — check its
+ * `time` if staleness matters.
  */
 object KLocation {
     @SuppressLint("MissingPermission")
-    suspend fun current(context: Context): Location? {
+    suspend fun current(context: Context, maxAgeMillis: Long = 2 * 60_000, timeoutMillis: Long = 15_000): Location? {
         val granted = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).any {
             context.checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
         if (!granted) return null
         val lm = context.getSystemService(LocationManager::class.java)
-        val provider = listOf(LocationManager.FUSED_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-            .firstOrNull { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) } ?: return lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-        return suspendCancellableCoroutine { c ->
-            val cancel = android.os.CancellationSignal()
-            c.invokeOnCancellation { cancel.cancel() }
-            lm.getCurrentLocation(provider, cancel, context.mainExecutor) { loc -> if (c.isActive) c.resume(loc) }
+        if (!lm.isLocationEnabled) return null
+        val enabled = lm.allProviders.filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+        val newest = enabled.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.elapsedRealtimeNanos }
+        val ageMs = newest?.let { (android.os.SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000 }
+        if (newest != null && ageMs != null && ageMs <= maxAgeMillis) return newest
+        for (p in listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER).filter { it in enabled }) {
+            val fresh = kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) {
+                suspendCancellableCoroutine<Location?> { c ->
+                    val cancel = android.os.CancellationSignal()
+                    c.invokeOnCancellation { cancel.cancel() }
+                    lm.getCurrentLocation(p, cancel, context.mainExecutor) { loc -> if (c.isActive) c.resume(loc) }
+                }
+            }
+            if (fresh != null) return fresh
         }
+        return newest
     }
 }
 
