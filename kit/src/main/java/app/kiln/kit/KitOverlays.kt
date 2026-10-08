@@ -189,7 +189,11 @@ fun KPullRefresh(refreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
 /** One destination in a [KBottomBar]. */
 data class KNavItem(val label: String, val icon: ImageVector, val badge: Int? = null)
 
-/** Bottom navigation bar (for apps not using KilnTabs). */
+/**
+ * Bottom navigation bar. It draws where you put it, so put it in a screen's bottom slot:
+ * `KilnScreen("Home", bottomBar = { KBottomBar(items, tab, { tab = it }) }) { pad -> … }`.
+ * For an app whose top level is tabs, [KilnTabs] does this (and the rail on tablets) for you.
+ */
 @Composable
 fun KBottomBar(items: List<KNavItem>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) =
     NavigationBar(modifier, containerColor = Nocturne.surface) {
