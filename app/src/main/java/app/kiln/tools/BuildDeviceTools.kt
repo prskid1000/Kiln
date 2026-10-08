@@ -413,8 +413,18 @@ class ShellTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val description = "Run a shell command as the shell user (through Warden). Last resort — prefer the dedicated tools. Needs approval."
     override val schema = schema { str("command", "Command line for sh -c.") }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.NEEDS_APPROVAL, Trait.DESTRUCTIVE)
+    override fun precheck(input: JsonObject): String? = input.str("command")?.let(::shellRefusal)
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val r = warden.exec(listOf("sh", "-c", input.req("command")), timeoutMs = 60_000)
         return ToolResult(ctx.spill("exit ${r.code}\n${r.all}"), isError = !r.ok)
     }
+}
+
+/** Why a shell command must not run (driving the device with adb/input), or null. */
+internal fun shellRefusal(cmd: String): String? {
+    if (Regex("""^\s*adb\b""").containsMatchIn(cmd))
+        return "There is no adb here — this already runs on the phone. To use the app, call tap, type_text, swipe, press_key or wait_for; to inspect it, ui_tree, screenshot or logcat."
+    if (Regex("""\binput\s+(tap|text|swipe|keyevent|draganddrop|motionevent)\b""").containsMatchIn(cmd))
+        return "Don't drive the device with `input`: it steals focus and can freeze the app under test. Use tap, type_text, swipe or press_key — they act inside the app."
+    return null
 }

@@ -200,10 +200,14 @@ class AgentLoop(
             // A new app made in Kiln: the user picks its look before the agent writes any UI.
             val pending = File(project.kilnDir, app.kiln.tools.Looks.PENDING)
             val look = if (mode == Mode.BUILD && role == "agent" && pending.isFile) {
-                val (note, summary) = app.kiln.tools.Looks.instruction(askLook(project.meta().label))
+                val answer = askLook(project.meta().label)
                 pending.delete()
+                val applied = runCatching { app.kiln.tools.Looks.applyTo(project, answer) }.getOrDefault(false)
+                val (note, summary) = app.kiln.tools.Looks.instruction(answer)
                 next(Activity.Kind.NOTICE, summary)
-                obj("type" to "text", "text" to "<system-reminder>Before you started, the user picked this app's look. $note</system-reminder>")
+                obj("type" to "text", "text" to "<system-reminder>Before you started, the user picked this app's look. " +
+                    (if (applied) "Kiln has already put it in MainActivity (the Theme override) — keep that override exactly as it is when you edit MainActivity; style screens only with Nocturne.* tokens and K components. "
+                     else "") + note + "</system-reminder>")
             } else null
             val extra = Attachments.blocks(project, attachments)
             update(id) { it.copy(files = attachments.filterNot { a -> a.mime.startsWith("image/") }.map { a -> a.name },
@@ -496,6 +500,7 @@ class AgentLoop(
         if (input["_invalid_json"] != null || truncated && input.isEmpty())
             return result(ToolResult.error("your tool input was cut off or invalid JSON — send it again (smaller, if it was large)"), Activity.Status.FAILED)
         validate(tool, input)?.let { return result(ToolResult.error(it), Activity.Status.FAILED) }
+        tool.precheck(input)?.let { return result(ToolResult.error(it), Activity.Status.FAILED) }
         if (mode == Mode.PLAN && Trait.READ_ONLY !in tool.traits)
             return result(ToolResult.error("plan mode is read-only: put this change in the plan instead"), Activity.Status.DENIED)
 

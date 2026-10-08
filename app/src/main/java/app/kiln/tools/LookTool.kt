@@ -42,6 +42,33 @@ object Looks {
     /** Marks a project created in Kiln whose look the user hasn't picked yet (asked at its first run). */
     const val PENDING = "look-pending"
 
+    /**
+     * Write the chosen theme into the project's MainActivity (a Theme override), so it doesn't depend
+     * on the model applying it. Returns false when the answer isn't a preset or MainActivity can't be found.
+     */
+    fun applyTo(project: app.kiln.build.Project, answer: String): Boolean {
+        val theme = Regex("theme=([^;]+)").find(answer)?.groupValues?.get(1)?.trim() ?: return false
+        val style = Regex("style=([^;]+)").find(answer)?.groupValues?.get(1)?.trim() ?: "Flat"
+        val t = themes.firstOrNull { it.name.equals(theme, true) } ?: return false
+        if (t.code == "Nocturne" && style == "Flat") return false
+        val f = project.files().firstOrNull { it.name == "MainActivity.kt" } ?: return false
+        var s = f.readText()
+        val cls = Regex("""class\s+MainActivity\s*:\s*KilnActivity\(\)\s*\{""").find(s) ?: return false
+        if ("override fun Theme(" in s) return false
+        val args = listOfNotNull("theme = KThemes.${t.code}", if (style != "Flat") "style = KStyle.$style" else null).joinToString(", ")
+        s = s.substring(0, cls.range.last + 1) +
+            "\n    // The look the user picked when the app was created.\n" +
+            "    @Composable\n    override fun Theme(content: @Composable () -> Unit) = KilnTheme($args, content = content)\n" +
+            s.substring(cls.range.last + 1)
+        val imports = listOfNotNull("app.kiln.kit.KilnTheme", "app.kiln.kit.KThemes", if (style != "Flat") "app.kiln.kit.KStyle" else null,
+            "androidx.compose.runtime.Composable").filter { "import $it\n" !in s }
+        val pkg = Regex("""(?m)^package .+\n""").find(s)
+        if (imports.isNotEmpty() && pkg != null)
+            s = s.substring(0, pkg.range.last + 1) + "\n" + imports.joinToString("") { "import $it\n" } + s.substring(pkg.range.last + 1)
+        f.writeText(s)
+        return true
+    }
+
     /** What the agent should do with the picker's answer, and a short summary. */
     fun instruction(answer: String): Pair<String, String> {
         val raw = answer.trim()

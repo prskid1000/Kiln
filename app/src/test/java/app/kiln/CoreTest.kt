@@ -32,6 +32,31 @@ import java.util.zip.ZipOutputStream
 
 class CoreTest {
 
+    @Test fun `the picked look is written into the template MainActivity`() {
+        val dir = kotlin.io.path.createTempDirectory("look").toFile()
+        val tpl = File("../toolchain/templates/compose/src/MainActivity.kt").readText().replace("{{package}}", "kiln.app.demo").replace("{{label}}", "Demo")
+        File(dir, "src/kiln/app/demo").mkdirs(); File(dir, "src/kiln/app/demo/MainActivity.kt").writeText(tpl)
+        val p = app.kiln.build.Project(dir)
+        assertTrue(app.kiln.tools.Looks.applyTo(p, app.kiln.tools.Looks.answer("Botanical Garden", "Elevated")))
+        val out = File(dir, "src/kiln/app/demo/MainActivity.kt").readText()
+        assertTrue(out, "override fun Theme(content: @Composable () -> Unit) = KilnTheme(theme = KThemes.BotanicalGarden, style = KStyle.Elevated, content = content)" in out)
+        assertTrue(out, "import app.kiln.kit.KThemes" in out && "import app.kiln.kit.KStyle" in out)
+        assertFalse("applies once", app.kiln.tools.Looks.applyTo(p, app.kiln.tools.Looks.answer("Ocean Depths", "Flat")))
+        assertFalse("default changes nothing", app.kiln.tools.Looks.applyTo(p, app.kiln.tools.Looks.DEFAULT))
+        dir.deleteRecursively()
+    }
+
+    @Test fun `shell refuses adb and input before asking for approval`() {
+        fun cmd(c: String) = c
+        val t = object { fun precheck(c: String) = app.kiln.tools.shellRefusal(c) }
+        assertNotNull(t.precheck(cmd("adb shell input text \"Snake%20Plant\"")))
+        assertNotNull(t.precheck(cmd("input tap 100 200")))
+        assertNotNull(t.precheck(cmd("sleep 1; input keyevent 4")))
+        assertEquals(null, t.precheck(cmd("ls /sdcard")))
+        assertEquals(null, t.precheck(cmd("dumpsys input_method | grep mInputShown")))
+    }
+
+
     @Test fun `stored entries are 4-byte aligned`() {
         val dir = Files.createTempDirectory("kiln").toFile()
         val res = File(dir, "res.apk")

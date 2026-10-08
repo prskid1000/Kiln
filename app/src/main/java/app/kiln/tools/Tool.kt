@@ -81,6 +81,8 @@ interface Tool {
     /** Held back from the model until `tool_search` finds it (large MCP servers). */
     val deferred: Boolean get() = false
     suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult
+    /** Rejects input that can never be right before anyone is asked to approve it (null = fine). */
+    fun precheck(input: JsonObject): String? = null
 }
 
 /** Schema DSL: `schema { str("path", "File path"); int("line", "…", required = false) }`. */
