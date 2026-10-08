@@ -390,7 +390,7 @@ private fun type(t: String): String = when {
 }
 
 /** Lower-case top-level functions and properties models use without importing (not facades named after them). */
-private val COMMON_FUNCTIONS = mapOf(
+internal val COMMON_FUNCTIONS = mapOf(
     "collectAsStateWithLifecycle" to "androidx.lifecycle.compose.collectAsStateWithLifecycle",
     "collectAsState" to "androidx.compose.runtime.collectAsState",
     "rememberSaveable" to "androidx.compose.runtime.saveable.rememberSaveable",
@@ -414,6 +414,30 @@ private val COMMON_FUNCTIONS = mapOf(
     "border" to "androidx.compose.foundation.border",
     "clip" to "androidx.compose.ui.draw.clip",
     "rememberLazyListState" to "androidx.compose.foundation.lazy.rememberLazyListState",
+    "padding" to "androidx.compose.foundation.layout.padding",
+    "fillMaxWidth" to "androidx.compose.foundation.layout.fillMaxWidth",
+    "fillMaxSize" to "androidx.compose.foundation.layout.fillMaxSize",
+    "fillMaxHeight" to "androidx.compose.foundation.layout.fillMaxHeight",
+    "size" to "androidx.compose.foundation.layout.size",
+    "height" to "androidx.compose.foundation.layout.height",
+    "width" to "androidx.compose.foundation.layout.width",
+    "heightIn" to "androidx.compose.foundation.layout.heightIn",
+    "widthIn" to "androidx.compose.foundation.layout.widthIn",
+    "wrapContentSize" to "androidx.compose.foundation.layout.wrapContentSize",
+    "offset" to "androidx.compose.foundation.layout.offset",
+    "aspectRatio" to "androidx.compose.foundation.layout.aspectRatio",
+    "imePadding" to "androidx.compose.foundation.layout.imePadding",
+    "statusBarsPadding" to "androidx.compose.foundation.layout.statusBarsPadding",
+    "navigationBarsPadding" to "androidx.compose.foundation.layout.navigationBarsPadding",
+    "alpha" to "androidx.compose.ui.draw.alpha",
+    "shadow" to "androidx.compose.ui.draw.shadow",
+    "rotate" to "androidx.compose.ui.draw.rotate",
+    "scale" to "androidx.compose.ui.draw.scale",
+    "items" to "androidx.compose.foundation.lazy.items",
+    "itemsIndexed" to "androidx.compose.foundation.lazy.itemsIndexed",
+    "getValue" to "androidx.compose.runtime.getValue",
+    "setValue" to "androidx.compose.runtime.setValue",
+    "LaunchedEffect" to "androidx.compose.runtime.LaunchedEffect",
 )
 
 private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.""")

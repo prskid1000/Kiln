@@ -135,11 +135,10 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
             }
             continue
         }
-        val name = icon?.groupValues?.get(3) ?: unresolved.find(e.message)?.groupValues?.get(1) ?: continue
-        if (name[0].isLowerCase() && name !in setOf("collectAsStateWithLifecycle", "collectAsState", "rememberSaveable", "mutableStateOf",
-                "mutableIntStateOf", "mutableFloatStateOf", "mutableStateListOf", "derivedStateOf", "rememberCoroutineScope", "viewModel",
-                "viewModelScope", "stringResource", "painterResource", "dp", "sp", "rememberScrollState", "verticalScroll", "horizontalScroll",
-                "clickable", "background", "border", "clip", "rememberLazyListState")) continue
+        // `by remember { … }` without getValue/setValue imports is reported as a missing method, not a name.
+        val delegate = Regex("""has no method '(getValue|setValue)\(""").find(e.message)?.groupValues?.get(1)
+        val name = delegate ?: icon?.groupValues?.get(3) ?: unresolved.find(e.message)?.groupValues?.get(1) ?: continue
+        if (name[0].isLowerCase() && name !in COMMON_FUNCTIONS) continue
         val path = e.file ?: continue
         val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
         if (!f.isFile || f.extension != "kt") continue

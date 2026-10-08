@@ -264,7 +264,7 @@ internal fun closestMatch(text: String, old: String): String {
         if (score / want.size > bestScore) { bestScore = score / want.size; best = i }
     }
     if (best < 0 || bestScore < 0.5) return " Nothing similar found — read the file again."
-    val end = minOf(lines.size, best + want.size + 2)
+    val end = minOf(lines.size, best + minOf(want.size + 2, 30))
     val sameIgnoringIndent = lines.subList(best, end).map { it.trim() }.filter { it.isNotEmpty() }.take(want.size) == want
     return (if (sameIgnoringIndent) " The text is there with different indentation." else " Closest match") +
         " (lines ${best + 1}–$end) — copy it exactly:\n" + (best until end).joinToString("\n") { "${it + 1}\t${lines[it]}" }
