@@ -110,16 +110,16 @@ class Kiln(
         val registry = ToolRegistry(base)
         val brokerReady = warden.status() == Warden.Status.READY
         var tools = registry.assemble(extra, cfg.disabledTools, brokerReady)
-        // The subagent sees only read-only tools.
-        // The subagent runs headless: nobody can answer its questions or approvals.
-        val readOnly = tools.filter { Trait.READ_ONLY in it.traits && it.name != "ask_user" }
-        // QA: a fresh agent that can only look at and use the app (no editing, no building).
-        val qaTools = tools.filter { it.name in QA_TOOLS }
+        // Helper agents (QA, explore, reviewer, project agents) all run through runAgent with these tools to pick from.
+        val available = tools
+        val specs = Agents.all(project)
         val agentDevice = if (settings.value.backgroundTesting) testDevice else device
-        val qa = app.kiln.tools.QaCheckTool({ criteria, onStep, onFeed -> qaTask(project, registry, qaTools, criteria, onStep, onFeed) }, agentDevice)
+        val qa = app.kiln.tools.QaCheckTool({ criteria, ctx, onStep ->
+            runAgent(project, registry, available, Agents.QA, "Done criteria:\n$criteria\n\nTest the criteria on the device now.", ctx, onStep)
+        }, agentDevice)
         val deferred = tools.filter { it.deferred }
         // qa_check only with the QA agent on; both helpers obey disabledTools like every other tool.
-        tools = (tools + SubagentTool(this, project, registry, readOnly) + listOfNotNull(qa.takeIf { cfg.qaAgent }) +
+        tools = (tools + SubagentTool(this, project, registry, available, specs) + listOfNotNull(qa.takeIf { cfg.qaAgent }) +
             listOfNotNull(deferred.takeIf { it.isNotEmpty() }?.let { app.kiln.tools.ToolSearchTool(it) }))
             .filter { it.name !in cfg.disabledTools }.sortedBy { it.name }
         ToolRegistry.validateNames(tools)
@@ -142,46 +142,50 @@ class Kiln(
         return AgentLoop(project, s, providers, reg, tools, settings)
     }
 
-    suspend fun qaTask(project: Project, registry: ToolRegistry, tools: List<Tool>, criteria: String, onStep: (String) -> Unit, onFeed: (List<Activity>) -> Unit) =
-        AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings, QA_PROMPT,
-            "Done criteria:\n$criteria\n\nTest the criteria on the device now.", role = "subagent", onStep = onStep, onFeed = onFeed,
-            finished = Regex("VERDICT:\\s*(PASS|FAIL)"),
-            unfinished = "You stopped before finishing. Use the tools now to test every criterion on the device, then end " +
-                "with one line per criterion and the final line VERDICT: PASS or VERDICT: FAIL.")
-
-    suspend fun subTask(project: Project, registry: ToolRegistry, tools: List<Tool>, task: String) =
-        AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings,
-            "You are a focused investigator helping an Android engineer. Use the read-only tools to answer the task " +
-                "precisely and briefly; report facts with file:line references. Do not speculate.\n\n" +
-                "Kit reference:\n" + toolchain.kitApi() + "\n\nKit index:\n" + toolchain.kitIndex(), task, role = "subagent")
+    /**
+     * Run a helper agent of kind [spec] on [task]: a headless loop with the spec's tools (from [available]),
+     * its steps streamed into the chat under the spec's tag via [ctx]. Every kind of helper runs through here.
+     */
+    suspend fun runAgent(project: Project, registry: ToolRegistry, available: List<Tool>, spec: AgentSpec, task: String,
+                         ctx: ToolContext?, onStep: ((String) -> Unit)? = null): Triple<String, app.kiln.llm.Usage, Double> {
+        // Helpers can't ask the user (nobody answers a headless loop) or start other helpers.
+        val tools = available.filter { t ->
+            t.name !in HELPER_TOOLS && t.name != "ask_user" &&
+                (spec.tools?.contains(t.name) ?: (Trait.READ_ONLY in t.traits))
+        }
+        val prompt = spec.prompt + if (spec.kitDocs) "\n\nKit reference:\n" + toolchain.kitApi() + "\n\nKit index:\n" + toolchain.kitIndex() else ""
+        return AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings, prompt, task, role = "subagent",
+            finished = spec.finished, unfinished = spec.unfinished, onStep = onStep,
+            onFeed = ctx?.let { c -> { feed -> c.children(feed.map { it.copy(agent = spec.tag) }) } })
+    }
 }
 
-/** Delegate a self-contained investigation to a cheaper model with read-only tools (SPEC §5). */
+/** Spawn a helper agent of a given type: built-ins (explore, reviewer, …) and the project's own (.kiln/agents). */
 class SubagentTool(private val kiln: Kiln, private val project: Project, private val registry: ToolRegistry,
-                   private val readOnly: List<Tool>) : Tool {
+                   private val available: List<Tool>, private val specs: List<AgentSpec>) : Tool {
     override val name = "subagent"
-    override val description = "Hand a self-contained, read-only investigation to a helper (a cheaper model) and get back a short report — e.g. \"find every screen that reads the todos store and summarise how\". Keeps long reading out of your context."
-    override val schema = schema { str("task", "What to investigate and what to report back.") }
+    override val description = "Hand a self-contained task to a helper agent and get back its report; its steps show in the chat. " +
+        "Keeps long reading out of your context. Types: " + specs.filter { it.name != "qa" }.joinToString("; ") { "${it.name} — ${it.description}" } +
+        ". (To test the app against done criteria use qa_check.)"
+    override val schema = schema {
+        str("type", "Which kind of helper.", enum = specs.filter { it.name != "qa" }.map { it.name })
+        str("task", "What to do and what to report back.")
+    }
     override val traits = setOf(Trait.READ_ONLY, Trait.LONG_RUNNING)
     override val timeoutMs = 900_000L
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val task = input.str("task") ?: return ToolResult.error("missing task")
-        ctx.progress("subagent working")
-        val (answer, usage, usd) = kiln.subTask(project, registry, readOnly, task)
+        val spec = specs.firstOrNull { it.name == (input.str("type") ?: "explore") }
+            ?: return ToolResult.error("no helper type '${input.str("type")}' — use one of: ${specs.joinToString { it.name }}")
+        ctx.progress("${spec.tag} agent working")
+        val (answer, usage, usd) = kiln.runAgent(project, registry, available, spec, task, ctx)
         ctx.addCost(usd)
-        return ToolResult.ok(ctx.spill(answer), "subagent: ${usage.output} tokens out")
+        return ToolResult.ok(ctx.spill(answer), "${spec.tag}: ${usage.output} tokens out")
     }
 }
 
 /** More MCP tools than this are deferred behind tool_search. */
 private const val DEFER_MCP_OVER = 8
 
-/** What the QA agent may use: look at and operate the app, read the code, never change it. */
-private val QA_TOOLS = setOf("launch", "screenshot", "ui_tree", "tap", "type_text", "swipe", "press_key", "wait_for",
-    "logcat", "last_crash", "ui_check", "read_file", "list_dir", "grep")
-
-private const val QA_PROMPT = "You are a strict QA tester for an Android app on this phone. You did not build it. " +
-    "Start with launch, then exercise the app to check each done criterion: tap by visible label, type, swipe, wait_for, " +
-    "and read the screen (ui_tree / screenshot). A criterion passes only if you observed it. Also note crashes (last_crash) " +
-    "and anything broken you see on the way. Reply with one line per criterion: PASS or FAIL — criterion — what you saw. " +
-    "End with exactly one line: VERDICT: PASS (every criterion passed) or VERDICT: FAIL."
+/** Tools that start helpers: never given to a helper. */
+private val HELPER_TOOLS = setOf("subagent", "qa_check")

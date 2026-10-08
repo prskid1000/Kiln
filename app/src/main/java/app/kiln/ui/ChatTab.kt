@@ -125,7 +125,7 @@ private fun withHelperSteps(feed: List<Activity>): List<Activity> = feed.flatMap
     if (a.children.isEmpty()) listOf(a)
     else listOf(a) + a.children.map { c ->
         // Negative ids can't collide with the main feed's (list keys).
-        c.copy(id = -(a.id * 100_000 + c.id + 1), agent = if (a.tool == "qa_check") "QA" else "Helper")
+        c.copy(id = -(a.id * 100_000 + c.id + 1), agent = c.agent ?: if (a.tool == "qa_check") "QA" else "Helper")
     }
 }
 

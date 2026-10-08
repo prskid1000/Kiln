@@ -231,7 +231,8 @@ fun securityIssues(files: Map<String, String>, permissions: List<String>): List<
  * display, while the screen is recorded. The builder doesn't grade its own work.
  */
 class QaCheckTool(
-    private val run: suspend (criteria: String, onStep: (String) -> Unit, onFeed: (List<app.kiln.agent.Activity>) -> Unit) -> Triple<String, app.kiln.llm.Usage, Double>,
+    /** Runs the QA agent (Agents.QA) on the criteria; its steps go into the chat through the ToolContext. */
+    private val run: suspend (criteria: String, ctx: ToolContext, onStep: (String) -> Unit) -> Triple<String, app.kiln.llm.Usage, Double>,
     private val device: Device,
 ) : Tool {
     override val name = "qa_check"
@@ -253,7 +254,7 @@ class QaCheckTool(
         // The QA agent's own steps: live in the chat while it works, and listed under its report.
         val trail = java.util.Collections.synchronizedList(mutableListOf<String>())
         // Every QA step — its tool call, result and screenshot — nested under this call in the chat, live.
-        val (report, _, usd) = run(criteria, { line -> trail += line; ctx.progress("QA · step ${trail.size}: $line") }, { feed -> ctx.children(feed) })
+        val (report, _, usd) = run(criteria, ctx) { line -> trail += line; ctx.progress("QA · step ${trail.size}: $line") }
         ctx.addCost(usd)
         val clip = runCatching { rec?.stop() }.getOrNull()
         val verdict = Regex("""VERDICT:\s*(PASS|FAIL)""", RegexOption.IGNORE_CASE).find(report)?.groupValues?.get(1)?.uppercase()

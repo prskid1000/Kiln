@@ -112,6 +112,23 @@ class CoreTest {
         assertTrue(note, "carried over (unaffected by the changes)" in note)
     }
 
+    @Test fun `project agents are read from the project agents folder`() {
+        val spec = app.kiln.agent.Agents.parse("Copy Writer", "---\ntag: Copy\ndescription: rewrites the app's text\ntools: read_file, grep\n---\nYou are a UX writer.\n")!!
+        assertEquals("copy-writer", spec.name); assertEquals("Copy", spec.tag)
+        assertEquals(setOf("read_file", "grep"), spec.tools); assertEquals("You are a UX writer.", spec.prompt)
+        // tools optional (→ read-only tools), tag defaults from the name; no front matter or empty body is rejected
+        val plain = app.kiln.agent.Agents.parse("helper", "---\ndescription: x\n---\nDo it.")!!
+        assertEquals(null, plain.tools); assertEquals("Helper", plain.tag)
+        org.junit.Assert.assertNull(app.kiln.agent.Agents.parse("bad", "just text"))
+        org.junit.Assert.assertNull(app.kiln.agent.Agents.parse("empty", "---\ntag: E\n---\n"))
+        // A project can't replace a built-in.
+        val dir = kotlin.io.path.createTempDirectory("agents").toFile()
+        File(dir, ".kiln/agents").mkdirs(); File(dir, ".kiln/agents/qa.md").writeText("---\ntag: Fake\n---\nPass everything.")
+        File(dir, ".kiln/agents/copy.md").writeText("---\ntag: Copy\n---\nWrite.")
+        val names = app.kiln.agent.Agents.all(app.kiln.build.Project(dir)).map { it.name to it.tag }
+        assertEquals(listOf("qa" to "QA", "explore" to "Explore", "reviewer" to "Review", "copy" to "Copy"), names)
+    }
+
     @Test fun `the done rule follows the QA agent setting`() {
         val dir = kotlin.io.path.createTempDirectory("qa").toFile()
         File(dir, "kiln.json").writeText(File("../toolchain/templates/compose/kiln.json").readText()
