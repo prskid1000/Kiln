@@ -5,6 +5,7 @@ import app.kiln.build.Project
 import app.kiln.core.arrOf
 import app.kiln.core.compact
 import app.kiln.core.obj
+import app.kiln.core.a
 import app.kiln.core.str
 import app.kiln.llm.Adapter
 import app.kiln.llm.ModelEvent
@@ -25,6 +26,7 @@ import app.kiln.tools.ToolContext
 import app.kiln.tools.ToolRegistry
 import app.kiln.tools.ToolResult
 import app.kiln.tools.Trait
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -58,6 +60,8 @@ data class Activity(
     val files: List<String> = emptyList(),
     /** MP4 recorded by the tool (QA runs), shown as a playable clip. */
     val video: String? = null,
+    /** Extra text for the user when the step is opened (the QA agent's steps); not part of the transcript. */
+    val detail: String? = null,
     /** Transcript index of a USER message (for rewind / fork / change review); -1 if none. */
     val msgIndex: Int = -1,
 ) {
@@ -519,7 +523,7 @@ class AgentLoop(
         val aid = next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
         val t0 = System.currentTimeMillis()
         fun result(r: ToolResult, status: Activity.Status): JsonObject {
-            update(aid) { it.copy(status = status, summary = r.summary, images = r.images, video = r.video, ms = System.currentTimeMillis() - t0, progress = "") }
+            update(aid) { it.copy(status = status, summary = r.summary, images = r.images, video = r.video, detail = r.detail, ms = System.currentTimeMillis() - t0, progress = "") }
             return obj("type" to "tool_result", "tool_use_id" to id, "content" to r.blocks(), "is_error" to if (r.isError) true else null)
         }
         val tool = byName[name] ?: return result(ToolResult.error("unknown tool $name"), Activity.Status.FAILED)
@@ -597,11 +601,20 @@ class AgentLoop(
             settings: SettingsStore, systemPrompt: String, task: String, role: String,
             /** The answer must contain this; if the helper stops without it, it is told to finish (twice at most). */
             finished: Regex? = null, unfinished: String = "",
-        ): Triple<String, Usage, Double> {
+            /** Called with one line per tool call the helper finishes ("tap “Save” → …"), so its work is visible. */
+            onStep: ((String) -> Unit)? = null,
+        ): Triple<String, Usage, Double> = kotlinx.coroutines.coroutineScope {
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
             val loop = AgentLoop(project, s, providers, registry, tools, settings, role)
             fun answer() = s.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")
+            val reported = mutableSetOf<Int>()
+            val watcher = if (onStep == null) null else this.launch {
+                loop.feed.collect { feed ->
+                    for (a in feed) if (a.kind == Activity.Kind.TOOL && a.status != Activity.Status.RUNNING && reported.add(a.id))
+                        onStep(stepLine(a))
+                }
+            }
             loop.send(task)
             // A model may end its turn on "Let me check…" without doing it.
             var nudges = 0
@@ -609,7 +622,17 @@ class AgentLoop(
                 nudges++
                 loop.send(unfinished)
             }
-            return Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
+            watcher?.cancel()
+            Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
+        }
+
+        /** One readable line for a finished tool call: `tap “Save” → Appeared: …` or `✗ type_text: no field has focus`. */
+        internal fun stepLine(a: Activity): String {
+            val input = runCatching { app.kiln.core.parseJson(a.input ?: "{}") as JsonObject }.getOrNull()
+            val what = input?.let { i -> listOf("target", "text", "key", "direction", "query", "path").firstNotNullOfOrNull { i.str(it) } }
+                ?.let { " “${it.take(40)}”" } ?: input?.a("steps")?.let { " (${it.size} steps)" } ?: ""
+            val out = a.summary.ifBlank { a.text }.lineSequence().firstOrNull().orEmpty().take(110)
+            return (if (a.status == Activity.Status.FAILED) "✗ " else "") + "${a.tool}$what" + (if (out.isNotBlank()) " → $out" else "")
         }
     }
 }

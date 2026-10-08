@@ -50,6 +50,15 @@ class CoreTest {
             steps("""{"desc":"Add food expense","actions":[{"tap":{"target":"Add"}},{"type_text":"500","field":"Amount"}]}"""))
     }
 
+    @Test fun `a helper agent's steps read as one line each`() {
+        fun line(tool: String, input: String, summary: String, failed: Boolean = false) = app.kiln.agent.AgentLoop.stepLine(
+            app.kiln.agent.Activity(1, app.kiln.agent.Activity.Kind.TOOL, tool = tool, input = input, summary = summary,
+                status = if (failed) app.kiln.agent.Activity.Status.FAILED else app.kiln.agent.Activity.Status.DONE))
+        assertEquals("tap “Save” → Appeared: “Expense added”", line("tap", """{"target":"Save"}""", "Appeared: “Expense added”"))
+        assertEquals("✗ type_text “500” → no text field has focus", line("type_text", """{"text":"500"}""", "no text field has focus", failed = true))
+        assertEquals("test_flow (3 steps) → all 3 steps passed", line("test_flow", """{"steps":[{},{},{}]}""", "all 3 steps passed"))
+    }
+
     @Test fun `runtime crashes get a likely cause`() {
         assertTrue(app.kiln.tools.crashHints("java.lang.IllegalStateException: Vertically scrollable component was measured with an infinity maximum height constraints").contains("ONE LazyColumn"))
         assertTrue(app.kiln.tools.crashHints("kotlin.UninitializedPropertyAccessException: lateinit property expenses has not been initialized").contains("plain values"))

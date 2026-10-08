@@ -547,6 +547,11 @@ private fun StepRow(a: Activity) {
             val detail = if (a.kind == Activity.Kind.THINKING) a.text else a.summary
             if (detail.isNotBlank()) Text(detail.trim(), style = T.label.copy(color = N.textMuted), maxLines = if (open) 40 else 1,
                 overflow = TextOverflow.Ellipsis)
+            // Steps a helper agent took (qa_check): a collapsed hint, the full list when opened.
+            a.detail?.takeIf { it.isNotBlank() }?.let { d ->
+                if (open) Text(d, style = T.monoSmall.copy(color = N.textLabel), modifier = Modifier.padding(top = 6.dp).fillMaxWidth().vInset().padding(8.dp))
+                else Text("${d.lines().size} QA steps · tap to see them", style = T.label.copy(color = N.accent2), maxLines = 1)
+            }
             if (open && !a.input.isNullOrBlank() && a.kind == Activity.Kind.TOOL)
                 Text(a.input.take(2000), style = T.monoSmall, softWrap = false,
                     modifier = Modifier.padding(top = 6.dp).fillMaxWidth().vInset().horizontalScroll(rememberScrollState()).padding(8.dp))

@@ -116,7 +116,7 @@ class Kiln(
         // QA: a fresh agent that can only look at and use the app (no editing, no building).
         val qaTools = tools.filter { it.name in QA_TOOLS }
         val agentDevice = if (settings.value.backgroundTesting) testDevice else device
-        val qa = app.kiln.tools.QaCheckTool({ criteria -> qaTask(project, registry, qaTools, criteria) }, agentDevice)
+        val qa = app.kiln.tools.QaCheckTool({ criteria, onStep -> qaTask(project, registry, qaTools, criteria, onStep) }, agentDevice)
         val deferred = tools.filter { it.deferred }
         tools = (tools + SubagentTool(this, project, registry, readOnly) + qa +
             listOfNotNull(deferred.takeIf { it.isNotEmpty() }?.let { app.kiln.tools.ToolSearchTool(it) })).sortedBy { it.name }
@@ -139,9 +139,9 @@ class Kiln(
         return AgentLoop(project, s, providers, reg, tools, settings)
     }
 
-    suspend fun qaTask(project: Project, registry: ToolRegistry, tools: List<Tool>, criteria: String) =
+    suspend fun qaTask(project: Project, registry: ToolRegistry, tools: List<Tool>, criteria: String, onStep: (String) -> Unit) =
         AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings, QA_PROMPT,
-            "Done criteria:\n$criteria\n\nTest every criterion on the device now.", role = "subagent",
+            "Done criteria:\n$criteria\n\nTest every criterion on the device now.", role = "subagent", onStep = onStep,
             finished = Regex("VERDICT:\\s*(PASS|FAIL)"),
             unfinished = "You stopped before finishing. Use the tools now to test every criterion on the device, then end " +
                 "with one line per criterion and the final line VERDICT: PASS or VERDICT: FAIL.")

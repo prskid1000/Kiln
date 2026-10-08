@@ -231,7 +231,7 @@ fun securityIssues(files: Map<String, String>, permissions: List<String>): List<
  * display, while the screen is recorded. The builder doesn't grade its own work.
  */
 class QaCheckTool(
-    private val run: suspend (criteria: String) -> Triple<String, app.kiln.llm.Usage, Double>,
+    private val run: suspend (criteria: String, onStep: (String) -> Unit) -> Triple<String, app.kiln.llm.Usage, Double>,
     private val device: Device,
 ) : Tool {
     override val name = "qa_check"
@@ -245,11 +245,14 @@ class QaCheckTool(
         ctx.progress("QA agent testing the app")
         val video = File(ctx.spillDir, "qa-${System.currentTimeMillis()}.mp4")
         val rec = device.testDisplay?.record(video, CoroutineScope(SupervisorJob() + Dispatchers.IO))
-        val (report, _, usd) = try { run(criteria) } finally { }
+        // The QA agent's own steps: live in the chat while it works, and listed under its report.
+        val trail = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val (report, _, usd) = run(criteria) { line -> trail += line; ctx.progress("QA · step ${trail.size}: $line") }
         ctx.addCost(usd)
         val clip = runCatching { rec?.stop() }.getOrNull()
         val verdict = Regex("""VERDICT:\s*(PASS|FAIL)""", RegexOption.IGNORE_CASE).find(report)?.groupValues?.get(1)?.uppercase()
-        return ToolResult(report.trim(), isError = verdict != "PASS", summary = "QA: ${verdict ?: "no verdict"}", video = clip?.path)
+        return ToolResult(report.trim(), isError = verdict != "PASS", summary = "QA: ${verdict ?: "no verdict"}", video = clip?.path,
+            detail = trail.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n").ifBlank { null })
     }
 }
 
