@@ -12,6 +12,7 @@ import app.kiln.device.Device
 import app.kiln.device.UiNode
 import app.kiln.device.Warden
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
@@ -586,7 +587,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         suspend fun visible(text: String) = device.find(device.uiTree(pkg), text) != null
         for ((i, st) in steps.withIndex()) {
             val n = i + 1
-            val (ok, what) = runCatching { step(ctx, pkg, st, ::visible) }.getOrElse { false to "error: ${it.message}" }
+            val (ok, what) = runCatching { step(ctx, pkg, normalizeStep(st), ::visible) }.getOrElse { false to "error: ${it.message}" }
             report.append(if (ok) "$n ✓ " else "$n ✗ ").append(what).append('\n')
             if (!ok) { failed++; if (!keepGoing) { report.append("stopped at step $n of ${steps.size}\n"); break } }
         }
@@ -637,6 +638,35 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
             return false to "expected “$t” to be gone — still on screen"
         }
         st["wait_ms"]?.toString()?.toLongOrNull()?.let { ms -> delay(ms.coerceIn(0, 10_000)); return true to "waited ${ms}ms" }
-        return false to "unknown step ${st}"
+        return false to "unknown step ${st} — use tap, type (+ into), swipe (+ on), key, expect, expect_gone or wait_ms"
+    }
+
+    /**
+     * Steps the way models actually write them: tool names as keys (type_text, press_key, wait_for),
+     * objects instead of strings ({"tap": {"text": "Add"}}), and field names like id/field/target.
+     */
+    private fun normalizeStep(st: JsonObject): JsonObject {
+        val alias = mapOf("type_text" to "type", "input" to "type", "enter" to "type", "press_key" to "key", "press" to "key",
+            "back" to "key", "wait" to "wait_ms", "sleep" to "wait_ms", "wait_for" to "expect", "assert" to "expect",
+            "see" to "expect", "expect_text" to "expect", "assert_gone" to "expect_gone", "expect_not" to "expect_gone",
+            "click" to "tap", "press_button" to "tap", "target" to "tap", "direction" to "swipe")
+        val out = LinkedHashMap<String, JsonElement>()
+        for ((k0, v) in st) {
+            val k = alias[k0] ?: k0
+            if (v is JsonObject) {
+                // {"tap": {"text": "Add"}} / {"type": {"text": "500", "into": "Amount"}} / {"swipe": {"direction": "left", "on": "Lunch"}}
+                val main = listOf("text", "target", "label", "value", "name", "direction", "key", "ms").firstNotNullOfOrNull { v.str(it) }
+                if (main != null) out[k] = JsonPrimitive(main)
+                v.str("into")?.let { out["into"] = JsonPrimitive(it) }
+                listOf("field", "id", "in", "on_field").firstNotNullOfOrNull { v.str(it) }?.let { if (k == "type") out["into"] = JsonPrimitive(it) }
+                v.str("on")?.let { out["on"] = JsonPrimitive(it) }
+                v["replace"]?.let { out["replace"] = it }
+                v["timeout_ms"]?.let { out["timeout_ms"] = it }
+            } else out[k] = v
+        }
+        if (st.containsKey("back") && out["key"] !is JsonPrimitive) out["key"] = JsonPrimitive("BACK")
+        // {"type": "500", "field": "Amount"} at the top level.
+        if ("type" in out && "into" !in out) listOf("field", "id", "in", "target").firstNotNullOfOrNull { st.str(it) }?.let { out["into"] = JsonPrimitive(it) }
+        return JsonObject(out)
     }
 }

@@ -496,6 +496,14 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 if (similar.isNotEmpty()) out += "'$n' isn't declared in this project. Did you mean ${similar.joinToString(" or ") { "'$it'" }}? Use the existing name, or declare $n."
             }
         }
+        // `it.id` on the app's own item type: the id lives on the KCollection row, not the item.
+        Regex("unresolved reference '(id|value)' on receiver of type '(\\w+)'").find(m)?.let { r ->
+            val (field, type) = r.destructured
+            if (type in declared || "KCollection" in project.files().filter { it.extension == "kt" }.joinToString { it.readText() })
+                out += if (field == "id") "$type has no `id`: a KCollection keeps ids on its rows. Use `Repo.x.rows` (KRow<$type>: row.id, row.value) where you need ids — " +
+                    "`items(rows, key = { it.id }) { row -> … row.value.amount … }`, `Repo.x.update(row.id, …)`, `Repo.x.delete(row.id)`, `Repo.x.get(id)`; `.items` is plain $type values without ids."
+                else "$type has no `value`: you already have the item itself here (`.items` gives $type). `.value` is on KRow, from `.rows`."
+        }
         if ("AutoMirrored" in src && ("receiver type mismatch" in m || "unresolved reference" in m))
             out += "Icons.AutoMirrored.Filled.* only has direction-sensitive icons (ArrowBack, ArrowForward, List, Send, Logout, Undo…). Use Icons.Filled.X for everything else — the deprecation warning on Icons.Filled.List etc. is harmless."
         if ("cannot infer type for type parameter" in m || "uninferred" in m) {

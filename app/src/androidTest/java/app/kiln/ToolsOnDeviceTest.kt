@@ -209,6 +209,8 @@ fun Bar() { KToolbar(title = \"x\") }
             // A whole journey in one call; a failing expectation names what is on screen instead.
             Case("test_flow", """{"steps":[{"expect":"Built on this phone"},{"tap":"Built on this phone with Kiln."},{"expect_gone":"Nothing like this","timeout_ms":500},{"wait_ms":100}]}""", expect = "all 4 steps passed", images = true),
             Case("test_flow", """{"steps":[{"expect":"No such text anywhere","timeout_ms":500},{"tap":"x"}]}""", expectError = true, expect = "stopped at step 1"),
+            // Steps written the way run 7's model wrote them: tool names as keys, objects instead of strings.
+            Case("test_flow", """{"steps":[{"wait_for":{"text":"Built on this phone"}},{"tap":{"text":"Built on this phone with Kiln."}},{"wait":{"ms":"100"}}]}""", expect = "all 3 steps passed"),
             Case("swipe", """{"direction":"up"}"""),
             Case("press_key", """{"key":"BACK"}"""),
             Case("launch", "{}"),
