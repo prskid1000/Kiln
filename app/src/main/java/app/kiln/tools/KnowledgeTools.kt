@@ -107,6 +107,27 @@ class ClassIndex(private val toolchain: Toolchain) {
     /** The kit catalog's exact signature for [name] (KTextField, KHttp.get…), or null. */
     fun kitSignature(name: String): String? = kitSigs[name]
 
+    /** Kit names close to [name] (for a K… name that doesn't exist), with what each is. */
+    fun similarKitNames(name: String, limit: Int = 3): List<String> {
+        val base = name.removePrefix("K").lowercase()
+        // Common inventions mapped to what the kit actually has.
+        val known = mapOf("toolbar" to "KilnScreen", "topbar" to "KilnScreen", "appbar" to "KilnScreen", "scaffold" to "KilnScreen",
+            "header" to "KSection", "title" to "KSection", "label" to "KLabeled", "input" to "KTextField", "edittext" to "KTextField",
+            "dropdown" to "KSelect", "picker" to "KSelect", "list" to "KCrudList", "listitem" to "KListRow", "row" to "KListRow",
+            "dialogbutton" to "KDialog", "modal" to "KDialog", "sheet" to "KBottomSheet", "snackbar" to "rememberKToast",
+            "toast" to "rememberKToast", "progress" to "KProgressBar", "loader" to "KSpinner", "navbar" to "KBottomBar",
+            "tabs" to "KilnTabs", "tabbar" to "KilnTabs", "tab" to "KilnTabs", "fab" to "KFab", "toggle" to "KSwitch",
+            "checkbox" to "KCheckbox", "radio" to "KRadioGroup", "card" to "KCardBox", "divider" to "KDivider", "image" to "KImage")
+        val hinted = known.entries.filter { (k, _) -> base.startsWith(k) || base.endsWith(k) }.map { it.value }
+        fun grams(s: String) = s.lowercase().windowed(2).toSet()
+        val g = grams(name)
+        val scored = kitSigs.keys.filter { it.startsWith("K") && '.' !in it && it != name }
+            .map { it to (if (grams(it).isEmpty() || g.isEmpty()) 0.0 else 2.0 * (grams(it) intersect g).size / (grams(it).size + g.size)) }
+            .filter { it.second >= 0.45 }.sortedByDescending { it.second }.map { it.first }
+        return (hinted + scored).distinct().filter { it in kitSigs }.take(limit)
+            .map { n -> "$n — " + kitSigs[n]!!.substringAfter("fun ").substringAfter("class ").take(90) }
+    }
+
     fun uniqueClass(name: String, line: String = ""): String? {
         COMMON_FUNCTIONS[name]?.let { return it }
         ensure()
@@ -465,6 +486,11 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
         val m = e.message; val src = e.source.orEmpty()
         Regex("unresolved reference '([A-Z]\\w*)'").find(m)?.groupValues?.get(1)?.let { n ->
             outside[n]?.let { f -> out += "$n is declared in ${project.rel(f)}, which is outside src/ so it isn't compiled: move it under src/ (the package directory)." }
+            // A K… name that's neither in the project nor in the kit was invented: say what exists instead.
+            if (n.startsWith("K") && n.length > 2 && n[1].isUpperCase() && index?.kitSignature(n) == null && n !in declared && n !in outside) {
+                val alt = index?.similarKitNames(n).orEmpty()
+                out += "$n isn't in the kit." + (if (alt.isEmpty()) " Search for what exists: kit_search." else " Closest:\n      " + alt.joinToString("\n      "))
+            }
             if (!src.contains("Icons.") && n !in outside) {
                 val similar = declared.filter { it != n && (it.startsWith(n.take(4)) || n.startsWith(it.take(4)) || similarity(it, n) >= 0.6) }.take(3)
                 if (similar.isNotEmpty()) out += "'$n' isn't declared in this project. Did you mean ${similar.joinToString(" or ") { "'$it'" }}? Use the existing name, or declare $n."

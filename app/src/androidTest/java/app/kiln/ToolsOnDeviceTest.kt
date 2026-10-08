@@ -171,6 +171,17 @@ class ToolsOnDeviceTest {
             Case("read_file", """{"path":"$src/ui/Use.kt"}""", expect = "import kiln.app.tooltest.data.Helper"),
             Case("delete", """{"path":"$src/data"}"""),
             Case("delete", """{"path":"$src/ui"}"""),
+            // An invented kit component is named as such, with what the kit has instead.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest
+
+import androidx.compose.runtime.Composable
+
+@Composable
+fun Bar() { KToolbar(title = \"x\") }
+"}"""),
+            Case("check", "{}", expectError = true, expect = "KToolbar isn't in the kit. Closest:"),
+            Case("check", "{}", expectError = true, expect = "KilnScreen"),
+            Case("delete", """{"path":"$src/Bad.kt"}"""),
             // Kotlin outside src/ is refused before it's written.
             Case("write_file", """{"path":"ui/Stray.kt","content":"package x\n"}""", expectError = true, expect = "must be under src/"),
             // A misspelt project symbol gets a "did you mean".
