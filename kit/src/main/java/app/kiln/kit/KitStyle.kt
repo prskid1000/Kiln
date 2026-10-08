@@ -76,15 +76,17 @@ fun Modifier.kSurface(shape: Shape, fill: Color, border: Color? = null, neutral:
             }.clip(shape).background(base)
         }
         KStyle.Brutalist -> {
-            val ink = Nocturne.text
-            // On dark themes a white offset shadow glares; the accent keeps it bold without the glare.
-            val drop = if (Nocturne.isDark) Nocturne.accent else ink
+            // Bold outlines and hard shadows in the theme's own colour (not black/white): a deep accent on
+            // light themes, a light accent on dark ones.
+            val ink = if (Nocturne.isDark) androidx.compose.ui.graphics.lerp(Nocturne.accent, Color.White, 0.35f)
+                else androidx.compose.ui.graphics.lerp(Nocturne.accent, Nocturne.text, 0.45f)
+            val drop = if (Nocturne.isDark) Nocturne.accent.copy(alpha = 0.9f) else ink
             this.drawBehind {
                 val outline = shape.createOutline(size, layoutDirection, this)
                 val o = 4.dp.toPx()
                 translate(o, o) { drawOutline(outline, drop) }
             }.clip(shape).background(if (neutral && fill.alpha < 1f) Nocturne.surface.copy(alpha = 1f) else fill.compositeOver(Nocturne.bg.copy(alpha = 1f)))
-                .border(2.dp, if (Nocturne.isDark) ink.copy(alpha = 0.85f) else ink, shape)
+                .border(2.dp, ink, shape)
         }
     }
 }
