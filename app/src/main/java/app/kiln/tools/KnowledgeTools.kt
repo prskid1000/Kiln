@@ -509,3 +509,28 @@ private fun similarity(a: String, b: String): Double {
     val x = grams(a); val y = grams(b)
     return if (x.isEmpty() || y.isEmpty()) 0.0 else 2.0 * (x intersect y).size / (x.size + y.size)
 }
+
+/** What usually causes a runtime crash and how to fix it, for the crashes models hit most. */
+fun crashHints(crash: String): String {
+    val out = linkedSetOf<String>()
+    fun has(t: String) = t in crash
+    if (has("measured with an infinity maximum height") || has("measured with an infinity maximum width"))
+        out += "A LazyColumn/LazyRow/grid is inside a scrolling Column (verticalScroll) or another lazy list: use ONE LazyColumn for the whole screen (put the header items in item { … }), or give the inner list a fixed height."
+    if (Regex("lateinit property \\w+ has not been initialized").containsMatchIn(crash))
+        out += "A lateinit store was read before it was set. Make stores plain values instead: object Repo { val items = KCollection<Item>(\"items\"); val settings = KStore(\"settings\", Settings()) } — no Context or init call needed."
+    if (has("NetworkOnMainThreadException"))
+        out += "Network on the main thread: call KHttp.get/post (suspend) from a coroutine (LaunchedEffect / rememberCoroutineScope().launch)."
+    if (has("Key \"") && has("was already used"))
+        out += "Two LazyColumn items have the same key: use a unique, stable key (the row id), not the title or index."
+    if (has("NumberFormatException"))
+        out += "Parsing text as a number threw: use toDoubleOrNull()/toIntOrNull() and show an error for invalid input."
+    if (has("SerializationException") || has("JsonDecodingException"))
+        out += "JSON didn't match the @Serializable class: add defaults for optional fields; KJson ignores unknown keys."
+    if (has("SecurityException") && has("permission"))
+        out += "Missing permission: add it to kiln.json (set_app_meta permissions) and request runtime ones with rememberPermission before use."
+    if (has("IndexOutOfBoundsException"))
+        out += "Index out of range: guard list access (getOrNull) — lists can be empty on first launch."
+    if (has("ClassCastException") && has("Parcelable"))
+        out += "Saved state held a type it can't restore: keep rememberSaveable to simple values (String, Int, Boolean) or use rememberStored."
+    return if (out.isEmpty()) "" else "Likely cause:\n" + out.joinToString("\n") { "  • $it" } + "\n"
+}

@@ -279,7 +279,7 @@ class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device, private 
             if (fixed.isNotEmpty()) append(fixed)
             // Bugs the compiler accepts (e.g. "$items.size") — the screenshot alone won't make them obvious.
             r.warnings.filter { it.tool == "kiln-lint" }.take(10).forEach { appendLine("WARNING [kiln-lint] ${it.file}:${it.line} ${it.message}") }
-            if (crash != null) { appendLine("CRASH:"); appendLine(crash) }
+            if (crash != null) { appendLine("CRASH:"); appendLine(crash); append(crashHints(crash)) }
             if (logs.isNotBlank()) { appendLine("log (W and above since launch):"); appendLine(logs.lines().takeLast(40).joinToString("\n")) }
             if (tree.isNotEmpty()) { appendLine("screen:"); appendLine(treeText(tree).lines().take(80).joinToString("\n")) }
         }
@@ -352,7 +352,7 @@ class LastCrashTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val schema = schema { }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.READ_ONLY)
     override suspend fun exec(ctx: ToolContext, input: JsonObject) =
-        device.lastCrash(pkg(ctx), null)?.let { ToolResult.ok(it, "crash found") } ?: ToolResult.ok("no crash recorded")
+        device.lastCrash(pkg(ctx), null)?.let { ToolResult.ok(it + "\n" + crashHints(it), "crash found") } ?: ToolResult.ok("no crash recorded")
 }
 
 class ScreenshotTool(w: Warden, d: Device) : DeviceTool(w, d) {

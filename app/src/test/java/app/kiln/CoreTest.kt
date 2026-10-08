@@ -32,6 +32,38 @@ import java.util.zip.ZipOutputStream
 
 class CoreTest {
 
+    @Test fun `runtime crashes get a likely cause`() {
+        assertTrue(app.kiln.tools.crashHints("java.lang.IllegalStateException: Vertically scrollable component was measured with an infinity maximum height constraints").contains("ONE LazyColumn"))
+        assertTrue(app.kiln.tools.crashHints("kotlin.UninitializedPropertyAccessException: lateinit property expenses has not been initialized").contains("plain values"))
+        assertEquals("", app.kiln.tools.crashHints("java.lang.RuntimeException: something else"))
+    }
+
+    @Test fun `lint flags a lazy list inside a scrolling column`() {
+        val dir = kotlin.io.path.createTempDirectory("lint").toFile()
+        File(dir, "src/a").mkdirs()
+        File(dir, "src/a/S.kt").writeText("""
+            package a
+            fun S() {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("hi")
+                    LazyColumn { }
+                }
+            }
+        """.trimIndent())
+        File(dir, "src/a/Ok.kt").writeText("""
+            package a
+            fun Ok() {
+                Column(Modifier.verticalScroll(rememberScrollState())) { Text("x") }
+                LazyColumn { }
+            }
+        """.trimIndent())
+        val d = app.kiln.build.Lint.run(app.kiln.build.Project(dir))
+        assertEquals(1, d.count { "inside a verticalScroll" in it.message })
+        assertTrue(d.first { "inside a verticalScroll" in it.message }.file!!.endsWith("S.kt"))
+        dir.deleteRecursively()
+    }
+
+
     @Test fun `the picked look is written into the template MainActivity`() {
         val dir = kotlin.io.path.createTempDirectory("look").toFile()
         val tpl = File("../toolchain/templates/compose/src/MainActivity.kt").readText().replace("{{package}}", "kiln.app.demo").replace("{{label}}", "Demo")

@@ -75,6 +75,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.text.font.FontWeight
@@ -309,7 +311,9 @@ fun KTextField(
         OutlinedTextField(
             value = value,
             onValueChange = { v -> if (maxLength == null || v.length <= maxLength) onChange(v) },
-            modifier = Modifier.fillMaxWidth().kSize(height = height),
+            // Named for TalkBack and UI automation: tap("Amount") / type_text(target = "Amount") find it.
+            modifier = Modifier.fillMaxWidth().kSize(height = height)
+                .semantics { (label ?: placeholder)?.let { contentDescription = it } },
             label = label?.let { { Text(it) } },
             placeholder = placeholder?.let { { Text(it) } },
             leadingIcon = leadingIcon?.let { { Icon(it, null) } },
@@ -359,7 +363,7 @@ fun KSearchBar(query: String, onQuery: (String) -> Unit, modifier: Modifier = Mo
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) Text(hint, color = Nocturne.textMuted, fontSize = kt(15))
             BasicTextField(query, onQuery, singleLine = true, cursorBrush = SolidColor(Nocturne.accent),
-                textStyle = TextStyle(color = Nocturne.text, fontSize = kt(15)), modifier = Modifier.fillMaxWidth())
+                textStyle = TextStyle(color = Nocturne.text, fontSize = kt(15)), modifier = Modifier.fillMaxWidth().semantics { contentDescription = hint })
         }
         if (query.isNotEmpty()) IconButton({ onQuery("") }, Modifier.size(32.dp)) { Icon(Icons.Filled.Clear, "Clear search", tint = Nocturne.textMuted) }
         trailing?.invoke()
@@ -373,7 +377,7 @@ fun KOtpField(code: String, onChange: (String) -> Unit, modifier: Modifier = Mod
     Box(modifier) {
         BasicTextField(code, { v -> val d = v.filter(Char::isDigit).take(length); onChange(d) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            modifier = Modifier.focusRequester(focus).size(1.dp), textStyle = TextStyle(color = Color.Transparent))
+            modifier = Modifier.focusRequester(focus).size(1.dp).semantics { contentDescription = "Code" }, textStyle = TextStyle(color = Color.Transparent))
         Row(Modifier.clickable { focus.requestFocus() }, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             repeat(length) { i ->
                 val active = i == code.length
