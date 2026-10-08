@@ -78,10 +78,13 @@ fun KMap(
     corner: Dp = kr(16),
     onTap: ((KLatLng) -> Unit)? = null,
     onLongPress: ((KLatLng) -> Unit)? = null,
+    /** Called when the user pans or zooms: the new centre and zoom (e.g. to load places in view). */
+    onMove: ((center: KLatLng, zoom: Double) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val tap by rememberUpdatedState(onTap)
     val long by rememberUpdatedState(onLongPress)
+    val moved by rememberUpdatedState(onMove)
     val map = remember {
         Configuration.getInstance().apply {
             userAgentValue = context.packageName
@@ -95,7 +98,16 @@ fun KMap(
             controller.setCenter(GeoPoint(center.lat, center.lng))
         }
     }
-    DisposableEffect(map) { map.onResume(); onDispose { map.onPause(); map.onDetach() } }
+    DisposableEffect(map) {
+        val listener = object : org.osmdroid.events.MapListener {
+            fun report(): Boolean { moved?.invoke(KLatLng(map.mapCenter.latitude, map.mapCenter.longitude), map.zoomLevelDouble); return false }
+            override fun onScroll(event: org.osmdroid.events.ScrollEvent?) = report()
+            override fun onZoom(event: org.osmdroid.events.ZoomEvent?) = report()
+        }
+        map.addMapListener(org.osmdroid.events.DelayedMapListener(listener, 250))
+        map.onResume()
+        onDispose { map.onPause(); map.onDetach() }
+    }
     var lastCenter by remember { mutableStateOf(center) }
     // OpenStreetMap's tile policy requires this credit on the map.
     androidx.compose.foundation.layout.Box(modifier.fillMaxWidth().then(if (height != null) Modifier.height(height) else Modifier).clip(RoundedCornerShape(corner))) {

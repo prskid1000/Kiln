@@ -60,6 +60,8 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.pinch
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -79,6 +81,13 @@ import java.time.LocalTime
 @RunWith(AndroidJUnit4::class)
 class ComponentsOnDeviceTest {
     @get:Rule val rule = createComposeRule()
+
+    /** A long suite outlasts the screen timeout; a sleeping screen has no compose hierarchy to test. */
+    @org.junit.Before fun wake() {
+        val ui = InstrumentationRegistry.getInstrumentation().uiAutomation
+        ui.executeShellCommand("input keyevent KEYCODE_WAKEUP").close()
+        ui.executeShellCommand("wm dismiss-keyguard").close()
+    }
 
     private fun show(content: @Composable () -> Unit) = rule.setContent {
         KilnTheme { Surface(Modifier.fillMaxSize(), color = Nocturne.bg) { Column(Modifier.padding(16.dp)) { content() } } }
@@ -344,21 +353,40 @@ class ComponentsOnDeviceTest {
     }
 
     @Test fun mapsSvgAndScreen() {
-        var tapped = false
+        var tapped: KLatLng? = null; var markerHit = false
+        val moves = mutableListOf<Pair<KLatLng, Double>>()
         show {
             KilnScreen("Screen title") { p ->
                 Column(Modifier.padding(p), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    KMap(KLatLng(52.5163, 13.3777), zoom = 14.0, height = 260.dp, markers = listOf(KMarker(KLatLng(52.5163, 13.3777), "Gate")),
-                        route = listOf(KLatLng(52.5163, 13.3777), KLatLng(52.52, 13.39)), onTap = { tapped = true }, modifier = Modifier.testTag("map"))
+                    KMap(KLatLng(52.5163, 13.3777), zoom = 14.0, height = 260.dp,
+                        markers = listOf(KMarker(KLatLng(52.5163, 13.3777), "Gate") { markerHit = true }),
+                        route = listOf(KLatLng(52.5163, 13.3777), KLatLng(52.52, 13.39)), onTap = { tapped = it },
+                        onMove = { c, z -> moves += c to z }, modifier = Modifier.testTag("map"))
                     KSvg("file:///android_asset/test.svg", "Test art", Modifier.size(96.dp))
                     KImage("https://picsum.photos/seed/kiln/600/300", "Photo", aspectRatio = 2f)
                 }
             }
         }
         rule.onNodeWithText("Screen title").assertIsDisplayed(); rule.onNodeWithText("© OpenStreetMap contributors").assertIsDisplayed()
-        rule.onNodeWithTag("map").assertIsDisplayed().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.2f, height * 0.8f)) }
-        Thread.sleep(4000)                                          // let tiles and images load for the screenshot
+        val map = rule.onNodeWithTag("map").assertIsDisplayed()
+        // Tap the map away from the marker: onTap gets a real coordinate near the centre.
+        map.performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.2f, height * 0.8f)) }
+        rule.waitUntil(4000) { tapped != null }
+        assertTrue("tap at $tapped", tapped!!.lat in 52.4..52.6 && tapped!!.lng in 13.2..13.5)
+        // Tap the marker (it sits at the centre): its onClick runs.
+        map.performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 2f, height / 2f - 20f)) }
+        rule.waitUntil(4000) { markerHit }
+        // Drag pans: the centre moves.
+        map.performTouchInput { swipe(androidx.compose.ui.geometry.Offset(width * 0.7f, height * 0.5f), androidx.compose.ui.geometry.Offset(width * 0.2f, height * 0.5f), 400) }
+        rule.waitUntil(5000) { moves.any { it.first.lng > 13.385 } }       // swiping left moves the view east
+        // Pinch out zooms in.
+        val zoomBefore = moves.last().second
+        map.performTouchInput {
+            pinch(androidx.compose.ui.geometry.Offset(width * 0.45f, height * 0.5f), androidx.compose.ui.geometry.Offset(width * 0.25f, height * 0.5f),
+                androidx.compose.ui.geometry.Offset(width * 0.55f, height * 0.5f), androidx.compose.ui.geometry.Offset(width * 0.75f, height * 0.5f), 500)
+        }
+        rule.waitUntil(5000) { moves.last().second > zoomBefore + 0.2 }
+        Thread.sleep(2500)                                          // let tiles and images load for the screenshot
         rule.waitForIdle(); shot("map_svg")
-        rule.waitUntil(3000) { tapped }
     }
 }
