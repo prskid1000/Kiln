@@ -89,6 +89,7 @@ class ReadFileTool : Tool {
 }
 
 class WriteFileTool : Tool {
+    override fun precheck(input: JsonObject): String? = misplacedSource(input.str("path"))
     override val name = "write_file"
     override val description = "Create a file or replace its whole content. For changes to an existing file prefer edit_file (smaller, safer)."
     override val schema = schema {
@@ -227,4 +228,12 @@ internal fun occurrences(text: String, needle: String): Int {
     var n = 0; var at = text.indexOf(needle)
     while (at >= 0) { n++; at = text.indexOf(needle, at + needle.length) }
     return n
+}
+
+/** Kotlin outside src/ is never compiled: say so before the file is written, with the right path. */
+internal fun misplacedSource(path: String?): String? {
+    val p = path?.replace('\\', '/')?.trimStart('/') ?: return null
+    if (!p.endsWith(".kt") || p.startsWith("src/")) return null
+    return "Kotlin sources must be under src/ (the app's package directory, e.g. src/kiln/app/<name>/$p) or they won't be compiled. " +
+        "Write it there instead — project_info shows the package."
 }

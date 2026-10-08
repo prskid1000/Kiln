@@ -158,6 +158,12 @@ class ToolsOnDeviceTest {
             Case("check", "{}", expect = "auto-fixed imports"),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.material.icons.filled.Settings"),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.material3.Icon\n"),
+            // Lower-case Compose functions are imported too; a wrong kit parameter shows the real signature.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\nimport kotlinx.coroutines.flow.MutableStateFlow\n\n@Composable\nfun Probe2() {\n    val s = MutableStateFlow(1).collectAsStateWithLifecycle()\n    app.kiln.kit.KButton(\n        labelText = \"x\",\n    ) {}\n}\n"}"""),
+            Case("check", "{}", expectError = true, expect = "KButton has no parameter 'labelText' — its signature is: fun KButton("),
+            Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.lifecycle.compose.collectAsStateWithLifecycle"),
+            // Kotlin outside src/ is refused before it's written.
+            Case("write_file", """{"path":"ui/Stray.kt","content":"package x\n"}""", expectError = true, expect = "must be under src/"),
             // A misspelt project symbol gets a "did you mean".
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nfun HomeScreen() = 1\nfun probe() = HomeScren()\n"}"""),
             Case("check", "{}", expectError = true, expect = "Did you mean 'HomeScreen'"),

@@ -81,17 +81,24 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     var r = builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) }
     fun linted(b: BuildResult) = b.copy(diagnostics = b.diagnostics + app.kiln.build.Lint.run(ctx.project))
     if (r.ok) return linted(r) to ""
-    val unresolved = Regex("unresolved reference '([A-Z][A-Za-z0-9_]*)'")
+    val unresolved = Regex("unresolved reference '([A-Za-z][A-Za-z0-9_]*)'")
+    val wrongIcon = Regex("candidate 'val Icons\\.(?:(AutoMirrored)\\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\\.(\\w+): ImageVector' is inapplicable because of a receiver type mismatch")
     val fixes = linkedSetOf<String>()
     // Kotlin reports Icons.Filled.Settings's 'Settings' only once 'Icons' resolves: up to three passes.
     for (pass in 1..3) {
     val before = fixes.size
     for (e in r.errors) {
-        val name = unresolved.find(e.message)?.groupValues?.get(1) ?: continue
+        val icon = wrongIcon.find(e.message)
+        val name = icon?.groupValues?.get(3) ?: unresolved.find(e.message)?.groupValues?.get(1) ?: continue
+        if (name[0].isLowerCase() && name !in setOf("collectAsStateWithLifecycle", "collectAsState", "rememberSaveable", "mutableStateOf",
+                "mutableIntStateOf", "mutableFloatStateOf", "mutableStateListOf", "derivedStateOf", "rememberCoroutineScope", "viewModel",
+                "viewModelScope", "stringResource", "painterResource", "dp", "sp", "rememberScrollState", "verticalScroll", "horizontalScroll",
+                "clickable", "background", "border", "clip", "rememberLazyListState")) continue
         val path = e.file ?: continue
         val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
         if (!f.isFile || f.extension != "kt") continue
-        val fq = index.uniqueClass(name, e.source ?: "") ?: continue
+        val fq = (if (icon != null) "androidx.compose.material.icons." + (if (icon.groupValues[1].isNotEmpty()) "automirrored." else "") +
+            icon.groupValues[2].lowercase() + "." + name else index.uniqueClass(name, e.source ?: "")) ?: continue
         val text = f.readText()
         val stale = Regex("(?m)^import\\s+[\\w.]+\\.$name\\s*$")
         val fixed = when {
@@ -130,7 +137,7 @@ class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = true)
         ctx.state.lastBuild = r
-        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project), isError = !r.ok,
+        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project, index), isError = !r.ok,
             summary = if (r.ok) (if (fixed.isEmpty()) "check OK" else "check OK · auto-fixed imports") else "${r.errors.size} errors")
     }
 }
@@ -144,7 +151,7 @@ class BuildTool(private val builds: BuildEngine, private val index: ClassIndex) 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project) + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
+        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project, index) + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
             isError = !r.ok, summary = if (r.ok) "build OK ${r.totalMs}ms" else "${r.errors.size} errors")
     }
 }
@@ -204,7 +211,7 @@ class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device, private 
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        if (!r.ok) return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project), isError = true, summary = "${r.errors.size} build errors")
+        if (!r.ok) return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project, index), isError = true, summary = "${r.errors.size} build errors")
         val pkg = pkg(ctx)
         ctx.progress("install")
         val inst = device.install(File(r.apk!!))

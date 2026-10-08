@@ -293,6 +293,8 @@ fun KTextField(
     maxLength: Int? = null,
     password: Boolean = false,
     keyboard: KeyboardType = KeyboardType.Text,
+    /** The standard Compose options; wins over [keyboard] and [password]'s keyboard when given. */
+    keyboardOptions: KeyboardOptions? = null,
     enabled: Boolean = true,
     readOnly: Boolean = false,
     width: Dp? = null,
@@ -320,7 +322,7 @@ fun KTextField(
             singleLine = singleLine, minLines = minLines, maxLines = maxLines,
             enabled = enabled, readOnly = readOnly,
             visualTransformation = if (password && !reveal) PasswordVisualTransformation() else VisualTransformation.None,
-            keyboardOptions = KeyboardOptions(keyboardType = if (password && keyboard == KeyboardType.Text) KeyboardType.Password else keyboard),
+            keyboardOptions = keyboardOptions ?: KeyboardOptions(keyboardType = if (password && keyboard == KeyboardType.Text) KeyboardType.Password else keyboard),
             shape = RoundedCornerShape(corner),
             textStyle = textStyle ?: MaterialTheme.typography.bodyLarge,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = colors?.border ?: Nocturne.accent,
@@ -340,9 +342,10 @@ fun KTextField(
 /** Multi-line text area (notes, descriptions). */
 @Composable
 fun KTextArea(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, label: String? = null,
-              placeholder: String? = null, minLines: Int = 4, maxLines: Int = 10, maxLength: Int? = null, height: Dp? = null) =
+              placeholder: String? = null, minLines: Int = 4, maxLines: Int = 10, maxLength: Int? = null, height: Dp? = null,
+              keyboard: KeyboardType = KeyboardType.Text, keyboardOptions: KeyboardOptions? = null) =
     KTextField(value, onChange, modifier, label = label, placeholder = placeholder, singleLine = false,
-        minLines = minLines, maxLines = maxLines, maxLength = maxLength, height = height)
+        minLines = minLines, maxLines = maxLines, maxLength = maxLength, height = height, keyboard = keyboard, keyboardOptions = keyboardOptions)
 
 /** Search bar with a clear button; [onSubmit] runs on the keyboard's search action. */
 @Composable

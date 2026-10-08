@@ -93,7 +93,22 @@ class ClassIndex(private val toolchain: Toolchain) {
      * Only app-facing namespaces count, and the first group (kit, Compose, AndroidX, …) that has
      * candidates must have exactly one.
      */
+    private val kitSigs: Map<String, String> by lazy {
+        runCatching {
+            (kotlinx.serialization.json.Json.parseToJsonElement(toolchain.kitCatalog()) as kotlinx.serialization.json.JsonArray).mapNotNull { el ->
+                val o = el as JsonObject
+                val n = (o["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
+                val sig = (o["signature"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
+                n to sig
+            }.toMap()
+        }.getOrDefault(emptyMap())
+    }
+
+    /** The kit catalog's exact signature for [name] (KTextField, KHttp.get…), or null. */
+    fun kitSignature(name: String): String? = kitSigs[name]
+
     fun uniqueClass(name: String, line: String = ""): String? {
+        COMMON_FUNCTIONS[name]?.let { return it }
         ensure()
         val groups = listOf("app.kiln.kit.", "androidx.compose.", "androidx.", "kotlinx.", "kotlin.", "android.")
         val all = (where.keys.asSequence() + topLevel.asSequence())
@@ -374,17 +389,50 @@ private fun type(t: String): String = when {
         "B" -> "Byte"; "C" -> "Char"; "S" -> "Short"; else -> t }
 }
 
+/** Lower-case top-level functions and properties models use without importing (not facades named after them). */
+private val COMMON_FUNCTIONS = mapOf(
+    "collectAsStateWithLifecycle" to "androidx.lifecycle.compose.collectAsStateWithLifecycle",
+    "collectAsState" to "androidx.compose.runtime.collectAsState",
+    "rememberSaveable" to "androidx.compose.runtime.saveable.rememberSaveable",
+    "mutableStateOf" to "androidx.compose.runtime.mutableStateOf",
+    "mutableIntStateOf" to "androidx.compose.runtime.mutableIntStateOf",
+    "mutableFloatStateOf" to "androidx.compose.runtime.mutableFloatStateOf",
+    "mutableStateListOf" to "androidx.compose.runtime.mutableStateListOf",
+    "derivedStateOf" to "androidx.compose.runtime.derivedStateOf",
+    "rememberCoroutineScope" to "androidx.compose.runtime.rememberCoroutineScope",
+    "viewModel" to "androidx.lifecycle.viewmodel.compose.viewModel",
+    "viewModelScope" to "androidx.lifecycle.viewModelScope",
+    "stringResource" to "androidx.compose.ui.res.stringResource",
+    "painterResource" to "androidx.compose.ui.res.painterResource",
+    "dp" to "androidx.compose.ui.unit.dp",
+    "sp" to "androidx.compose.ui.unit.sp",
+    "rememberScrollState" to "androidx.compose.foundation.rememberScrollState",
+    "verticalScroll" to "androidx.compose.foundation.verticalScroll",
+    "horizontalScroll" to "androidx.compose.foundation.horizontalScroll",
+    "clickable" to "androidx.compose.foundation.clickable",
+    "background" to "androidx.compose.foundation.background",
+    "border" to "androidx.compose.foundation.border",
+    "clip" to "androidx.compose.ui.draw.clip",
+    "rememberLazyListState" to "androidx.compose.foundation.lazy.rememberLazyListState",
+)
+
 private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.""")
 
 /**
  * Plain-language hints for compile errors that trap models in loops: one line per kind of mistake,
  * with what to do instead. Seen in benchmark runs; each cost a local model dozens of steps.
  */
-fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Project): String {
+fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Project, index: ClassIndex? = null): String {
     if (build.ok) return ""
     val out = linkedSetOf<String>()
+    val srcDir = java.io.File(project.dir, "src")
+    fun declaredIn(files: List<java.io.File>) = files.flatMap { f ->
+        Regex("""(?m)^\s*(?:@\w+\s+)*(?:(?:private|internal|data|sealed|enum|abstract|open)\s+)*(?:fun|class|object|interface|val|var)\s+([A-Z]\w*)""")
+            .findAll(f.readText()).map { it.groupValues[1] to f }
+    }
+    val outside by lazy { declaredIn(project.files().filter { it.extension == "kt" && !it.path.startsWith(srcDir.path) }).toMap() }
     val declared by lazy {
-        project.files().filter { it.extension == "kt" }.flatMap { f ->
+        project.files().filter { it.extension == "kt" && it.path.startsWith(srcDir.path) }.flatMap { f ->
             Regex("""(?m)^\s*(?:@\w+\s+)*(?:(?:private|internal|data|sealed|enum|abstract|open)\s+)*(?:fun|class|object|interface|val|var)\s+([A-Z]\w*)""")
                 .findAll(f.readText()).map { it.groupValues[1] }
         }.toSet()
@@ -392,7 +440,8 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
     for (e in build.errors) {
         val m = e.message; val src = e.source.orEmpty()
         Regex("unresolved reference '([A-Z]\\w*)'").find(m)?.groupValues?.get(1)?.let { n ->
-            if (!src.contains("Icons.")) {
+            outside[n]?.let { f -> out += "$n is declared in ${project.rel(f)}, which is outside src/ so it isn't compiled: move it under src/ (the package directory)." }
+            if (!src.contains("Icons.") && n !in outside) {
                 val similar = declared.filter { it != n && (it.startsWith(n.take(4)) || n.startsWith(it.take(4)) || similarity(it, n) >= 0.6) }.take(3)
                 if (similar.isNotEmpty()) out += "'$n' isn't declared in this project. Did you mean ${similar.joinToString(" or ") { "'$it'" }}? Use the existing name, or declare $n."
             }
@@ -406,15 +455,43 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
         }
         if ("'return' is prohibited here" in m || "Label must be named" in m)
             out += "Inside a lambda, `return` can't leave the composable: use `return@onClick` (the lambda's label) or restructure with if/else."
-        if ("no parameter with name" in m) Regex("no parameter with name '(\\w+)'").find(m)?.groupValues?.get(1)?.let { p ->
-            out += "No parameter '$p' there: call kit_search with the component's name for its exact signature."
+        if ("no parameter with name" in m || "no value passed for parameter" in m) {
+            val p = Regex("parameter(?: with name)? '(\\w+)'").find(m)?.groupValues?.get(1) ?: "?"
+            val callee = e.file?.let { calleeAt(project, it, e.line) }
+            val sig = callee?.let { index?.kitSignature(it) }
+            out += if (sig != null) "$callee has no parameter '$p' — its signature is: $sig"
+                   else "No parameter '$p' there${callee?.let { " ($it)" } ?: ""}: check the exact signature (kit_search for K… components, sdk_lookup for others)."
         }
+        if ("attribute android:fillMode not found" in m)
+            out += "Vector drawables have android:fillType (nonZero | evenOdd), not fillMode. Easier: draw icons with make_graphic from SVG."
+        if (Regex("attribute android:\\w+ not found").containsMatchIn(m) && e.file?.contains("drawable") == true && "fillMode" !in m)
+            out += "That attribute doesn't exist on vector drawables (path: fillColor, fillAlpha, fillType, strokeColor, strokeWidth, strokeLineCap, strokeLineJoin, pathData). make_graphic converts SVG for you."
         if ("@Composable invocations can only happen" in m)
             out += "A composable is called from a plain lambda (onClick, LaunchedEffect body, a callback): compute values in composition and pass them in, or move the call into the UI tree."
         if ("too many arguments for 'constructor(): Icon'" in m || "android.graphics.drawable.Icon" in m)
             out += "That Icon is android.graphics.drawable.Icon: import androidx.compose.material3.Icon instead."
     }
     return if (out.isEmpty()) "" else "\nHints:\n" + out.joinToString("\n") { "  • $it" } + "\n"
+}
+
+/** The function whose call encloses [line] of [path] (the nearest unclosed `Name(` above it), or null. */
+private fun calleeAt(project: app.kiln.build.Project, path: String, line: Int?): String? {
+    val f = java.io.File(path).let { if (it.isAbsolute) it else java.io.File(project.dir, path) }
+    if (!f.isFile || line == null) return null
+    val lines = f.readLines()
+    var depth = 0
+    for (i in (line - 1).coerceAtMost(lines.lastIndex) downTo maxOf(0, line - 30)) {
+        val l = lines[i]
+        for (j in l.indices.reversed()) {
+            when (l[j]) {
+                ')' -> depth++
+                '(' -> if (depth == 0) {
+                    return Regex("""([A-Za-z_][\w.]*)\s*$""").find(l.substring(0, j))?.groupValues?.get(1)?.substringAfterLast('.')
+                } else depth--
+            }
+        }
+    }
+    return null
 }
 
 /** Share of matching character bigrams (0..1), for "did you mean". */
