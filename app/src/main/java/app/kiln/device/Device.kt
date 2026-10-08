@@ -285,8 +285,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         if (testDisplay != null) inApp("--es", "op", "key", "--es", "key", k) else warden.exec(input("keyevent", k))
     }
     /** `input text` needs spaces as %s; in the app, text goes into the focused field as is. */
-    suspend fun type(text: String) =
-        if (testDisplay != null) inApp("--es", "op", "text", "--es", "text", text)
+    suspend fun type(text: String, replace: Boolean = false) =
+        if (testDisplay != null) inApp("--es", "op", "text", "--es", "text", text, "--ez", "replace", replace.toString())
         else warden.exec(input("text", text.replace(" ", "%s")))
 
     /**

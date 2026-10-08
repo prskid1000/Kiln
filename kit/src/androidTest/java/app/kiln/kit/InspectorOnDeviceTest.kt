@@ -42,21 +42,34 @@ class InspectorOnDeviceTest {
     @Test fun dialogsAreVisibleAndTappable() {
         rule.runOnUiThread { KilnInspector.install(rule.activity) }
         var open by mutableStateOf(false); var saved = false
+        var amount by mutableStateOf("")
         rule.setContent {
             KilnTheme {
                 Column { Text("Home screen"); KButton("Open") { open = true } }
                 KDialog(open, "New expense", { open = false }, confirmLabel = "Save", onConfirm = { saved = true }) {
-                    KTextField("", {}, label = "Amount")
+                    KTextField(amount, { amount = it }, label = "Amount")
                 }
             }
         }
         assertTrue(tree().contains("Home screen"))
         rule.runOnIdle { open = true }
         rule.waitForIdle()
-        val xml = tree()
+        var xml = tree()
         assertTrue("dialog title missing: $xml", xml.contains("New expense"))
         assertTrue("dialog field missing", xml.contains("content-desc=\"Amount\""))
         assertTrue("the covered screen should not be listed", !xml.contains("Home screen"))
+        // Typing reports what the field holds; a second type adds, replace sets.
+        val field = Regex("""content-desc="Amount"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"""").find(xml) ?: error("no Amount field")
+        val (fl, ft, fr, fb) = field.destructured
+        ask(Intent(KilnInspector.INPUT).putExtra("op", "tap").putExtra("x", (fl.toInt() + fr.toInt()) / 2).putExtra("y", (ft.toInt() + fb.toInt()) / 2))
+        rule.waitForIdle()
+        assertTrue(ask(Intent(KilnInspector.INPUT).putExtra("op", "text").putExtra("text", "12")).contains("Amount — it now holds “12”"))
+        rule.waitForIdle()
+        assertTrue(ask(Intent(KilnInspector.INPUT).putExtra("op", "text").putExtra("text", "3")).contains("“123”"))
+        rule.waitForIdle()
+        assertTrue(ask(Intent(KilnInspector.INPUT).putExtra("op", "text").putExtra("text", "5").putExtra("replace", true)).contains("“5”"))
+        rule.waitForIdle()
+        assertTrue("field value $amount", amount == "5")
         // Tap Save by its bounds, as Kiln's tap tool does.
         val save = Regex("""text="Save"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"""").find(xml) ?: error("no Save button in $xml")
         val (l, t, r, b) = save.destructured

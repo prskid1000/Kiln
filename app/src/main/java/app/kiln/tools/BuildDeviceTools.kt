@@ -418,9 +418,12 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
 class TypeTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val inputTool = true
     override val name = "type_text"
-    override val description = "Type text into the focused field (tap the field first)."
-    override val schema = schema { str("text", "Text to type.") }
-    override suspend fun exec(ctx: ToolContext, input: JsonObject) = device.type(input.req("text")).let { ToolResult.ok("typed") }
+    override val description = "Type text into the focused field (tap the field first). It adds to what's there; replace: true sets the field to exactly this text. The result says what the field now holds."
+    override val schema = schema { str("text", "Text to type."); bool("replace", "Replace the field's text instead of adding to it.", required = false) }
+    override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
+        val r = device.type(input.req("text"), replace = input["replace"]?.toString() == "true")
+        return if (r.ok) ToolResult.ok(r.out.ifBlank { "typed" }) else ToolResult.error(r.err.ifBlank { "couldn't type" })
+    }
 }
 
 class SwipeTool(w: Warden, d: Device) : DeviceTool(w, d) {

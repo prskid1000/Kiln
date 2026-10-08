@@ -147,8 +147,12 @@ internal object KilnInspector {
                     .firstOrNull { it.config.getOrNull(SemanticsProperties.Focused) == true && SemanticsActions.SetText in it.config }
                     ?: return "error: no text field has focus — tap one first"
                 val now = field.config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
-                field.config[SemanticsActions.SetText].action?.invoke(androidx.compose.ui.text.AnnotatedString(now + text))
-                "typed"
+                val result = if (i.getBooleanExtra("replace", false)) text else now + text
+                field.config[SemanticsActions.SetText].action?.invoke(androidx.compose.ui.text.AnnotatedString(result))
+                // Say what the field holds now: typing twice appends, and the agent should see that.
+                val name = (field.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()
+                    ?: field.config.getOrNull(SemanticsProperties.Text)?.firstOrNull()?.text).orEmpty()
+                "typed into ${name.ifBlank { "the field" }} — it now holds “$result”"
             }
             "key" -> {
                 val key = i.getStringExtra("key").orEmpty().uppercase().removePrefix("KEYCODE_")
