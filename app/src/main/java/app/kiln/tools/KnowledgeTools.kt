@@ -511,6 +511,8 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 out += "Give KCollection/KStore its item type: KCollection<Expense>(context, \"expenses\"), KStore(context, \"settings\", Settings()). Without it every later use fails to infer."
             else out += "Kotlin can't infer a type here: add the type explicitly (val x: List<Expense> = …, map<Expense, String> { … }) — usually one missing type causes the rest of these errors."
         }
+        if ("actual type is 'Modifier'" in m && Regex("'Dp\\??' was expected").containsMatchIn(m))
+            out += "Kit `width`/`height` take a size, not a Modifier: `width = 200.dp`. To fill the row use `modifier = Modifier.fillMaxWidth()` (or `.weight(1f)` inside a Row)."
         if ("'return' is prohibited here" in m || "Label must be named" in m)
             out += "Inside a lambda, `return` can't leave the composable: use `return@onClick` (the lambda's label) or restructure with if/else."
         if ("no parameter with name" in m || "no value passed for parameter" in m) {

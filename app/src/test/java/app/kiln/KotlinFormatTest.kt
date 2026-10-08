@@ -111,6 +111,11 @@ class KotlinFormatTest {
         }
     }
 
+    @Test fun `star imports don't indent the next line`() {
+        val src = "package a\n\nimport b.*\nimport c.D\n\nfun x() = 1\n"
+        assertEquals(src, KotlinFormat.format(src))
+    }
+
     @Test fun `import edits apply whatever order the file has`() {
         val file = "package a\n\nimport b.A\nimport c.C\nimport d.D\n\nfun x() = 1\n"
         val out = app.kiln.tools.importEdit(file, "import d.D\nimport b.A", "import b.A\nimport e.E")!!
