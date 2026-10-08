@@ -32,6 +32,8 @@ Layout of the pack (all paths relative to its root):
     kit/res/packages.txt      library packages (for --extra-packages)
     kit/manifest.xml          merged manifest fragment of every library
     kit/API.md                the kit reference the agent reads
+    kit/catalog.json          every kit declaration + library (kit_catalog.py), for kit_search
+    kit/INDEX.md              their names by category, for the system prompt
     templates/                project templates
 """
 import hashlib, io, json, os, re, shutil, subprocess, sys, tarfile, urllib.request, zipfile
@@ -316,6 +318,9 @@ def build_kit():
     for i, d in enumerate(sorted(dexout.glob("classes*.dex"), key=lambda p: (len(p.name), p.name))):
         shutil.copyfile(d, dex / f"kit-{i + 1:02d}.dex")
     shutil.copyfile(REPO / "kit" / "API.md", kit / "API.md")
+    import kit_catalog
+    kit_catalog.build(REPO / "kit" / "src" / "main" / "java" / "app" / "kiln" / "kit", export / "index.txt", kit,
+                      {"Kotlin": KOTLIN, "compileSdk": 36, "minSdk": 30, "JDK": 21})
 
 
 def build_templates():

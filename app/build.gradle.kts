@@ -84,6 +84,7 @@ dependencies {
     implementation("com.anthropic:anthropic-java:2.68.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("com.squareup.okhttp3:okhttp-sse:5.5.0")
+    implementation("com.caverock:androidsvg-aar:1.4")
 
     // Per-project APK signing keys (self-signed X.509 into PKCS#12).
     implementation("org.bouncycastle:bcpkix-jdk18on:1.86")

@@ -372,7 +372,7 @@ private fun describe(a: Activity): Pair<ImageVector, String> {
         "wait_for" -> Icons.Rounded.TouchApp to "Waited for ${arg("target") ?: "the screen"}"
         "shell", "dumpsys" -> Icons.Rounded.Terminal to (arg("command")?.take(48)?.let { "Ran $it" } ?: "Ran a command")
         "sdk_lookup" -> Icons.AutoMirrored.Rounded.MenuBook to "Looked up ${arg("query") ?: arg("name") ?: "the SDK"}"
-        "kit_docs" -> Icons.AutoMirrored.Rounded.MenuBook to "Read the kit docs"
+        "kit_search" -> Icons.AutoMirrored.Rounded.MenuBook to "Searched the kit"
         "web_fetch" -> Icons.Rounded.Language to "Fetched ${arg("url")?.removePrefix("https://")?.take(40) ?: "a page"}"
         "todo" -> Icons.Rounded.Checklist to "Updated the plan"
         "subagent" -> Icons.Rounded.AutoAwesome to "Delegated a task"

@@ -510,7 +510,7 @@ class AgentLoop(
     companion object {
         /** Appended to a Plan-mode request: what a plan must contain (the last part feeds goal runs and QA). */
         const val PLAN_REMINDER = "<system-reminder>PLAN MODE — change nothing. Investigate if useful (read files, " +
-            "sdk_lookup, kit_docs), then reply with a plan in Markdown: ## What it does (2–3 lines), ## Screens " +
+            "sdk_lookup, kit_search), then reply with a plan in Markdown: ## What it does (2–3 lines), ## Screens " +
             "(each with its contents and actions), ## Data (what is stored, where), ## Done criteria (a checklist " +
             "of observable behaviours on the device, e.g. \"tapping Add 250ml raises the total by 250\"). Reply with " +
             "the plan only.</system-reminder>"

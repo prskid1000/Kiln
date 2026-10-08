@@ -228,19 +228,87 @@ class SdkLookupTool(private val index: ClassIndex) : Tool {
     }
 }
 
-class KitDocsTool(private val toolchain: Toolchain) : Tool {
-    override val name = "kit_docs"
-    override val description = "Search the Kiln app kit reference (the libraries, components and rules every app uses). Returns the matching sections."
-    override val schema = schema { str("query", "Topic, e.g. navigation, KStore, permissions, tabs, list-detail.") }
+/**
+ * Finds what the kit already has: components, services, libraries and versions (the catalog
+ * generated from the kit sources), the reference's sections, and the skills.
+ */
+class KitDocsTool(private val toolchain: Toolchain, private val skills: Skills? = null) : Tool {
+    override val name = "kit_search"
+    override val description = "Search everything the Kiln app kit already provides — UI components, services (database, HTTP, files, " +
+        "reminders, intents…), bundled libraries and versions, reference sections and skills. Give a name for its exact signature " +
+        "and example (KTextField, KCollection, KHttp.get), or describe what you need (\"swipe to delete\", \"date picker\", \"save a file\")."
+    override val schema = schema { str("query", "A name (KButton, KFormat) or what you need (pull to refresh, star rating, okhttp version).") }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
+
+    private data class Entry(val name: String, val owner: String?, val kind: String, val category: String, val signature: String, val doc: String)
+
+    private val catalog: List<Entry> by lazy {
+        runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(toolchain.kitCatalog()).let { it as kotlinx.serialization.json.JsonArray }.map { el ->
+                val o = el as JsonObject
+                fun f(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+                Entry(f("name") ?: "", f("owner"), f("kind") ?: "", f("category") ?: "", f("signature") ?: "", f("doc") ?: "")
+            }
+        }.getOrDefault(emptyList())
+    }
+
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val doc = toolchain.kitApi()
-        val sections = doc.split(Regex("(?m)^(?=#{2,3} )"))
-        val words = input.req("query").lowercase().split(Regex("\\W+")).filter { it.length > 1 }
-        val ranked = sections.map { s -> s to words.sumOf { w -> Regex(Regex.escape(w)).findAll(s.lowercase()).count() } }
-            .filter { it.second > 0 }.sortedByDescending { it.second }.take(3).map { it.first }
-        return ToolResult.ok(ranked.joinToString("\n").ifBlank { "no section matches; sections: " +
-            sections.mapNotNull { it.lineSequence().firstOrNull()?.takeIf { l -> l.startsWith("#") } }.joinToString(" | ") })
+        val query = input.req("query").trim()
+        val q = query.lowercase()
+        val all = q.split(Regex("[^a-z0-9.]+")).filter { it.length > 1 && it !in STOP }
+        val wantsLibrary = all.any { it in LIBRARY_HINTS }
+        val words = all.filter { it !in LIBRARY_HINTS }
+        val single = words.size <= 1
+        fun score(e: Entry): Int {
+            val n = e.name.lowercase()
+            var s = 0
+            if (n == q || n.substringAfterLast('.') == q) s += 200
+            if (!single && e.doc.lowercase().contains(words.joinToString(" "))) s += 80   // the phrase itself
+            if (wantsLibrary && e.kind == "library") s += 20
+            for (w in words) {
+                if (n == w || n.substringAfterLast('.') == w) s += if (single) 60 else 20 else if (n.contains(w)) s += 25
+                if (e.category.lowercase().contains(w)) s += 10
+                s += minOf(3, Regex(Regex.escape(w)).findAll(e.doc.lowercase()).count()) * 4
+                if (e.signature.lowercase().contains(w)) s += 3
+            }
+            if (e.owner != null) s -= 5                       // prefer the object itself unless a member is named
+            if (e.kind == "library") s -= 8
+            return s
+        }
+        val ranked = catalog.map { it to score(it) }.filter { it.second > 6 }.sortedByDescending { it.second }
+        val top = ranked.take(8).map { it.first }.toMutableList()
+        // Asked for an object/class by name: show all of its members too.
+        top.firstOrNull { it.name.equals(query, true) }?.let { o -> catalog.filter { it.owner == o.name }.forEach { if (it !in top) top += it } }
+        val out = StringBuilder()
+        for (e in top) {
+            out.append("### ").append(e.name).append("  ·  ").append(e.category).append(" · ").append(e.kind).append('\n')
+            out.append("```kotlin\n").append(e.signature).append("\n```\n")
+            if (e.doc.isNotBlank()) out.append(e.doc).append('\n')
+            out.append('\n')
+        }
+        val sections = toolchain.kitApi().split(Regex("(?m)^(?=#{2,3} )"))
+        val sec = sections.map { sx ->
+            val head = sx.lineSequence().first().lowercase()
+            sx to (words.sumOf { w -> Regex(Regex.escape(w)).findAll(sx.lowercase()).count() } + (if (words.isNotEmpty() && words.all { head.contains(it) }) 50 else 0))
+        }.filter { it.second > 1 }.sortedByDescending { it.second }.take(if (top.isEmpty()) 3 else 1).map { it.first }
+        if (sec.isNotEmpty()) {
+            val ref = "## From the kit reference\n" + sec.joinToString("\n").take(4000) + "\n"
+            // A section whose heading is the query ("App icon") is the answer: put it first.
+            val headed = words.isNotEmpty() && words.all { sec.first().lineSequence().first().lowercase().contains(it) }
+            if (headed) out.insert(0, ref + "\n") else out.append(ref)
+        }
+        skills?.let { sk ->
+            val hits = sk.names().filter { n -> words.any { w -> n.contains(w) || (sk.read(n)?.lowercase()?.let { t -> Regex(Regex.escape(w)).findAll(t).count() >= 3 } == true) } }
+            if (hits.isNotEmpty()) out.append("\nSkills with tested code for this: ").append(hits.joinToString { "`load_skill $it`" }).append('\n')
+        }
+        if (out.isBlank()) return ToolResult.ok("Nothing in the kit matches \"$query\". Categories: " +
+            catalog.map { it.category }.distinct().joinToString() + ". Try another word, or `sdk_lookup` for Android/Compose classes.")
+        return ToolResult.ok(out.toString().trim())
+    }
+
+    private companion object {
+        val LIBRARY_HINTS = setOf("version", "versions", "library", "libraries", "dependency", "dependencies")
+        val STOP = setOf("the", "a", "an", "to", "of", "for", "and", "or", "with", "in", "on", "how", "do", "i", "is", "it", "my", "use", "using", "need", "want", "add", "make", "show", "kit")
     }
 }
 

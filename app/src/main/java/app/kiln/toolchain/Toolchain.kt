@@ -67,6 +67,10 @@ class Toolchain(private val paths: Paths) {
     fun kitResZips(d: File = require()): List<File> =
         File(kit(d), "res").listFiles { f -> f.extension == "zip" }?.sortedBy { it.name } ?: emptyList()
     fun kitApi(d: File = require()): String = File(kit(d), "API.md").takeIf { it.isFile }?.readText() ?: ""
+    /** Every kit component, service, library and version by category (generated from the kit sources). */
+    fun kitIndex(d: File = require()): String = File(kit(d), "INDEX.md").takeIf { it.isFile }?.readText() ?: ""
+    /** The same as JSON entries with signatures and docs, for kit_search. */
+    fun kitCatalog(d: File = require()): String = File(kit(d), "catalog.json").takeIf { it.isFile }?.readText() ?: "[]"
     fun templates(d: File = require()) = File(d, "templates")
 
     /** Environment every toolchain process gets (shared libs for aapt2 and the JVM). */

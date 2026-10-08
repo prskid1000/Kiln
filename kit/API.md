@@ -72,98 +72,21 @@ Imports: `androidx.navigation3.runtime.*`, `androidx.navigation3.ui.NavDisplay`,
 entries `metadata = ListDetailSceneStrategy.listPane()` / `.detailPane()`
 (`androidx.compose.material3.adaptive.navigation3`).
 
-## Components (`app.kiln.kit`)
+## Components and services (`app.kiln.kit`)
 
-Every component takes `modifier`; most also take `width` / `height` (Dp, omitted = natural or full
-width), `tone: KTone` (Accent, Neutral, Ok, Warn, Danger), `size: KSize` (Small, Medium, Large),
-`variant: KVariant` (Filled, Tonal, Outline, Ghost), `corner` (Dp) and `enabled`. Every parameter has
-a sensible default, so the minimal call is short. Prefer these over raw Material: they match Nocturne.
+The **Kit index** (in your instructions) lists every component and service by category; it is generated
+from the kit's code, so if a name is there, it exists. `kit_search <name>` returns its exact signature
+and an example. Use them before writing your own: they match Nocturne, handle accessibility, and are tested.
 
-**Layout & containers**
-| Component | Purpose |
-|---|---|
-| `KCard(onClick?, padding) { … }` | simple outlined card |
-| `KCardBox(variant, tone, width, height, padding, corner, spacing, onClick?) { … }` | card with every knob |
-| `KSection(title, action?)` | uppercase accent heading above a group |
-| `KAccordion(title, subtitle?, icon?, initiallyOpen) { … }` | expandable / collapsible section |
-| `KDivider(label?, thickness)` | divider, optionally "— or —" |
-| `KGrid(columns = 2 or null+minCellWidth, spacing) { items(…) { … } }` | lazy grid |
-| `KCarousel(count, height, peek, showDots) { page -> … }`, `KPageDots(count, current)` | swipeable pages |
-| `VGap(dp)` / `HGap(dp)` | spacing |
+Shared knobs, all with defaults: `modifier`, `width`/`height` (Dp; omitted = natural or full width),
+`tone: KTone` (Accent, Neutral, Ok, Warn, Danger), `size: KSize` (Small, Medium, Large),
+`variant: KVariant` (Filled, Tonal, Outline, Ghost), `corner` (Dp), `enabled`.
 
-**Buttons & actions**
-| Component | Purpose |
-|---|---|
-| `KButton(text, variant, tone, size, icon?, trailingIcon?, loading, fullWidth, width, height, corner) { … }` | the button |
-| `KIconButton(icon, description, variant, tone, size) { … }` | icon-only (always pass a description) |
-| `KFab(icon, description, text?) { … }` | floating action button (extended with text) |
-| `KSegmented(options, selected, onSelect, size, icons?)` | segmented control / single toggle group |
-| `KToggleGroup(options, selected: Set<Int>, onChange)` | multi toggle group |
-| `KMenu(items = listOf(KMenuItem(label, icon?, destructive) { … })) { open -> KIconButton(…, onClick = open) }` | dropdown / context menu |
-
-**Inputs & forms**
-| Component | Purpose |
-|---|---|
-| `KTextField(value, onChange, label?, placeholder?, leadingIcon?, trailingIcon?, helper?, error?, maxLength?, password, keyboard, singleLine, width, height)` | text input |
-| `KTextArea(value, onChange, label?, minLines, maxLength?)` | multi-line input |
-| `KSearchBar(query, onQuery, hint, trailing?)` / `KSearchField(query, onQuery)` | search with clear button |
-| `KOtpField(code, onChange, length)` | one-time code boxes |
-| `KStepper(value, onChange, min, max, step, label?)` | − value + |
-| `KSelect(options, selected: Int?, onSelect, label?, placeholder)` | dropdown select |
-| `KCombobox(options, selected: String?, onSelect, label?)` | searchable select |
-| `KCheckbox(checked, onChange, label, subtitle?)` | checkbox with label |
-| `KRadioGroup(options, selected, onSelect)` | radio buttons |
-| `KSwitch(checked, onChange)` / `KSwitchRow(title, checked, onChange, subtitle?)` | switch |
-| `KChipGroup(options, selected: Set<Int>, onChange, multi)` | filter chips |
-| `KSlider(value, onChange, range, steps, label?, format)` / `KRangeSlider(range, onChange, …)` | sliders |
-| `KRating(value, onChange?, max, starSize)` | star rating (display-only when onChange is null) |
-| `KDateField(date: LocalDate?, onChange, label)` / `KTimeField(time: LocalTime?, onChange, label, is24h)` | date / time pickers |
-| `KField(label, error?, helper?) { custom input }` | label + error around your own input |
-
-**Display**
-| Component | Purpose |
-|---|---|
-| `KListRow(title, subtitle?, icon?, onClick?, trailing?)` | list row |
-| `KAvatar(name, imageUrl?, icon?, size, tone, online?)` / `KAvatarGroup(names, max)` | avatars |
-| `KBadge(count?) { icon }` | count badge (null = dot, 0 = hidden) |
-| `KChip(text, icon?, tone, selected, onClick?, onClose?)` / `KTag(text, tone)` | chip / status pill |
-| `KStat(label, value, caption?)` | metric tile |
-| `KKeyValue(key, value, valueTone?, bold)` | label → value row |
-| `KTable(headers, rows, weights, zebra)` | simple table |
-| `KTimeline(listOf(KTimelineItem(title, subtitle?, time?, tone, done)))` | vertical timeline |
-| `KSteps(steps, current)` | multi-step progress (1—2—3) |
-| `KImage(url, description, width, height, aspectRatio, corner)` | image from a URL |
-| `KKbd(key)` | keyboard key cap |
-| `KPagination(page, pages, onPage)` | page numbers |
-
-**Feedback**
-| Component | Purpose |
-|---|---|
-| `KAlert(message, tone, title?, icon?, actionLabel?, onAction?, onDismiss?)` | banner / notice bar |
-| `KProgressBar(progress 0–1 or null, label?, tone, height)` | linear progress |
-| `KProgressRing(progress, size, stroke, tone, center)` | circular progress / goal ring |
-| `KSpinner(size)` / `KLoading()` | inline / full-screen loading |
-| `KSkeleton(width?, height, circle)` | shimmering placeholder while loading |
-| `KEmptyState(title, body, icon?, actionLabel?, onAction?)` / `KError(message, onRetry?)` | empty / error |
-| `val toast = rememberKToast()` + `KToastHost(toast)` (in a Box) → `toast.show("Saved", tone, action = "Undo") { … }` | toasts / snackbars |
-
-**Overlays & gestures**
-| Component | Purpose |
-|---|---|
-| `KDialog(open, title, onDismiss, confirmLabel?, onConfirm, destructive) { content }` | dialog with your content |
-| `KConfirm(open, title, body, confirmLabel, destructive, onConfirm, onDismiss)` | yes/no dialog |
-| `KBottomSheet(open, onDismiss, title?, fullHeight) { … }` | bottom sheet / drawer |
-| `KTooltip(text) { content }` | long-press tooltip |
-| `KSwipeRow(onDelete = { remove(); true }, onArchive?) { row }` | swipe to delete / archive |
-| `KPullRefresh(refreshing, onRefresh) { list }` | pull to refresh |
-
-**Navigation**: `KilnScreen`, `KilnTabs` (adaptive, preferred), or `KBottomBar(listOf(KNavItem(label, icon, badge?)), selected, onSelect)`.
-
-**Charts**: `KBarChart(values, labels, height, tone, highlight?, valueFormat?)`, `KLineChart(values, height, tone, fill, showDots)`,
-`KDonutChart(listOf(KSlice(label, value, tone)), size, center?)`.
-
-Plain Material 3 components are all available too (TextField, Slider, NavigationRail, SearchBar, …).
-Icons: `Icons.Filled.*`, `Icons.Outlined.*`, `Icons.Rounded.*`, `Icons.AutoMirrored.*` (extended set).
+- Overlays are driven by state: `KDialog(open, …)`, `KBottomSheet(open, …)`, `KConfirm(open, …)`.
+- Toasts: `val toast = rememberKToast()`, `KToastHost(toast)` last inside a `Box`, then `toast.show("Saved", action = "Undo") { … }`.
+- Data: one value → `KStore` / `rememberStored`; a growing list (notes, expenses) → `KCollection`; a small setting → `rememberPref`.
+- Network: `KHttp.get<T>(url)` / `KHttp.post<B, T>(url, body)` throw `KHttpException`; show `KError(…) { retry }`.
+- Plain Material 3 is available too. Icons: `Icons.Filled.*`, `Icons.Outlined.*`, `Icons.Rounded.*`, `Icons.AutoMirrored.*` (extended set).
 
 ## Theme tokens (`Nocturne`)
 

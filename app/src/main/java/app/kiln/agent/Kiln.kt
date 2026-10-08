@@ -90,7 +90,7 @@ class Kiln(
         LogcatTool(warden, device), LastCrashTool(warden, device), ScreenshotTool(warden, device),
         UiTreeTool(warden, device), TapTool(warden, device), TypeTool(warden, device), SwipeTool(warden, device),
         KeyTool(warden, device), WaitForTool(warden, device), DumpsysTool(warden, device), ShellTool(warden, device),
-        SdkLookupTool(classIndex), KitDocsTool(toolchain), WebFetchTool(),
+        SdkLookupTool(classIndex), KitDocsTool(toolchain, skills), WebFetchTool(), app.kiln.tools.MakeGraphicTool(),
         app.kiln.tools.LoadSkillTool(skills), app.kiln.tools.ProposeRuleTool(), app.kiln.tools.SecurityCheckTool(),
         app.kiln.tools.CompareScreenTool(warden, device), app.kiln.tools.UiCheckTool(warden, device), app.kiln.tools.SaveScreenshotTool(warden, device),
         TodoTool(), AskUserTool(), CheckpointTool(), RestoreTool(), MemoryTool(),
@@ -125,7 +125,7 @@ class Kiln(
     }
 
     fun systemPrompt(project: Project) =
-        SystemPrompt.build(project, toolchain.kitApi(), warden.status() == Warden.Status.READY, skills.index())
+        SystemPrompt.build(project, toolchain.kitApi(), warden.status() == Warden.Status.READY, skills.index(), toolchain.kitIndex())
 
     suspend fun newSession(project: Project): AgentLoop {
         val s = Session.create(paths.sessions, project.name, systemPrompt(project))
@@ -150,7 +150,7 @@ class Kiln(
         AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings,
             "You are a focused investigator helping an Android engineer. Use the read-only tools to answer the task " +
                 "precisely and briefly; report facts with file:line references. Do not speculate.\n\n" +
-                "Kit reference:\n" + toolchain.kitApi(), task, role = "subagent")
+                "Kit reference:\n" + toolchain.kitApi() + "\n\nKit index:\n" + toolchain.kitIndex(), task, role = "subagent")
 }
 
 /** Delegate a self-contained investigation to a cheaper model with read-only tools (SPEC §5). */

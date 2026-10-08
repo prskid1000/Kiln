@@ -118,7 +118,7 @@ object McpServer {
         "initialize" -> obj("protocolVersion" to "2025-06-18", "capabilities" to obj("tools" to obj()),
             "serverInfo" to obj("name" to "kiln", "version" to "0.1"),
             "instructions" to "Kiln builds Android apps on this phone. Start with list_projects (or create_project); every " +
-                "other tool takes `project`, a project name from that list. Kit reference: call kit_docs.")
+                "other tool takes `project`, a project name from that list. Kit reference: call kit_search.")
         "ping" -> obj()
         "tools/list" -> obj("tools" to JsonArray(PROJECT_TOOLS + tools().map { t ->
             val props = (t.schema["properties"] as? JsonObject ?: obj()).toMutableMap()
