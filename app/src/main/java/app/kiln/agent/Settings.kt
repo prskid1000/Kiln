@@ -9,7 +9,7 @@ import java.time.LocalDate
 /** Global settings (files/settings.json). A project's .kiln/config.json may override any field. */
 @Serializable
 data class Settings(
-    val maxSteps: Int = 80,
+    val maxSteps: Int = 200,
     val maxRetries: Int = 3,
     val taskBudgetTokens: Int = 400_000,
     val sessionUsd: Double = 3.0,
