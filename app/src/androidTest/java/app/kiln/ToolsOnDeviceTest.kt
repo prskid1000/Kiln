@@ -242,7 +242,7 @@ class ToolsOnDeviceTest {
             val ok = r.isError == c.expectError &&
                 (c.expect == null || text.contains(c.expect, ignoreCase = true)) &&
                 (!c.images || r.images.isNotEmpty()) 
-            println("TOOLTEST ${if (ok) "PASS" else "FAIL"} ${c.tool.padEnd(16)} ${c.input.take(70)} -> ${if (r.isError) "ERR " else ""}${text.replace('\n', ' ').take(160)}")
+            println("TOOLTEST ${if (ok) "PASS" else "FAIL"} ${c.tool.padEnd(16)} ${c.input.take(70)} -> ${if (r.isError) "ERR " else ""}${text.replace('\n', ' ').take(if (ok) 160 else 1500)}")
             if (!ok) failures += "${c.tool} ${c.input.take(60)} -> ${if (r.isError) "error" else "ok"}: ${text.take(200)}"
         }
         // Every registered tool appears at least once above (subagent and qa_check need a model; MCP/command tools are user-defined).

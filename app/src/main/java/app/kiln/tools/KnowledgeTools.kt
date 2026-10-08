@@ -131,7 +131,8 @@ class ClassIndex(private val toolchain: Toolchain) {
     fun uniqueClass(name: String, line: String = ""): String? {
         COMMON_FUNCTIONS[name]?.let { return it }
         ensure()
-        val groups = listOf("app.kiln.kit.", "androidx.compose.", "androidx.", "kotlinx.", "kotlin.", "android.")
+        // java.* last: LocalDate, YearMonth, Locale, DateTimeFormatter were never auto-imported before.
+        val groups = listOf("app.kiln.kit.", "androidx.compose.", "androidx.", "kotlinx.", "kotlin.", "android.", "java.", "javax.")
         val all = (where.keys.asSequence() + topLevel.asSequence())
             .filter { '$' !in it && it.substringAfterLast('.') == name && !it.contains(".internal.") }.distinct().toList()
         // Icons.Filled.X / Icons.Outlined.X …: the icon's style package comes from the code line.
