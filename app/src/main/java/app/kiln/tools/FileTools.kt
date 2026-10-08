@@ -132,7 +132,7 @@ class EditFileTool : Tool {
         val count = occurrences(text, old)
         val all = input["replace_all"]?.toString() == "true"
         // Files are formatted on save, so the agent's copy may be indented differently: match ignoring indentation.
-        val loose = if (count == 0) replaceIgnoringIndent(text, old, new) else null
+        val loose = if (count == 0) importEdit(text, old, new) ?: replaceIgnoringIndent(text, old, new) else null
         when {
             count == 0 && loose == null -> return ToolResult.error("old_text not found in $rel." + closestMatch(text, old))
             count > 1 && !all -> return ToolResult.error("old_text matches $count places in $rel — add surrounding lines to make it unique, or set replace_all")
@@ -166,7 +166,7 @@ class MultiEditTool : Tool {
             val old = o.req("old_text").replace("\r\n", "\n")
             val n = occurrences(text, old)
             val replacement = (o.str("new_text") ?: "").replace("\r\n", "\n")
-            val loose = if (n == 0) replaceIgnoringIndent(text, old, replacement) else null
+            val loose = if (n == 0) importEdit(text, old, replacement) ?: replaceIgnoringIndent(text, old, replacement) else null
             if (n != 1 && loose == null) return ToolResult.error("edit #${i + 1}: old_text matches $n places (must be exactly 1); nothing written." +
                 (if (n == 0) closestMatch(text, old) else " Add surrounding lines to make it unique."))
             text = loose ?: text.replaceFirst(old, replacement)
@@ -298,4 +298,22 @@ internal fun replaceIgnoringIndent(text: String, old: String, new: String): Stri
         if (l.isBlank()) "" else " ".repeat(maxOf(0, indentOf(l) + delta)) + l.trimStart()
     }
     return (lines.subList(0, at) + (if (new.isEmpty()) emptyList() else replacement) + lines.subList(at + want.size, lines.size)).joinToString("\n")
+}
+
+/**
+ * An edit whose old and new text are only import lines, applied as a set change: the old imports are
+ * removed, the new ones added, wherever they sit. Saving sorts imports, so the agent's remembered
+ * order can't be relied on. Null when the edit isn't purely about imports.
+ */
+internal fun importEdit(text: String, old: String, new: String): String? {
+    fun imports(s: String) = s.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    val gone = imports(old); val added = imports(new)
+    if (gone.isEmpty() || gone.any { !it.startsWith("import ") } || added.any { !it.startsWith("import ") }) return null
+    val lines = text.split("\n")
+    if (gone.none { g -> lines.any { it.trim() == g } }) return null
+    val kept = lines.filter { it.trim() !in gone || it.trim() in added }
+    val firstImport = kept.indexOfFirst { it.startsWith("import ") }
+    val toAdd = added.filter { a -> kept.none { it.trim() == a } }
+    val at = if (firstImport >= 0) firstImport else (kept.indexOfFirst { it.startsWith("package ") } + 1).coerceAtLeast(0)
+    return (kept.subList(0, at) + toAdd + kept.subList(at, kept.size)).joinToString("\n")
 }

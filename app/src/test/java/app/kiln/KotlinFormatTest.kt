@@ -111,6 +111,14 @@ class KotlinFormatTest {
         }
     }
 
+    @Test fun `import edits apply whatever order the file has`() {
+        val file = "package a\n\nimport b.A\nimport c.C\nimport d.D\n\nfun x() = 1\n"
+        val out = app.kiln.tools.importEdit(file, "import d.D\nimport b.A", "import b.A\nimport e.E")!!
+        assertEquals(listOf("import b.A", "import c.C", "import e.E"), KotlinFormat.format(out).lines().filter { it.startsWith("import") })
+        assertNull(app.kiln.tools.importEdit(file, "import z.Z", "import y.Y"))          // nothing to remove: not this file's imports
+        assertNull(app.kiln.tools.importEdit(file, "fun x() = 1", "fun x() = 2"))         // not an import edit
+    }
+
     @Test fun `edits match regardless of indentation and keep the file's indentation`() {
         val file = "fun a() {\n        if (x) {\n            go()\n        }\n}\n"
         val edited = replaceIgnoringIndent(file, "if (x) {\n    go()\n}", "if (x) {\n    stop()\n}")
