@@ -463,6 +463,26 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
     val current = items.lastOrNull { it.status == Activity.Status.RUNNING }
     val secs = items.sumOf { it.ms } / 1000.0
     val shot = items.lastOrNull { it.images.isNotEmpty() }?.images?.firstOrNull()
+    if (live) {
+        // While it works, show each step as it finishes (latest few, the rest one tap away), then what's running now.
+        val done = items.filter { it !== current && !(it.kind == Activity.Kind.THINKING && it.text.isBlank()) }
+        val shown = if (open) done else done.takeLast(4)
+        Column(Modifier.fillMaxWidth().animateContentSize()) {
+            if (done.size > shown.size) Text("+${done.size - shown.size} earlier step${if (done.size - shown.size == 1) "" else "s"}",
+                style = T.bodySmall.copy(color = N.textMuted), modifier = Modifier.clip(N.shapeMd).clickable { open = true }.padding(vertical = 4.dp))
+            shown.forEach { if (it.kind == Activity.Kind.THINKING) Box(Modifier.padding(vertical = 4.dp)) { ThoughtCard(it, live = false) } else StepRow(it) }
+            when {
+                current?.kind == Activity.Kind.THINKING -> ThoughtCard(current, live = true)
+                current != null -> Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(14.dp), color = N.accent, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    val (_, title) = describe(current)
+                    Text(current.progress.ifBlank { "$title…" }, style = T.bodySmall.copy(color = N.textLabel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        return
+    }
     Column(Modifier.fillMaxWidth()) {
         if (live && current?.kind == Activity.Kind.THINKING) ThoughtCard(current, live = true)
         else Row(Modifier.clip(N.shapeMd).clickable { open = !open }.padding(vertical = 6.dp),
