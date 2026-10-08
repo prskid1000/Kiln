@@ -118,14 +118,17 @@ class Kiln(
         val agentDevice = if (settings.value.backgroundTesting) testDevice else device
         val qa = app.kiln.tools.QaCheckTool({ criteria, onStep -> qaTask(project, registry, qaTools, criteria, onStep) }, agentDevice)
         val deferred = tools.filter { it.deferred }
-        tools = (tools + SubagentTool(this, project, registry, readOnly) + qa +
-            listOfNotNull(deferred.takeIf { it.isNotEmpty() }?.let { app.kiln.tools.ToolSearchTool(it) })).sortedBy { it.name }
+        // qa_check only with the QA agent on; both helpers obey disabledTools like every other tool.
+        tools = (tools + SubagentTool(this, project, registry, readOnly) + listOfNotNull(qa.takeIf { cfg.qaAgent }) +
+            listOfNotNull(deferred.takeIf { it.isNotEmpty() }?.let { app.kiln.tools.ToolSearchTool(it) }))
+            .filter { it.name !in cfg.disabledTools }.sortedBy { it.name }
         ToolRegistry.validateNames(tools)
         return registry to tools
     }
 
     fun systemPrompt(project: Project) =
-        SystemPrompt.build(project, toolchain.kitApi(), warden.status() == Warden.Status.READY, skills.index(), toolchain.kitIndex())
+        SystemPrompt.build(project, toolchain.kitApi(), warden.status() == Warden.Status.READY, skills.index(), toolchain.kitIndex(),
+            qaAgent = settings.value.merged(project.dir).qaAgent)
 
     suspend fun newSession(project: Project): AgentLoop {
         val s = Session.create(paths.sessions, project.name, systemPrompt(project))

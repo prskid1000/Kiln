@@ -27,6 +27,8 @@ data class Settings(
     val mcpPort: Int = 8765,
     /** The agent runs and tests apps on an invisible display instead of taking over the screen. */
     val backgroundTesting: Boolean = true,
+    /** Before calling work done, an independent QA agent tests the app (qa_check). Off: the agent verifies with test_flow itself. */
+    val qaAgent: Boolean = true,
 ) {
     fun merged(project: File?): Settings {
         val f = project?.let { File(it, ".kiln/config.json") }?.takeIf { it.isFile } ?: return this
@@ -65,4 +67,4 @@ class SettingsStore(private val dir: File) {
 }
 
 /** Settings a project's .kiln/config.json may override. */
-private val PROJECT_OVERRIDABLE = setOf("effort", "subagentEffort", "disabledTools", "maxSteps")
+private val PROJECT_OVERRIDABLE = setOf("effort", "subagentEffort", "disabledTools", "maxSteps", "qaAgent")

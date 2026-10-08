@@ -91,6 +91,18 @@ class CoreTest {
     }
 
 
+    @Test fun `the done rule follows the QA agent setting`() {
+        val dir = kotlin.io.path.createTempDirectory("qa").toFile()
+        File(dir, "kiln.json").writeText(File("../toolchain/templates/compose/kiln.json").readText()
+            .replace("{{package}}", "kiln.app.demo").replace("{{label}}", "Demo"))
+        val p = app.kiln.build.Project(dir)
+        val on = app.kiln.agent.SystemPrompt.build(p, "", deviceTools = true, qaAgent = true)
+        val off = app.kiln.agent.SystemPrompt.build(p, "", deviceTools = true, qaAgent = false)
+        assertTrue("run `qa_check`" in on)
+        assertTrue("qa_check" !in off)
+        assertTrue("test every done criterion yourself with `test_flow`" in off)
+    }
+
     @Test fun `the picked look is written into the template MainActivity`() {
         val dir = kotlin.io.path.createTempDirectory("look").toFile()
         val tpl = File("../toolchain/templates/compose/src/MainActivity.kt").readText().replace("{{package}}", "kiln.app.demo").replace("{{label}}", "Demo")

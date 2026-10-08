@@ -301,7 +301,7 @@ class AgentLoop(
                         next(Activity.Kind.NOTICE, "Goal not met yet — $why")
                         session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
                             "<system-reminder>The goal isn't met yet: $why\nKeep working until every done criterion is " +
-                            "verified on the device (run_app, ui_tree, tap, qa_check).</system-reminder>")))))
+                            "verified on the device (run_app, test_flow, ui_tree).</system-reminder>")))))
                         continue
                     }
                     next(Activity.Kind.NOTICE, "Goal met ✓")

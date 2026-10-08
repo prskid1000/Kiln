@@ -290,6 +290,9 @@ private fun LimitsCard() {
         SettingRow("Test apps in the background", "The agent uses a hidden screen, so yours stays yours. Run always uses the real screen.") {
             Toggle(s.backgroundTesting) { v -> save { it.copy(backgroundTesting = v) } }
         }
+        SettingRow("QA agent", "Before finishing, a separate agent tests the app and records it (a few minutes). Off: the agent checks its own work with test_flow.") {
+            Toggle(s.qaAgent) { v -> save { it.copy(qaAgent = v) } }
+        }
         Text("Effort (main agent)", style = T.label)
         val levels = listOf("low", "medium", "high", "xhigh", "max")
         SegTabs(levels.map { it to "" }, levels.indexOf(s.effort).coerceAtLeast(0)) { i -> save { it.copy(effort = levels[i]) } }
