@@ -57,6 +57,9 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -178,10 +181,20 @@ fun KSwipeRow(modifier: Modifier = Modifier, onDelete: (() -> Boolean)? = null, 
             val toDelete = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
             Box(Modifier.fillMaxSize().clip(RoundedCornerShape(kr(12))).background((if (toDelete) Nocturne.danger else Nocturne.ok).copy(alpha = 0.25f))
                 .padding(horizontal = 20.dp), contentAlignment = if (toDelete) Alignment.CenterEnd else Alignment.CenterStart) {
-                Icon(if (toDelete) Icons.Filled.Delete else Icons.Filled.Archive, if (toDelete) "Delete" else "Archive",
-                    tint = if (toDelete) Nocturne.danger else Nocturne.ok)
+                // Decorative: a labelled icon here sat in the screen tree on every row, swiped or not
+                // (run 10's agent asked where the "Archive" text came from).
+                if (state.dismissDirection != SwipeToDismissBoxValue.Settled)
+                    Icon(if (toDelete) Icons.Filled.Delete else Icons.Filled.Archive, null, tint = if (toDelete) Nocturne.danger else Nocturne.ok)
             }
-        }) { Box(Modifier.background(Nocturne.bg)) { content() } }
+        }) {
+            // Swipes are also offered as accessibility actions, for anyone who can't swipe.
+            Box(Modifier.background(Nocturne.bg).semantics {
+                customActions = listOfNotNull(
+                    onDelete?.let { f -> CustomAccessibilityAction("Delete") { f() } },
+                    onArchive?.let { f -> CustomAccessibilityAction("Archive") { f() } },
+                )
+            }) { content() }
+        }
 }
 
 /** Pull down to refresh; set [refreshing] while your load runs. */

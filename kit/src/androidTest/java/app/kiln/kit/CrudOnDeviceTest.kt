@@ -9,6 +9,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -60,6 +61,9 @@ class CrudOnDeviceTest {
         rule.onNodeWithText("Save").performClick()
         rule.waitUntil(3000) { store.size == 1 }
         rule.onNodeWithText("Lunch").assertExists(); rule.onNodeWithText("12.50").assertExists()
+        // A resting row shows no swipe labels (they used to sit in the tree on every row).
+        assertEquals(0, rule.onAllNodesWithContentDescription("Archive").fetchSemanticsNodes().size +
+            rule.onAllNodesWithContentDescription("Delete").fetchSemanticsNodes().size)
         // Edit by tapping the row.
         rule.onNodeWithText("Lunch").performClick()
         rule.onNodeWithText("Edit expense").assertExists()
