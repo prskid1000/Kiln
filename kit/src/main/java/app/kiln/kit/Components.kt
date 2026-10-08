@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun KSection(title: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
     Row(modifier.fillMaxWidth().padding(top = 16.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title.uppercase(), color = Nocturne.accent, fontSize = kt(11), fontWeight = FontWeight.Medium,
+        Text(title.uppercase(), color = Nocturne.ink(Nocturne.accent), fontSize = kt(11), fontWeight = FontWeight.Medium,
             letterSpacing = 1.sp, modifier = Modifier.weight(1f))
         action?.invoke()
     }
@@ -139,7 +139,7 @@ fun KLoading(modifier: Modifier = Modifier) =
 @Composable
 fun KError(message: String, onRetry: (() -> Unit)? = null, modifier: Modifier = Modifier) =
     KCardBox(modifier) {
-        Text(message, color = Nocturne.danger, style = MaterialTheme.typography.bodyMedium)
+        Text(message, color = Nocturne.ink(Nocturne.danger), style = MaterialTheme.typography.bodyMedium)
         if (onRetry != null) TextButton(onClick = onRetry) { Text("Retry") }
     }
 

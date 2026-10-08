@@ -43,7 +43,13 @@ data class KPalette(
     val neutral100: Color, val neutral300: Color, val neutral600: Color, val neutral700: Color, val neutral800: Color,
     val ok: Color, val warn: Color, val danger: Color,
 ) {
-    val textMuted: Color get() = text.copy(alpha = 0.55f)
+    // 65 %: still readable (4.5:1) over the screen backdrop's accent glow, where 55 % measured 3.7:1.
+    val textMuted: Color get() = text.copy(alpha = 0.65f)
+    /**
+     * [c] as text: accent, danger, ok and warn are tuned as fills, and as text over the backdrop glow
+     * they fall to 3–4:1. Lifted toward the text colour, every one reads at 4.5:1 or better.
+     */
+    fun ink(c: Color): Color = androidx.compose.ui.graphics.lerp(c, if (dark) Color.White else Color.Black, if (dark) 0.3f else 0.25f)
     val textLabel: Color get() = text.copy(alpha = 0.70f)
     val divider: Color get() = text.copy(alpha = if (dark) 0.16f else 0.12f)
 
@@ -191,6 +197,8 @@ object Nocturne {
     val danger get() = palette.danger
     val textMuted get() = palette.textMuted
     val textLabel get() = palette.textLabel
+    /** A colour as text, readable on every surface: `Text("Over budget", color = Nocturne.ink(Nocturne.danger))`. */
+    fun ink(c: androidx.compose.ui.graphics.Color) = palette.ink(c)
     val divider get() = palette.divider
 
     /** The theme's text font. */

@@ -126,7 +126,7 @@ internal fun toneColors(tone: KTone, variant: KVariant): Pair<Color, Color> {
     val c = tone.color()
     val onFilled = if (Nocturne.isDark) Nocturne.bg else Color.White
     // On glass the pane sits over an accent gradient: accent text would sink into it, so lift it.
-    val ink = if (Nocturne.surfaceStyle == KStyle.Glass) androidx.compose.ui.graphics.lerp(c, if (Nocturne.isDark) Color.White else Color.Black, 0.45f) else c
+    val ink = if (Nocturne.surfaceStyle == KStyle.Glass) androidx.compose.ui.graphics.lerp(c, if (Nocturne.isDark) Color.White else Color.Black, 0.45f) else Nocturne.ink(c)
     return when (variant) {
         KVariant.Filled -> (if (tone == KTone.Neutral) Nocturne.surfaceHi else c) to (if (tone == KTone.Neutral) Nocturne.text else onFilled)
         KVariant.Tonal -> c.copy(alpha = 0.18f) to (if (tone == KTone.Neutral) Nocturne.text else ink)

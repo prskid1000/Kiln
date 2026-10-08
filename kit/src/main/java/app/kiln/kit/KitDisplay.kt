@@ -226,9 +226,9 @@ fun KAlert(message: String, modifier: Modifier = Modifier, tone: KTone = KTone.A
         Icon(glyph, null, tint = c, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (title != null) Text(title, color = c, style = MaterialTheme.typography.titleSmall)
+            if (title != null) Text(title, color = Nocturne.ink(c), style = MaterialTheme.typography.titleSmall)
             Text(message, color = Nocturne.text, style = MaterialTheme.typography.bodyMedium)
-            if (actionLabel != null && onAction != null) Text(actionLabel, color = c, fontWeight = FontWeight.Medium, fontSize = kt(14),
+            if (actionLabel != null && onAction != null) Text(actionLabel, color = Nocturne.ink(c), fontWeight = FontWeight.Medium, fontSize = kt(14),
                 modifier = Modifier.padding(top = 4.dp).clickable(onClick = onAction))
         }
         if (onDismiss != null) Icon(Icons.Filled.Close, "Dismiss", tint = Nocturne.textMuted, modifier = Modifier.size(20.dp).clickable(onClick = onDismiss))
