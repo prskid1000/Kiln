@@ -11,7 +11,10 @@ plugins {
 android {
     namespace = "app.kiln.kit"
     compileSdk = 37
-    defaultConfig { minSdk = 30 }
+    defaultConfig {
+        minSdk = 30
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -53,6 +56,15 @@ dependencies {
     api("org.osmdroid:osmdroid-android:6.1.20")
     // In-app purchases (KBilling). Its permission and components are merged only into apps that opt in.
     api("com.android.billingclient:billing-ktx:8.0.0")
+
+    // On-device tests: every component rendered and used, every service called for real.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.5.0")
 }
 
 // Everything the pack builder needs, resolved by Gradle: the kit's own AAR plus

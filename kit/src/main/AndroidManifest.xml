@@ -3,4 +3,16 @@
     <!-- Every Kiln app may use the network and post notifications (KNet, KNotify). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- KHaptics. A normal permission: granted at install, never asked. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <application>
+        <!-- KFiles.share hands files to other apps through this. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.kiln.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/kiln_file_paths" />
+        </provider>
+    </application>
 </manifest>

@@ -164,9 +164,9 @@ fun KAvatarGroup(names: List<String>, modifier: Modifier = Modifier, max: Int = 
 fun KBadge(count: Int?, modifier: Modifier = Modifier, tone: KTone = KTone.Danger, content: @Composable BoxScope.() -> Unit) {
     Box(modifier) {
         content()
-        if (count == null) Box(Modifier.align(Alignment.TopEnd).size(10.dp).clip(CircleShape).background(tone.color()))
+        if (count == null) Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(10.dp).clip(CircleShape).background(tone.color()))
         else if (count > 0) Text(if (count > 99) "99+" else "$count", color = Nocturne.bg, fontSize = 10.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp).clip(RoundedCornerShape(50)).background(tone.color())
+            modifier = Modifier.align(Alignment.TopEnd).offset(x = 12.dp, y = (-8).dp).clip(RoundedCornerShape(50)).background(tone.color())
                 .padding(horizontal = 5.dp, vertical = 1.dp))
     }
 }

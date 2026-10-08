@@ -13,7 +13,6 @@
 import android.Manifest
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +49,6 @@ fun PlacesMap() {
                 KKeyValue("Picked", address ?: "%.4f, %.4f".format(p.lat, p.lng))
                 KKeyValue("To the gate", KGeo.formatDistance(KGeo.distanceMeters(p, places[0].at)))
             }
-            Text("Map data © OpenStreetMap contributors", color = Nocturne.textMuted)
         }
     }
 }

@@ -417,13 +417,15 @@ object KClipboard {
 
 /** Vibration feedback: `KHaptics.tick(ctx)` on taps, `success`/`error` after actions. */
 object KHaptics {
-    private fun v(context: Context) = context.getSystemService(Vibrator::class.java)
-    fun tick(context: Context) = v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
-    fun click(context: Context) = v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
-    fun heavy(context: Context) = v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
-    fun success(context: Context) = v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 30, 60, 30), -1))
-    fun error(context: Context) = v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1))
-    fun buzz(context: Context, millis: Long = 300) = v(context)?.vibrate(VibrationEffect.createOneShot(millis, VibrationEffect.DEFAULT_AMPLITUDE))
+    private fun v(context: Context) = context.getSystemService(Vibrator::class.java)?.takeIf { it.hasVibrator() }
+    // Haptics are a nicety: never let one crash the app (no vibrator, permission stripped).
+    private inline fun safe(block: () -> Unit) { runCatching(block) }
+    fun tick(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)) }
+    fun click(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)) }
+    fun heavy(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)) }
+    fun success(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 30, 60, 30), -1)) }
+    fun error(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1)) }
+    fun buzz(context: Context, millis: Long = 300) = safe { v(context)?.vibrate(VibrationEffect.createOneShot(millis, VibrationEffect.DEFAULT_AMPLITUDE)) }
 }
 
 /** Facts about the device. */

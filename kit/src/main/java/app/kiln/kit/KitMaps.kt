@@ -9,6 +9,8 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -95,7 +97,9 @@ fun KMap(
     }
     DisposableEffect(map) { map.onResume(); onDispose { map.onPause(); map.onDetach() } }
     var lastCenter by remember { mutableStateOf(center) }
-    AndroidView({ map }, modifier.fillMaxWidth().then(if (height != null) Modifier.height(height) else Modifier).clip(RoundedCornerShape(corner))) { mv ->
+    // OpenStreetMap's tile policy requires this credit on the map.
+    androidx.compose.foundation.layout.Box(modifier.fillMaxWidth().then(if (height != null) Modifier.height(height) else Modifier).clip(RoundedCornerShape(corner))) {
+    AndroidView({ map }, Modifier.matchParentSize()) { mv ->
         if (center != lastCenter) { mv.controller.animateTo(GeoPoint(center.lat, center.lng)); lastCenter = center }
         mv.overlays.clear()
         mv.overlays += MapEventsOverlay(object : MapEventsReceiver {
@@ -115,6 +119,11 @@ fun KMap(
         }
         if (showMyLocation && hasLocation(context)) mv.overlays += MyLocationNewOverlay(GpsMyLocationProvider(context), mv).apply { enableMyLocation() }
         mv.invalidate()
+    }
+    androidx.compose.material3.Text("© OpenStreetMap contributors", fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp),
+        color = androidx.compose.ui.graphics.Color(0xFF333333),
+        modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).background(androidx.compose.ui.graphics.Color(0xCCFFFFFF))
+            .padding(horizontal = 4.dp, vertical = 1.dp))
     }
 }
 
