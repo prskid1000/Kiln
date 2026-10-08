@@ -102,6 +102,12 @@ class CoreTest {
     }
 
 
+    @Test fun `QA result lines are found whatever the bullet`() {
+        val report = "Here's the report:\n1. PASS — Home total — saw ₹800\n2) **FAIL** — swipe — row stayed\n- PASS — search\n* FAIL — edit\nVERDICT: FAIL"
+        assertEquals(listOf("PASS — Home total — saw ₹800", "**FAIL** — swipe — row stayed", "PASS — search", "FAIL — edit"),
+            app.kiln.tools.qaResultLines(report))
+    }
+
     @Test fun `a QA re-run focuses on failures and changed files`() {
         assertEquals("", app.kiln.tools.qaFocus(null, mapOf("src/A.kt" to 1), 0))       // first run: test everything
         val last = app.kiln.tools.QaMemory(listOf("PASS — Home shows total — saw ₹500", "FAIL — swipe deletes — row stayed"),

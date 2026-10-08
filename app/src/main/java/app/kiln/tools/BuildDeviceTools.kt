@@ -494,13 +494,16 @@ class SwipeTool(w: Warden, d: Device) : DeviceTool(w, d) {
         val before = device.uiTree(pkg(ctx))
         val dir = input.req("direction")
         val target = input.str("target")?.takeIf { it.isNotBlank() }
+        // "632,1676" / "[632,1676]" is a point, as for tap.
+        val point = target?.let { Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(it) }?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
         val (x1, y1, x2, y2) = if (target != null) {
-            val n = device.find(before, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
-                treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
-            // Along the element, edge to edge across the screen at its height (a row's swipe needs distance and speed).
+            val (cx, cy) = point ?: (device.find(before, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
+                treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))).let { it.cx to it.cy }
+            // Sideways: edge to edge across the screen at its height (a row's swipe needs distance and speed).
+            // Up/down: a third of the screen from it, so a list scrolls even when the target is a small heading.
             when (dir) {
-                "left" -> listOf(w * 9 / 10, n.cy, w / 10, n.cy); "right" -> listOf(w / 10, n.cy, w * 9 / 10, n.cy)
-                "up" -> listOf(n.cx, n.bottom - 4, n.cx, maxOf(0, n.top - (n.bottom - n.top))); else -> listOf(n.cx, n.top + 4, n.cx, n.bottom + (n.bottom - n.top))
+                "left" -> listOf(w * 9 / 10, cy, w / 10, cy); "right" -> listOf(w / 10, cy, w * 9 / 10, cy)
+                "up" -> listOf(cx, cy, cx, maxOf(0, cy - h / 3)); else -> listOf(cx, cy, cx, minOf(h - 1, cy + h / 3))
             }
         } else when (dir) {
             "up" -> listOf(w / 2, h * 3 / 4, w / 2, h / 4); "down" -> listOf(w / 2, h / 4, w / 2, h * 3 / 4)

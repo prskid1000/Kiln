@@ -216,6 +216,7 @@ class ToolsOnDeviceTest {
             // Steps written the way run 7's model wrote them: tool names as keys, objects instead of strings.
             Case("test_flow", """{"steps":[{"wait_for":{"text":"Built on this phone"}},{"tap":{"text":"Built on this phone with Kiln."}},{"wait":{"ms":"100"}}]}""", expect = "all 3 steps passed"),
             Case("swipe", """{"direction":"up"}"""),
+            Case("swipe", """{"direction":"up","target":"[632,1676]"}""", expect = "swiped up"),   // a point, as for tap (run 10 QA)
             Case("press_key", """{"key":"BACK"}"""),
             Case("launch", "{}"),
             Case("logcat", """{"since_last":false,"level":"error","grep":""}"""),

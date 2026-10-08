@@ -259,7 +259,7 @@ class QaCheckTool(
         val clip = runCatching { rec?.stop() }.getOrNull()
         val verdict = Regex("""VERDICT:\s*(PASS|FAIL)""", RegexOption.IGNORE_CASE).find(report)?.groupValues?.get(1)?.uppercase()
         // Remember the per-criterion lines and what the source looked like, for the next run.
-        val lines = report.lines().map { it.trim().trimStart('-', '*', ' ') }.filter { Regex("""^\**(PASS|FAIL)\b""").containsMatchIn(it) }
+        val lines = qaResultLines(report)
         if (lines.isNotEmpty()) runCatching {
             memoryFile.parentFile?.mkdirs()
             memoryFile.writeText(app.kiln.core.KJ.encodeToString(QaMemory.serializer(), QaMemory(lines, snapshot, System.currentTimeMillis())))
@@ -272,6 +272,14 @@ class QaCheckTool(
 /** What the last QA run found, and a fingerprint of the source it tested. */
 @kotlinx.serialization.Serializable
 data class QaMemory(val results: List<String>, val files: Map<String, Int>, val at: Long)
+
+/**
+ * The per-criterion lines of a QA report, whatever their bullet: "PASS — …", "- **FAIL** — …", "1. PASS — …".
+ * (Run 10's report was numbered; nothing was remembered and the next run re-tested everything.)
+ */
+internal fun qaResultLines(report: String): List<String> =
+    report.lines().map { it.trim().replace(Regex("""^(?:[-*•]\s+|\d+[.)]\s*)+"""), "") }
+        .filter { Regex("""^\**(PASS|FAIL)\b""").containsMatchIn(it) }
 
 /** Hash of every source and resource file, by project path. */
 internal fun sourceSnapshot(project: app.kiln.build.Project): Map<String, Int> =
