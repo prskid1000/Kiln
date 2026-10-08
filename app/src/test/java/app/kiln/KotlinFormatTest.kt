@@ -115,6 +115,8 @@ class KotlinFormatTest {
         val file = "package a\n\nimport b.A\nimport c.C\nimport d.D\n\nfun x() = 1\n"
         val out = app.kiln.tools.importEdit(file, "import d.D\nimport b.A", "import b.A\nimport e.E")!!
         assertEquals(listOf("import b.A", "import c.C", "import e.E"), KotlinFormat.format(out).lines().filter { it.startsWith("import") })
+        // The package line as context is fine.
+        assertEquals(listOf("import b.A", "import c.C"), app.kiln.tools.importEdit(file, "package a\n\nimport d.D", "package a\n\nimport b.A")!!.lines().filter { it.startsWith("import") })
         assertNull(app.kiln.tools.importEdit(file, "import z.Z", "import y.Y"))          // nothing to remove: not this file's imports
         assertNull(app.kiln.tools.importEdit(file, "fun x() = 1", "fun x() = 2"))         // not an import edit
     }

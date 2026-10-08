@@ -306,7 +306,11 @@ internal fun replaceIgnoringIndent(text: String, old: String, new: String): Stri
  * order can't be relied on. Null when the edit isn't purely about imports.
  */
 internal fun importEdit(text: String, old: String, new: String): String? {
-    fun imports(s: String) = s.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    fun lines(s: String) = s.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    // The same `package` line on both sides is just context: drop it.
+    val pkgOld = lines(old).filter { it.startsWith("package ") }; val pkgNew = lines(new).filter { it.startsWith("package ") }
+    if (pkgOld != pkgNew) return null
+    fun imports(s: String) = lines(s).filter { !it.startsWith("package ") }
     val gone = imports(old); val added = imports(new)
     if (gone.isEmpty() || gone.any { !it.startsWith("import ") } || added.any { !it.startsWith("import ") }) return null
     val lines = text.split("\n")
