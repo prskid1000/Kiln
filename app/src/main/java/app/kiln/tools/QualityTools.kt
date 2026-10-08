@@ -241,8 +241,13 @@ class QaCheckTool(
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.LONG_RUNNING)
     override val timeoutMs = 900_000L
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val criteria = input.req("criteria")
-        ctx.progress("QA agent testing the app")
+        // A re-run focuses on what failed or what the code changes could affect (run 8 re-tested the
+        // whole app three times, ~6 min each).
+        val memoryFile = File(ctx.project.dir, ".kiln/qa-last.json")
+        val last = runCatching { app.kiln.core.KJ.decodeFromString(QaMemory.serializer(), memoryFile.readText()) }.getOrNull()
+        val snapshot = sourceSnapshot(ctx.project)
+        val criteria = input.req("criteria") + qaFocus(last, snapshot, System.currentTimeMillis())
+        ctx.progress(if (last == null) "QA agent testing the app" else "QA agent re-checking (focused on failures and changes)")
         val video = File(ctx.spillDir, "qa-${System.currentTimeMillis()}.mp4")
         val rec = device.testDisplay?.record(video, CoroutineScope(SupervisorJob() + Dispatchers.IO))
         // The QA agent's own steps: live in the chat while it works, and listed under its report.
@@ -251,9 +256,41 @@ class QaCheckTool(
         ctx.addCost(usd)
         val clip = runCatching { rec?.stop() }.getOrNull()
         val verdict = Regex("""VERDICT:\s*(PASS|FAIL)""", RegexOption.IGNORE_CASE).find(report)?.groupValues?.get(1)?.uppercase()
+        // Remember the per-criterion lines and what the source looked like, for the next run.
+        val lines = report.lines().map { it.trim().trimStart('-', '*', ' ') }.filter { Regex("""^\**(PASS|FAIL)\b""").containsMatchIn(it) }
+        if (lines.isNotEmpty()) runCatching {
+            memoryFile.parentFile?.mkdirs()
+            memoryFile.writeText(app.kiln.core.KJ.encodeToString(QaMemory.serializer(), QaMemory(lines, snapshot, System.currentTimeMillis())))
+        }
         return ToolResult(report.trim(), isError = verdict != "PASS", summary = "QA: ${verdict ?: "no verdict"}", video = clip?.path,
             detail = trail.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n").ifBlank { null })
     }
+}
+
+/** What the last QA run found, and a fingerprint of the source it tested. */
+@kotlinx.serialization.Serializable
+data class QaMemory(val results: List<String>, val files: Map<String, Int>, val at: Long)
+
+/** Hash of every source and resource file, by project path. */
+internal fun sourceSnapshot(project: app.kiln.build.Project): Map<String, Int> =
+    project.files().filter { f -> f.isFile && (f.extension in setOf("kt", "xml", "json")) && "/.kiln/" !in f.path.replace('\\', '/') }
+        .associate { project.rel(it) to it.readBytes().contentHashCode() }
+
+/**
+ * The note added to a QA task when an earlier run exists: what it found, which files changed since,
+ * and to re-test only failures, new criteria and what the changes could affect. Empty for a first run.
+ */
+internal fun qaFocus(last: QaMemory?, now: Map<String, Int>, nowMs: Long): String {
+    if (last == null) return ""
+    val changed = (now.keys + last.files.keys).filter { now[it] != last.files[it] }.sorted()
+    val mins = ((nowMs - last.at) / 60_000).coerceAtLeast(0)
+    return "\n\nA QA run ${if (mins == 0L) "just now" else "$mins min ago"} reported:\n" + last.results.joinToString("\n") { "  $it" } +
+        "\nFiles changed since then: " + (if (changed.isEmpty()) "none" else changed.take(25).joinToString(", ") +
+            if (changed.size > 25) " (+${changed.size - 25} more)" else "") +
+        "\n\nDon't repeat that whole run. Re-test properly: every criterion that FAILED, every criterion that is new, and any " +
+        "criterion whose screen or data the changed files could affect. A criterion that PASSED and that these changes can't " +
+        "affect: at most glance at its screen, and report it as `PASS — <criterion> — carried over (unaffected by the changes)`. " +
+        "Still report every criterion, and end with the VERDICT line."
 }
 
 /** A full-resolution screenshot saved into the project, for the store listing. */

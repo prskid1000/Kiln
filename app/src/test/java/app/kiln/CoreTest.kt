@@ -91,6 +91,16 @@ class CoreTest {
     }
 
 
+    @Test fun `a QA re-run focuses on failures and changed files`() {
+        assertEquals("", app.kiln.tools.qaFocus(null, mapOf("src/A.kt" to 1), 0))       // first run: test everything
+        val last = app.kiln.tools.QaMemory(listOf("PASS — Home shows total — saw ₹500", "FAIL — swipe deletes — row stayed"),
+            mapOf("src/Home.kt" to 1, "src/List.kt" to 2, "src/Old.kt" to 3), at = 0)
+        val note = app.kiln.tools.qaFocus(last, mapOf("src/Home.kt" to 1, "src/List.kt" to 9, "src/New.kt" to 4), 5 * 60_000)
+        assertTrue(note, "5 min ago" in note && "FAIL — swipe deletes — row stayed" in note)
+        assertTrue(note, "Files changed since then: src/List.kt, src/New.kt, src/Old.kt" in note)   // edited, added, removed; Home unchanged
+        assertTrue(note, "carried over (unaffected by the changes)" in note)
+    }
+
     @Test fun `the done rule follows the QA agent setting`() {
         val dir = kotlin.io.path.createTempDirectory("qa").toFile()
         File(dir, "kiln.json").writeText(File("../toolchain/templates/compose/kiln.json").readText()

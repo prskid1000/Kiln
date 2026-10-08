@@ -144,7 +144,7 @@ class Kiln(
 
     suspend fun qaTask(project: Project, registry: ToolRegistry, tools: List<Tool>, criteria: String, onStep: (String) -> Unit) =
         AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings, QA_PROMPT,
-            "Done criteria:\n$criteria\n\nTest every criterion on the device now.", role = "subagent", onStep = onStep,
+            "Done criteria:\n$criteria\n\nTest the criteria on the device now.", role = "subagent", onStep = onStep,
             finished = Regex("VERDICT:\\s*(PASS|FAIL)"),
             unfinished = "You stopped before finishing. Use the tools now to test every criterion on the device, then end " +
                 "with one line per criterion and the final line VERDICT: PASS or VERDICT: FAIL.")
