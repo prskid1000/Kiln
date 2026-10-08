@@ -239,6 +239,7 @@ class AgentLoop(
     private suspend fun loop() {
         val cfg = settings.value.merged(project.dir)
         var steps = 0
+        var lastTodoStep = 0
         while (true) {
             if (++steps > cfg.maxSteps) { stoppedWith("Stopped after ${cfg.maxSteps} steps (limit in Settings)."); return }
             if (cost.value >= cfg.sessionUsd) { next(Activity.Kind.NOTICE, "Session spending cap reached (\$${"%.2f".format(cfg.sessionUsd)})."); return }
@@ -274,7 +275,7 @@ class AgentLoop(
                 // with todo items still open. Unless it's asking the user something, push it on (twice at most).
                 val said = turn.second.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }
                     .joinToString("\n").trim()
-                val open = state.todos.filter { it.status != "completed" }
+                val open = state.todos.filter { it.status != "done" }
                 val announces = ANNOUNCES.containsMatchIn(said.takeLast(300))
                 if (mode == Mode.BUILD && unfinishedGuards < 2 && !said.trimEnd().endsWith("?") && (open.isNotEmpty() || announces)) {
                     unfinishedGuards++
@@ -319,8 +320,18 @@ class AgentLoop(
             val finish = if (!qaPassed) null else obj("type" to "text", "text" to "<system-reminder>qa_check passed every criterion. " +
                 "Stop testing now: tick off the remaining todos, and finish with a short summary of what was built and how to use it. " +
                 "Don't re-run qa_check or re-test what it verified; change code only if the user asks.</system-reminder>")
+            // Stale checklist: models write a plan, then stop ticking it (run 9: "data model: in progress"
+            // with every screen written). Every 8 steps without an update, show the list and ask.
+            if (uses.any { it.str("name") == "todo" }) lastTodoStep = steps
+            val stale = steps - lastTodoStep
+            val todoNudge = state.todos.filter { it.status != "done" }.takeIf { it.isNotEmpty() && finish == null && stale >= 8 && stale % 8 == 0 }?.let {
+                obj("type" to "text", "text" to "<system-reminder>Your checklist hasn't changed in $stale steps:\n" +
+                    state.todos.joinToString("\n") { t -> "[${when (t.status) { "done" -> "x"; "in_progress" -> "~"; else -> " " }}] ${t.text}" } +
+                    "\nIf you've finished some of these, send the updated list with todo now (one item in_progress at a time). " +
+                    "Don't mention this reminder.</system-reminder>")
+            }
             // Queued user messages ride along with the tool results: the model sees them at its next step.
-            session.append(Msg("user", JsonArray(results + listOfNotNull(budget, finish) + (drainSteering() ?: emptyList()))))
+            session.append(Msg("user", JsonArray(results + listOfNotNull(budget, finish, todoNudge) + (drainSteering() ?: emptyList()))))
         }
     }
 
