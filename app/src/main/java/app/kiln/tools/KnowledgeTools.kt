@@ -462,6 +462,15 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             out += if (sig != null) "$callee has no parameter '$p' — its signature is: $sig"
                    else "No parameter '$p' there${callee?.let { " ($it)" } ?: ""}: check the exact signature (kit_search for K… components, sdk_lookup for others)."
         }
+        if (Regex("^\\s*import\\s").containsMatchIn(src) && "unresolved reference" in m) {
+            val pkgLines = project.files().filter { it.extension == "kt" && it.path.startsWith(srcDir.path) }.mapNotNull { f ->
+                val dirPkg = f.parentFile.relativeTo(srcDir).invariantSeparatorsPath.replace('/', '.')
+                val decl = Regex("(?m)^package\\s+([\\w.]+)").find(f.readText())?.groupValues?.get(1)
+                if (decl != null && decl != dirPkg) "${project.rel(f)} says `package $decl` but sits in $dirPkg" else null
+            }
+            if (pkgLines.isNotEmpty()) out += "Package lines don't match their folders — imports use the package line: " + pkgLines.take(4).joinToString("; ") +
+                ". Make each file's package match its folder."
+        }
         if ("attribute android:fillMode not found" in m)
             out += "Vector drawables have android:fillType (nonZero | evenOdd), not fillMode. Easier: draw icons with make_graphic from SVG."
         if (Regex("attribute android:\\w+ not found").containsMatchIn(m) && e.file?.contains("drawable") == true && "fillMode" !in m)

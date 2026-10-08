@@ -162,6 +162,15 @@ class ToolsOnDeviceTest {
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\nimport kotlinx.coroutines.flow.MutableStateFlow\n\n@Composable\nfun Probe2() {\n    val s = MutableStateFlow(1).collectAsStateWithLifecycle()\n    app.kiln.kit.KButton(\n        labelText = \"x\",\n    ) {}\n}\n"}"""),
             Case("check", "{}", expectError = true, expect = "KButton has no parameter 'labelText' — its signature is: fun KButton("),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.lifecycle.compose.collectAsStateWithLifecycle"),
+            // The project's own symbols: a wrong-package import is pointed at the real package, a missing one is added.
+            Case("delete", """{"path":"$src/Bad.kt"}"""),
+            Case("write_file", """{"path":"$src/data/Repo.kt","content":"package kiln.app.tooltest\n\nobject ExpenseRepo { val n = 1 }\n"}"""),
+            Case("write_file", """{"path":"$src/data/Helper.kt","content":"package kiln.app.tooltest.data\n\nobject Helper { val m = 2 }\n"}"""),
+            Case("write_file", """{"path":"$src/ui/Use.kt","content":"package kiln.app.tooltest.ui\n\nimport kiln.app.tooltest.data.ExpenseRepo\n\nval total = ExpenseRepo.n + Helper.m\n"}"""),
+            Case("check", "{}", expect = "import kiln.app.tooltest.ExpenseRepo (was kiln.app.tooltest.data.ExpenseRepo)"),
+            Case("read_file", """{"path":"$src/ui/Use.kt"}""", expect = "import kiln.app.tooltest.data.Helper"),
+            Case("delete", """{"path":"$src/data"}"""),
+            Case("delete", """{"path":"$src/ui"}"""),
             // Kotlin outside src/ is refused before it's written.
             Case("write_file", """{"path":"ui/Stray.kt","content":"package x\n"}""", expectError = true, expect = "must be under src/"),
             // A misspelt project symbol gets a "did you mean".

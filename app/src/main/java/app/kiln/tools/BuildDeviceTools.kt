@@ -87,8 +87,28 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     // Kotlin reports Icons.Filled.Settings's 'Settings' only once 'Icons' resolves: up to three passes.
     for (pass in 1..3) {
     val before = fixes.size
+    val decls = projectDeclarations(ctx.project)
     for (e in r.errors) {
         val icon = wrongIcon.find(e.message)
+        // Imports between the project's own files: point a broken import at where the symbol really is.
+        val imported = Regex("""^\s*import\s+([\w.]+)""").find(e.source.orEmpty())?.groupValues?.get(1)
+        if (imported != null && "unresolved reference" in e.message) {
+            val real = decls[imported.substringAfterLast('.')]?.singleOrNull()
+            val path0 = e.file
+            val f0 = path0?.let { File(it).let { x -> if (x.isAbsolute) x else ctx.project.resolve(it) } }
+            if (real != null && real != imported && f0 != null && f0.isFile) {
+                val text0 = f0.readText()
+                val line = Regex("(?m)^import\\s+${Regex.escape(imported)}\\s*$")
+                if (line.containsMatchIn(text0)) {
+                    val rel0 = ctx.project.rel(f0)
+                    val keep = ctx.state.readStamps[rel0] == f0.lastModified()
+                    f0.writeText(text0.replace(line, "import $real"))
+                    if (keep) ctx.state.readStamps[rel0] = f0.lastModified()
+                    fixes += "$rel0: import $real (was $imported)"
+                }
+            }
+            continue
+        }
         val name = icon?.groupValues?.get(3) ?: unresolved.find(e.message)?.groupValues?.get(1) ?: continue
         if (name[0].isLowerCase() && name !in setOf("collectAsStateWithLifecycle", "collectAsState", "rememberSaveable", "mutableStateOf",
                 "mutableIntStateOf", "mutableFloatStateOf", "mutableStateListOf", "derivedStateOf", "rememberCoroutineScope", "viewModel",
@@ -97,8 +117,10 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val path = e.file ?: continue
         val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
         if (!f.isFile || f.extension != "kt") continue
+        val filePkg = Regex("(?m)^package\\s+([\\w.]+)").find(f.readText())?.groupValues?.get(1).orEmpty()
+        val own = decls[name]?.singleOrNull()?.takeIf { it.substringBeforeLast('.') != filePkg }
         val fq = (if (icon != null) "androidx.compose.material.icons." + (if (icon.groupValues[1].isNotEmpty()) "automirrored." else "") +
-            icon.groupValues[2].lowercase() + "." + name else index.uniqueClass(name, e.source ?: "")) ?: continue
+            icon.groupValues[2].lowercase() + "." + name else own ?: index.uniqueClass(name, e.source ?: "")) ?: continue
         val text = f.readText()
         val stale = Regex("(?m)^import\\s+[\\w.]+\\.$name\\s*$")
         val fixed = when {
@@ -446,4 +468,21 @@ internal fun shellRefusal(cmd: String): String? {
     if (Regex("""\binput\s+(tap|text|swipe|keyevent|draganddrop|motionevent)\b""").containsMatchIn(cmd))
         return "Don't drive the device with `input`: it steals focus and can freeze the app under test. Use tap, type_text, swipe or press_key — they act inside the app."
     return null
+}
+
+/** Top-level declarations of the project's compiled sources: simple name → fully qualified names. */
+internal fun projectDeclarations(project: app.kiln.build.Project): Map<String, List<String>> {
+    val src = File(project.dir, "src")
+    val out = HashMap<String, MutableList<String>>()
+    for (f in project.files().filter { it.extension == "kt" && it.path.startsWith(src.path) }) {
+        val text = f.readText()
+        val pkg = Regex("(?m)^package\\s+([\\w.]+)").find(text)?.groupValues?.get(1) ?: ""
+        Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|internal|public|data|sealed|enum|abstract|open|inline|suspend|value)\s+)*(?:fun|class|object|interface|val|var|typealias)\s+(?:<[^>]*>\s*)?([A-Za-z_]\w*)""")
+            .findAll(text).forEach { m ->
+                val line = m.value
+                if (line.startsWith("private")) return@forEach
+                out.getOrPut(m.groupValues[1]) { mutableListOf() } += if (pkg.isEmpty()) m.groupValues[1] else "$pkg.${m.groupValues[1]}"
+            }
+    }
+    return out.mapValues { it.value.distinct() }
 }
