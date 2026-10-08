@@ -32,6 +32,21 @@ import java.util.zip.ZipOutputStream
 
 class CoreTest {
 
+    @Test fun `test_flow steps are read the way models write them`() {
+        fun steps(json: String) = app.kiln.tools.TestFlowTool.expand(app.kiln.core.parseJson(json) as kotlinx.serialization.json.JsonObject)
+            .map { it.toString() }
+        // Several actions in one step run in order; contains lists become one expectation each (run 8).
+        assertEquals(listOf("""{"tap":"Home tab"}""", """{"expect":"₹500"}""", """{"expect":"Food"}"""),
+            steps("""{"tap":"Home tab","expect":{"contains":["₹500","Food"]}}"""))
+        // type_text with target types into that field, it doesn't tap and stop.
+        assertEquals(listOf("""{"type":"200","into":"Amount","replace":"true"}"""),
+            steps("""{"type_text":"200","target":"Amount","replace":"true"}"""))
+        assertEquals(listOf("""{"tap":"Add"}"""), steps("""{"tap":{"text":"Add"}}"""))
+        assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
+        assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
+        assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+    }
+
     @Test fun `runtime crashes get a likely cause`() {
         assertTrue(app.kiln.tools.crashHints("java.lang.IllegalStateException: Vertically scrollable component was measured with an infinity maximum height constraints").contains("ONE LazyColumn"))
         assertTrue(app.kiln.tools.crashHints("kotlin.UninitializedPropertyAccessException: lateinit property expenses has not been initialized").contains("plain values"))

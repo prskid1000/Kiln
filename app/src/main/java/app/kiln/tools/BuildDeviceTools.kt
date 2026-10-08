@@ -12,6 +12,7 @@ import app.kiln.device.Device
 import app.kiln.device.UiNode
 import app.kiln.device.Warden
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -412,7 +413,7 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
         else (input.int("x") ?: 0) to (input.int("y") ?: 0)
         device.tap(x, y)
         delay(600)
-        return ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}. " + screenChange(ctx, before))
+        return ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}. " + screenChange(ctx, before, x, y))
     }
 }
 
@@ -543,7 +544,7 @@ internal fun projectDeclarations(project: app.kiln.build.Project): Map<String, L
  * What an action did, from the screen before and after: "No change on screen", what appeared and
  * disappeared, or that the app stopped — so a tap doesn't need a screenshot to know if it worked.
  */
-internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.kiln.device.UiNode>): String {
+internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.kiln.device.UiNode>, x: Int? = null, y: Int? = null): String {
     val pkg = pkg(ctx)
     val after = device.uiTree(pkg)
     if (after.isEmpty() && device.pid(pkg) == null) return "The app is no longer running — it may have crashed: call last_crash."
@@ -552,6 +553,10 @@ internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.
     val was = labels(before); val now = labels(after)
     val appeared = now.filter { it !in was }; val gone = was.filter { it !in now }
     if (appeared.isEmpty() && gone.isEmpty()) {
+        // Focusing a field changes nothing in the tree: say so, or the tap looks like it failed.
+        if (x != null && y != null) before.filter { "EditText" in it.cls && x in it.left..it.right && y in it.top..it.bottom }
+            .minByOrNull { (it.right - it.left) * (it.bottom - it.top) }
+            ?.let { f -> return "The text field “${f.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)." }
         val moved = before.map { it.label() to it.top } != after.map { it.label() to it.top }
         return if (moved) "The screen scrolled or moved; same items." else "No change on screen."
     }
@@ -580,14 +585,14 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
     }
 
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        val steps = input.a("steps")?.mapNotNull { it as? JsonObject } ?: return ToolResult.error("give steps")
+        val steps = input.a("steps")?.mapNotNull { it as? JsonObject }?.flatMap(::expand) ?: return ToolResult.error("give steps")
         val keepGoing = input.str("keep_going") == "true"
         val pkg = pkg(ctx)
         val report = StringBuilder(); var failed = 0
         suspend fun visible(text: String) = device.find(device.uiTree(pkg), text) != null
         for ((i, st) in steps.withIndex()) {
             val n = i + 1
-            val (ok, what) = runCatching { step(ctx, pkg, normalizeStep(st), ::visible) }.getOrElse { false to "error: ${it.message}" }
+            val (ok, what) = runCatching { step(ctx, pkg, st, ::visible) }.getOrElse { false to "error: ${it.message}" }
             report.append(if (ok) "$n ✓ " else "$n ✗ ").append(what).append('\n')
             if (!ok) { failed++; if (!keepGoing) { report.append("stopped at step $n of ${steps.size}\n"); break } }
         }
@@ -602,7 +607,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         s("tap")?.let { t ->
             val node = device.find(before, t) ?: return false to "tap “$t”: not on screen (${before.filter { it.clickable }.take(8).joinToString { "“${it.label()}”" }} …)"
             device.tap(node.cx, node.cy); delay(600)
-            return true to "tap “$t” → ${screenChange(ctx, before)}"
+            return true to "tap “$t” → ${screenChange(ctx, before, node.cx, node.cy)}"
         }
         s("type")?.let { text ->
             s("into")?.let { field ->
@@ -642,31 +647,55 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
     }
 
     /**
-     * Steps the way models actually write them: tool names as keys (type_text, press_key, wait_for),
-     * objects instead of strings ({"tap": {"text": "Add"}}), and field names like id/field/target.
+     * Steps the way models actually write them, as single actions: tool names as keys (type_text,
+     * press_key, wait_for), objects instead of strings ({"tap": {"text": "Add"}}), {"expect":
+     * {"contains": ["a", "b"]}}, field names like id/field/target, and several actions in one step
+     * ({"tap": "Home", "expect": "Total"} runs the tap, then the expectation).
      */
-    private fun normalizeStep(st: JsonObject): JsonObject {
+    companion object {
+    internal fun expand(st: JsonObject): List<JsonObject> {
         val alias = mapOf("type_text" to "type", "input" to "type", "enter" to "type", "press_key" to "key", "press" to "key",
-            "back" to "key", "wait" to "wait_ms", "sleep" to "wait_ms", "wait_for" to "expect", "assert" to "expect",
-            "see" to "expect", "expect_text" to "expect", "assert_gone" to "expect_gone", "expect_not" to "expect_gone",
-            "click" to "tap", "press_button" to "tap", "target" to "tap", "direction" to "swipe")
-        val out = LinkedHashMap<String, JsonElement>()
-        for ((k0, v) in st) {
-            val k = alias[k0] ?: k0
-            if (v is JsonObject) {
-                // {"tap": {"text": "Add"}} / {"type": {"text": "500", "into": "Amount"}} / {"swipe": {"direction": "left", "on": "Lunch"}}
-                val main = listOf("text", "target", "label", "value", "name", "direction", "key", "ms").firstNotNullOfOrNull { v.str(it) }
-                if (main != null) out[k] = JsonPrimitive(main)
-                v.str("into")?.let { out["into"] = JsonPrimitive(it) }
-                listOf("field", "id", "in", "on_field").firstNotNullOfOrNull { v.str(it) }?.let { if (k == "type") out["into"] = JsonPrimitive(it) }
-                v.str("on")?.let { out["on"] = JsonPrimitive(it) }
-                v["replace"]?.let { out["replace"] = it }
-                v["timeout_ms"]?.let { out["timeout_ms"] = it }
-            } else out[k] = v
+            "wait" to "wait_ms", "sleep" to "wait_ms", "wait_for" to "expect", "assert" to "expect", "see" to "expect",
+            "expect_text" to "expect", "assert_gone" to "expect_gone", "expect_not" to "expect_gone", "click" to "tap",
+            "press_button" to "tap", "direction" to "swipe")
+        val actions = listOf("tap", "type", "swipe", "key", "expect", "expect_gone", "wait_ms")
+        val typing = st.keys.any { (alias[it] ?: it) == "type" }
+        // Field and options, wherever they were written.
+        val opts = LinkedHashMap<String, JsonElement>()
+        fun opt(src: JsonObject) {
+            listOf("into", "field", "id", "in", "on_field").firstNotNullOfOrNull { src.str(it) }?.let { opts["into"] = JsonPrimitive(it) }
+            if (typing) src.str("target")?.let { opts.putIfAbsent("into", JsonPrimitive(it)) }
+            src.str("on")?.let { opts["on"] = JsonPrimitive(it) }
+            src["replace"]?.let { opts["replace"] = it }
+            src["timeout_ms"]?.let { opts["timeout_ms"] = it }
         }
-        if (st.containsKey("back") && out["key"] !is JsonPrimitive) out["key"] = JsonPrimitive("BACK")
-        // {"type": "500", "field": "Amount"} at the top level.
-        if ("type" in out && "into" !in out) listOf("field", "id", "in", "target").firstNotNullOfOrNull { st.str(it) }?.let { out["into"] = JsonPrimitive(it) }
-        return JsonObject(out)
+        opt(st)
+        val out = mutableListOf<JsonObject>()
+        for ((k0, v) in st) {
+            val k = alias[k0] ?: if (k0 == "target" && !typing) "tap" else if (k0 == "back") "key" else k0
+            if (k !in actions) continue
+            val values: List<String> = when (v) {
+                is JsonObject -> {
+                    opt(v)
+                    val c = v["contains"] ?: v["texts"]
+                    if (c is JsonArray) c.mapNotNull { (it as? JsonPrimitive)?.content }
+                    else listOfNotNull(listOf("contains", "text", "target", "label", "value", "name", "direction", "key", "ms")
+                        .firstNotNullOfOrNull { v.str(it) })
+                }
+                is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.content }
+                else -> listOfNotNull((v as? JsonPrimitive)?.content?.takeIf { k0 != "back" || it != "true" } ?: if (k0 == "back") "BACK" else null)
+            }
+            for (value in values) {
+                val one = LinkedHashMap<String, JsonElement>(); one[k] = JsonPrimitive(value)
+                when (k) {
+                    "type" -> listOf("into", "replace").forEach { o -> opts[o]?.let { one[o] = it } }
+                    "swipe" -> opts["on"]?.let { one["on"] = it }
+                    "expect", "expect_gone" -> opts["timeout_ms"]?.let { one["timeout_ms"] = it }
+                }
+                out += JsonObject(one)
+            }
+        }
+        return out.ifEmpty { listOf(st) }       // nothing recognised: step() reports it as unknown
+    }
     }
 }

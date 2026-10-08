@@ -325,7 +325,8 @@ fun KTextField(
                 else -> null
             },
             isError = error != null,
-            singleLine = singleLine, minLines = minLines, maxLines = maxLines,
+            // maxLines = 3 with the default minLines = 4 would crash: the minimum gives way.
+            singleLine = singleLine, minLines = if (singleLine) 1 else minOf(minLines, maxLines).coerceAtLeast(1), maxLines = if (singleLine) 1 else maxLines.coerceAtLeast(1),
             enabled = enabled, readOnly = readOnly,
             visualTransformation = if (password && !reveal) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = keyboardOptions ?: KeyboardOptions(keyboardType = if (password && keyboard == KeyboardType.Text) KeyboardType.Password else keyboard),

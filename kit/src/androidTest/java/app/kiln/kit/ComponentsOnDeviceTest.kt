@@ -138,7 +138,7 @@ class ComponentsOnDeviceTest {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 KTextField(name, { name = it }, label = "Name", helper = "As on ID", maxLength = 5, error = if (name == "bad") "Not allowed" else null)
                 KTextField(pin, { pin = it }, label = "PIN", password = true)
-                KTextArea(notes, { notes = it }, label = "Notes")
+                KTextArea(notes, { notes = it }, label = "Notes", maxLines = 3)  // below the default minLines: must not crash
                 KSearchBar(q, { q = it }, hint = "Search recipes")
                 KOtpField(otp, { otp = it }, length = 4)
             }
