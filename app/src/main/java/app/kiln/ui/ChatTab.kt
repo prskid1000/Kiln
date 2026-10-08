@@ -483,7 +483,8 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
     val stopped = tools.count { it.status == Activity.Status.STOPPED }
     val current = items.lastOrNull { it.status == Activity.Status.RUNNING }
     val secs = items.sumOf { it.ms } / 1000.0
-    val shot = items.lastOrNull { it.images.isNotEmpty() }?.images?.firstOrNull()
+    // The newest picture of the screen in this group (a step's own preview or its result image).
+    val shot = items.lastOrNull { it.preview != null || it.images.isNotEmpty() }?.let { it.preview ?: it.images.first() }
     if (live) {
         // While it works, show each step as it finishes (latest few, the rest one tap away), then what's running now.
         val done = items.filter { it !== current && !(it.kind == Activity.Kind.THINKING && it.text.isBlank()) }
@@ -538,7 +539,8 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
                 items.forEach { if (it.kind == Activity.Kind.THINKING) Box(Modifier.padding(vertical = 4.dp)) { ThoughtCard(it, live = false) } else StepRow(it) }
             }
         }
-        if (shot != null) Screenshot(shot, Modifier.padding(top = 8.dp))
+        // Collapsed: the latest screen stands for the group. Opened: each step shows its own, so not again here.
+        if (shot != null && !open) Screenshot(shot, Modifier.padding(top = 8.dp))
         items.lastOrNull { it.video != null }?.video?.let { QaVideo(it, Modifier.padding(top = 8.dp).fillMaxWidth()) }
     }
 }
