@@ -97,7 +97,8 @@ import java.time.format.DateTimeFormatter
 
 /** Small / Medium / Large: one knob for height, padding and text size. */
 enum class KSize(private val h: Int, private val pad: Int, private val txt: Int, private val ic: Int) {
-    Small(34, 12, 13, 16), Medium(44, 18, 15, 18), Large(54, 24, 17, 22);
+    // Medium and Large meet the 48dp touch-target minimum; Small is for dense rows.
+    Small(36, 12, 13, 16), Medium(48, 18, 15, 18), Large(56, 24, 17, 22);
     // Scaled by the theme's density and text scale (KilnTheme `density`, `textScale`).
     val height: Dp get() = (h * Nocturne.sizeScale).dp
     val padH: Dp get() = (pad * Nocturne.sizeScale).dp

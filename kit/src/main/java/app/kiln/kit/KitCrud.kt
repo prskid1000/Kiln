@@ -123,7 +123,11 @@ fun <T> KCrudList(
                 }
             }
         }
-        if (showAddButton) Box(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { KFab(Icons.Filled.Add, "Add $itemName") { state.add() } }
+        // The + button moves up while a toast shows, so the toast never covers it.
+        val lift by androidx.compose.animation.core.animateDpAsState(if (toast.host.currentSnackbarData != null) 72.dp else 0.dp, label = "fab")
+        if (showAddButton) Box(Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = lift)) {
+            KFab(Icons.Filled.Add, "Add $itemName") { state.add() }
+        }
         KToastHost(toast)
     }
 
@@ -132,7 +136,10 @@ fun <T> KCrudList(
     if (state.adding || editing != null) {
         var draft by remember(editing?.id, state.adding) { mutableStateOf(editing?.value ?: newItem()) }
         var error by remember(editing?.id, state.adding) { mutableStateOf<String?>(null) }
-        fun close() { state.adding = false; state.editing = null }
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+        val focus = androidx.compose.ui.platform.LocalFocusManager.current
+        // Closing the form also puts the keyboard away.
+        fun close() { focus.clearFocus(); keyboard?.hide(); state.adding = false; state.editing = null }
         KBottomSheet(true, { close() }, title = if (editing == null) "New $itemName" else "Edit $itemName") {
             form(draft) { draft = it; error = null }
             error?.let { KAlert(it, tone = KTone.Danger) }

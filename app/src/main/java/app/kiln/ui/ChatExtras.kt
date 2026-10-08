@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,13 +54,27 @@ import java.io.File
 @Composable
 fun QaVideo(path: String, modifier: Modifier = Modifier) {
     if (!File(path).isFile) return
-    AndroidView(factory = { ctx ->
-        VideoView(ctx).apply {
-            setVideoURI(Uri.fromFile(File(path)))
-            setMediaController(MediaController(ctx).also { it.setAnchorView(this) })
-            setOnPreparedListener { it.isLooping = true; start() }
-        }
-    }, modifier = modifier.heightIn(max = 320.dp).clip(RoundedCornerShape(14.dp)))
+    // A VideoView stretches to whatever box it gets, so size the box to the video's own shape.
+    val ratio = remember(path) {
+        runCatching {
+            android.media.MediaMetadataRetriever().use { r ->
+                r.setDataSource(path)
+                val w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)!!.toFloat()
+                val h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)!!.toFloat()
+                val rot = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if (rot % 180 == 0) w / h else h / w
+            }
+        }.getOrDefault(9f / 19.5f)
+    }
+    androidx.compose.foundation.layout.Box(modifier, contentAlignment = Alignment.CenterStart) {
+        AndroidView(factory = { ctx ->
+            VideoView(ctx).apply {
+                setVideoURI(Uri.fromFile(File(path)))
+                setMediaController(MediaController(ctx).also { it.setAnchorView(this) })
+                setOnPreparedListener { it.isLooping = true; start() }
+            }
+        }, modifier = Modifier.height(320.dp).aspectRatio(ratio).clip(RoundedCornerShape(14.dp)))
+    }
 }
 
 /** Rules the agent proposed after a correction; Save appends them to the project's memory. */

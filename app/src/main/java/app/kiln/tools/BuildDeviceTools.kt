@@ -422,7 +422,7 @@ class TypeTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val description = "Type text into the focused field (tap the field first). It adds to what's there; replace: true sets the field to exactly this text. The result says what the field now holds."
     override val schema = schema { str("text", "Text to type."); bool("replace", "Replace the field's text instead of adding to it.", required = false) }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        val r = device.type(input.req("text"), replace = input["replace"]?.toString() == "true")
+        val r = device.type(input.req("text"), replace = input.str("replace") == "true")
         return if (r.ok) ToolResult.ok(r.out.ifBlank { "typed" }) else ToolResult.error(r.err.ifBlank { "couldn't type" })
     }
 }
@@ -581,7 +581,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
 
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val steps = input.a("steps")?.mapNotNull { it as? JsonObject } ?: return ToolResult.error("give steps")
-        val keepGoing = input["keep_going"]?.toString() == "true"
+        val keepGoing = input.str("keep_going") == "true"
         val pkg = pkg(ctx)
         val report = StringBuilder(); var failed = 0
         suspend fun visible(text: String) = device.find(device.uiTree(pkg), text) != null
@@ -609,7 +609,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
                 val node = device.find(before, field) ?: return false to "type into “$field”: no such field on screen"
                 device.tap(node.cx, node.cy); delay(400)
             }
-            val r = device.type(text, replace = st["replace"]?.toString() == "true")
+            val r = device.type(text, replace = st.str("replace") == "true")
             return r.ok to (if (r.ok) r.out.ifBlank { "typed “$text”" } else "type “$text”: ${r.err}")
         }
         s("swipe")?.let { dir ->
@@ -627,17 +627,17 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         }
         s("key")?.let { k -> device.key(k); delay(500); return true to "key $k → ${screenChange(ctx, before)}" }
         s("expect")?.let { t ->
-            val until = System.currentTimeMillis() + (st["timeout_ms"]?.toString()?.toLongOrNull() ?: 3000)
+            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000)
             while (System.currentTimeMillis() < until) { if (visible(t)) return true to "“$t” is on screen"; delay(300) }
             val now = device.uiTree(pkg).filter { it.text.isNotBlank() || it.desc.isNotBlank() }.take(12).joinToString { "“${it.label()}”" }
             return false to "expected “$t” — not on screen. Showing: $now"
         }
         s("expect_gone")?.let { t ->
-            val until = System.currentTimeMillis() + (st["timeout_ms"]?.toString()?.toLongOrNull() ?: 3000)
+            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000)
             while (System.currentTimeMillis() < until) { if (!visible(t)) return true to "“$t” is gone"; delay(300) }
             return false to "expected “$t” to be gone — still on screen"
         }
-        st["wait_ms"]?.toString()?.toLongOrNull()?.let { ms -> delay(ms.coerceIn(0, 10_000)); return true to "waited ${ms}ms" }
+        st.str("wait_ms")?.toLongOrNull()?.let { ms -> delay(ms.coerceIn(0, 10_000)); return true to "waited ${ms}ms" }
         return false to "unknown step ${st} — use tap, type (+ into), swipe (+ on), key, expect, expect_gone or wait_ms"
     }
 

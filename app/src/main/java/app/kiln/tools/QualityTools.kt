@@ -143,7 +143,11 @@ fun checkUi(nodes: List<UiNode>, minPx: Int, shot: Bitmap?): List<String> {
     return out.distinct().take(40)
 }
 
-/** Contrast between the darkest and lightest tenth of the pixels inside a text node. */
+/**
+ * Contrast between the darkest and lightest few pixels inside a text node. Glyphs cover only a small
+ * part of a button or field, so averaging a tenth of the pixels mixes antialiased edges into the
+ * text colour and reports good contrast as poor; the extremes are the text and its background.
+ */
 private fun contrast(shot: Bitmap, n: UiNode): Double? {
     val l = n.left.coerceIn(0, shot.width - 1); val r = n.right.coerceIn(l + 1, shot.width)
     val t = n.top.coerceIn(0, shot.height - 1); val b = n.bottom.coerceIn(t + 1, shot.height)
@@ -153,7 +157,8 @@ private fun contrast(shot: Bitmap, n: UiNode): Double? {
     var y = t; while (y < b) { var x = l; while (x < r) { ls += lum(shot.getPixel(x, y)); x += step }; y += step }
     if (ls.size < 16) return null
     ls.sort()
-    val dark = ls.take(ls.size / 10).average(); val light = ls.takeLast(ls.size / 10).average()
+    val k = maxOf(3, ls.size / 50)
+    val dark = ls.take(k).average(); val light = ls.takeLast(k).average()
     if (light - dark < 0.01) return null   // a flat area: no text pixels sampled
     return (light + 0.05) / (dark + 0.05)
 }

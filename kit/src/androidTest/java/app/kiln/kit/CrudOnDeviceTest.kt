@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -68,15 +69,20 @@ class CrudOnDeviceTest {
         rule.waitUntil(3000) { store.items.firstOrNull()?.note == "Team lunch" }
         // A second item, then search.
         rule.onNodeWithContentDescription("Add expense").performClick()
-        rule.onNode(hasSetTextAction() and hasText("Amount")).performTextInput("3")
-        rule.onNode(hasSetTextAction() and hasText("Note")).performTextInput("Coffee")
+        // The sheet animates in: wait for it, and focus each field before typing.
+        rule.waitUntil(3000) { rule.onAllNodesWithText("New expense").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        rule.onNode(hasSetTextAction() and hasText("Amount")).performClick().performTextInput("3")
+        rule.onNode(hasSetTextAction() and hasText("Note")).performClick().performTextInput("Coffee")
         rule.onNodeWithText("Save").performClick()
         rule.waitUntil(3000) { store.size == 2 }
-        rule.onNode(hasSetTextAction() and hasText("Search expenses")).performTextInput("cof")
+        rule.waitUntil(3000) { rule.onAllNodesWithText("New expense").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+        rule.onNode(hasSetTextAction() and hasContentDescription("Search expenses")).performTextInput("cof")
         rule.waitUntil(3000) { rule.onAllNodesWithText("Team lunch").fetchSemanticsNodes().isEmpty() }
         rule.onNodeWithText("Coffee").assertExists()
         rule.onNode(hasSetTextAction() and hasText("cof")).performTextClearance()
-        rule.onNode(hasSetTextAction() and hasText("Search expenses")).performTextInput("zzz")
+        rule.onNode(hasSetTextAction() and hasContentDescription("Search expenses")).performTextInput("zzz")
         rule.onNodeWithText("Nothing matches “zzz”").assertExists()
         rule.onNode(hasSetTextAction() and hasText("zzz")).performTextClearance()
         // Swipe to delete, then Undo brings it back.

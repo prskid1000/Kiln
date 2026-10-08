@@ -133,6 +133,8 @@ class KToast internal constructor(internal val host: SnackbarHostState, private 
     /** Show [message]; with [action], [onAction] runs if it's tapped (e.g. "Undo"). */
     fun show(message: String, tone: KTone = KTone.Neutral, action: String? = null, long: Boolean = false, onAction: () -> Unit = {}) {
         this.tone = tone
+        // The newest message replaces the one showing: an Undo must not wait behind a "Saved".
+        host.currentSnackbarData?.dismiss()
         scope.launch {
             val r = host.showSnackbar(message, action, withDismissAction = action == null,
                 duration = if (long || action != null) SnackbarDuration.Long else SnackbarDuration.Short)
