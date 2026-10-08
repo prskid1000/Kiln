@@ -45,6 +45,9 @@ class CoreTest {
         assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+        // Grouped steps with a description (run 9).
+        assertEquals(listOf("""{"tap":"Add"}""", """{"type":"500","into":"Amount"}"""),
+            steps("""{"desc":"Add food expense","actions":[{"tap":{"target":"Add"}},{"type_text":"500","field":"Amount"}]}"""))
     }
 
     @Test fun `runtime crashes get a likely cause`() {

@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -96,7 +97,8 @@ fun KBottomSheet(open: Boolean, onDismiss: () -> Unit, title: String? = null, fu
                  content: @Composable ColumnScope.() -> Unit) {
     if (!open) return
     ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = fullHeight), containerColor = Nocturne.surface) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // imePadding: the keyboard pushes the sheet's content (and its Save button) up instead of covering it.
+        Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)
             content()
         }

@@ -221,6 +221,26 @@ class CleanTool(private val builds: BuildEngine) : Tool {
 abstract class DeviceTool(protected val warden: Warden, internal val device: Device) : Tool {
     override val traits: Set<Trait> get() = setOf(Trait.NEEDS_BROKER)
     internal fun pkg(ctx: ToolContext) = ctx.project.meta().`package`
+
+    /**
+     * Where to tap [n]: its centre, or the middle of its visible part when it's cut off by the screen
+     * edge. Null when none of it is on screen — a tap there would silently do nothing (run 9 tapped a
+     * Save button at y=2903 on a 2780 px screen and got "No change on screen").
+     */
+    internal suspend fun reachable(n: app.kiln.device.UiNode): Pair<Int, Int>? {
+        val (w, h) = device.screenSize()
+        val l = maxOf(n.left, 0); val r = minOf(n.right, w); val t = maxOf(n.top, 0); val b = minOf(n.bottom, h)
+        return if (r - l < 8 || b - t < 8) null else (l + r) / 2 to (t + b) / 2
+    }
+
+    internal suspend fun offScreen(n: app.kiln.device.UiNode, label: String): String {
+        val (_, h) = device.screenSize()
+        val where = if (n.top >= h) "below the bottom of the screen (y=${n.top}, screen is $h px tall)" else "above the top of the screen"
+        return "“$label” is $where, so a tap can't reach it. If the keyboard is open, close it (press_key BACK); otherwise scroll it " +
+            "into view (swipe ${if (n.top >= h) "up" else "down"}) and tap again. If it's a button in a sheet or dialog, the layout " +
+            "probably needs to scroll or sit above the keyboard."
+    }
+
     final override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         if (warden.status() != Warden.Status.READY)
             return ToolResult.error("Warden is ${warden.status().name.lowercase().replace('_', ' ')} — device tools need it (start Warden and grant Kiln).")
@@ -408,7 +428,7 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
         val (x, y) = if (target != null) {
             val n = device.find(before, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
                 treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
-            n.cx to n.cy
+            reachable(n) ?: return ToolResult.error(offScreen(n, target))
         } else if (coord != null) coord.groupValues[1].toInt() to coord.groupValues[2].toInt()
         else (input.int("x") ?: 0) to (input.int("y") ?: 0)
         device.tap(x, y)
@@ -612,8 +632,9 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         val before = device.uiTree(pkg)
         s("tap")?.let { t ->
             val node = device.find(before, t) ?: return false to "tap “$t”: not on screen (${before.filter { it.clickable }.take(8).joinToString { "“${it.label()}”" }} …)"
-            device.tap(node.cx, node.cy); delay(600)
-            return true to "tap “$t” → ${screenChange(ctx, before, node.cx, node.cy)}"
+            val (x, y) = reachable(node) ?: return false to "tap “$t”: ${offScreen(node, t)}"
+            device.tap(x, y); delay(600)
+            return true to "tap “$t” → ${screenChange(ctx, before, x, y)}"
         }
         s("type")?.let { text ->
             s("into")?.let { field ->
@@ -660,6 +681,10 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
      */
     companion object {
     internal fun expand(st: JsonObject): List<JsonObject> {
+        // Grouped steps (run 9): {"desc": "Add food expense", "actions": [ … ]} → the actions, in order.
+        listOf("actions", "steps", "do", "then").firstNotNullOfOrNull { st[it] as? JsonArray }?.let { group ->
+            return group.mapNotNull { it as? JsonObject }.flatMap(::expand)
+        }
         val alias = mapOf("type_text" to "type", "input" to "type", "enter" to "type", "press_key" to "key", "press" to "key",
             "wait" to "wait_ms", "sleep" to "wait_ms", "wait_for" to "expect", "assert" to "expect", "see" to "expect",
             "expect_text" to "expect", "assert_gone" to "expect_gone", "expect_not" to "expect_gone", "click" to "tap",
