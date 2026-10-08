@@ -565,8 +565,17 @@ fun rememberNow(everyMillis: Long = 1000): Long {
 
 /** Formatting for people: money, numbers, dates, relative times, durations. */
 object KFormat {
-    fun money(amount: Double, currency: String = Currency.getInstance(Locale.getDefault()).currencyCode, locale: Locale = Locale.getDefault()): String =
-        NumberFormat.getCurrencyInstance(locale).apply { this.currency = Currency.getInstance(currency) }.format(amount)
+    /**
+     * Money for display. [currency] is an ISO code ("USD", "INR") or a symbol ("$", "₹", "€") — a
+     * symbol is simply put in front of the amount, so a settings field holding either never crashes.
+     */
+    fun money(amount: Double, currency: String = Currency.getInstance(Locale.getDefault()).currencyCode, locale: Locale = Locale.getDefault()): String {
+        val code = currency.trim()
+        if (Regex("^[A-Za-z]{3}$").matches(code)) runCatching {
+            return NumberFormat.getCurrencyInstance(locale).apply { this.currency = Currency.getInstance(code.uppercase()) }.format(amount)
+        }
+        return code + NumberFormat.getNumberInstance(locale).apply { minimumFractionDigits = 2; maximumFractionDigits = 2 }.format(amount)
+    }
     fun number(value: Double, decimals: Int = 0): String = NumberFormat.getNumberInstance().apply {
         maximumFractionDigits = decimals; minimumFractionDigits = decimals }.format(value)
     /** 1.2K, 3.4M. */

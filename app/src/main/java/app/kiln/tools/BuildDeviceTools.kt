@@ -330,7 +330,7 @@ class LogcatTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val description = "App log lines. since_last=true returns only lines since the previous logcat/launch (the usual case). level: verbose | debug | info | warn | error."
     override val schema = schema {
         bool("since_last", "Only new lines since the last check.", required = false)
-        str("level", "Minimum level.", enum = listOf("verbose", "debug", "info", "warn", "error", "V", "D", "I", "W", "E"), required = false)
+        str("level", "Minimum level.", enum = listOf("verbose", "debug", "info", "warn", "error", "VERBOSE", "DEBUG", "INFO", "WARN", "ERROR", "V", "D", "I", "W", "E"), required = false)
         str("grep", "Only lines matching this regex; empty for all.", required = false)
     }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.READ_ONLY)

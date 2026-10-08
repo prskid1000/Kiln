@@ -12,6 +12,7 @@ import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.node.RootForTest
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
@@ -35,6 +36,13 @@ internal object KilnInspector {
     const val INPUT = "app.kiln.kit.INPUT"
     @Volatile private var installed = false
     @Volatile private var resumed: Activity? = null
+    /**
+     * Every Compose root of the app, bottom window first: the activity's, then each dialog, bottom
+     * sheet, dropdown or popup (Compose draws those in windows of their own, outside the activity's views).
+     */
+    private fun liveRoots(): List<ViewRootForTest> =
+        android.view.inspector.WindowInspector.getGlobalWindowViews().filter { it.isShown }
+            .flatMap { roots(it) }.filterIsInstance<ViewRootForTest>()
 
     fun install(activity: Activity) {
         val app = activity.application
@@ -69,11 +77,37 @@ internal object KilnInspector {
     private fun dump(): String {
         val a = resumed ?: return "<hierarchy rotation=\"0\"></hierarchy>"
         val out = StringBuilder("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation=\"0\">")
-        roots(a.window.decorView).forEach { view ->
-            val at = IntArray(2).also { view.getLocationOnScreen(it) }
-            node((view as RootForTest).semanticsOwner.rootSemanticsNode, a.packageName, at, out)
+        val roots = liveRoots().ifEmpty { roots(a.window.decorView).filterIsInstance<ViewRootForTest>() }
+        // A modal dialog or sheet covers what's under it: list only what the user can reach.
+        val top = roots.lastOrNull()
+        val shown = if (top != null && roots.size > 1 && covers(top.view, a.window.decorView)) listOf(top) else roots
+        shown.forEach { r ->
+            val at = IntArray(2).also { r.view.getLocationOnScreen(it) }
+            node(r.semanticsOwner.rootSemanticsNode, a.packageName, at, out)
         }
         return out.append("</hierarchy>").toString()
+    }
+
+    /**
+     * Whether [v]'s window is modal over [base]'s: a dialog or bottom sheet (an application window of
+     * its own), as opposed to a dropdown or popup (a panel attached to the screen beneath).
+     */
+    private fun covers(v: View, base: View): Boolean {
+        val win = v.rootView
+        if (win === base.rootView) return false
+        val type = (win.layoutParams as? android.view.WindowManager.LayoutParams)?.type ?: return false
+        return type == android.view.WindowManager.LayoutParams.TYPE_APPLICATION ||
+            (win.width >= base.width * 0.9 && win.height >= base.height * 0.9)
+    }
+
+    /** The topmost Compose window under the screen point (x, y), or the activity's decor view. */
+    private fun targetAt(x: Float, y: Float, fallback: View): View {
+        for (r in liveRoots().asReversed()) {
+            val win = r.view.rootView
+            val at = IntArray(2).also { win.getLocationOnScreen(it) }
+            if (x >= at[0] && y >= at[1] && x < at[0] + win.width && y < at[1] + win.height) return win
+        }
+        return fallback
     }
 
     /**
@@ -83,9 +117,11 @@ internal object KilnInspector {
      */
     private fun input(i: Intent): String {
         val a = resumed ?: return "error: no activity on screen"
-        val root = a.window.decorView
-        val at = IntArray(2).also { root.getLocationOnScreen(it) }
+        val decor = a.window.decorView
         fun touch(points: List<Pair<Float, Float>>, totalMs: Long) {
+            // The whole gesture goes to the window under its first point (a dialog sits above the activity).
+            val root = targetAt(points.first().first, points.first().second, decor)
+            val at = IntArray(2).also { root.getLocationOnScreen(it) }
             val t0 = android.os.SystemClock.uptimeMillis()
             val step = if (points.size > 1) totalMs / (points.size - 1) else 0L
             points.forEachIndexed { k, (x, y) ->
@@ -106,7 +142,8 @@ internal object KilnInspector {
             }
             "text" -> {
                 val text = i.getStringExtra("text").orEmpty()
-                val field = roots(root).flatMap { all((it as RootForTest).semanticsOwner.unmergedRootSemanticsNode) }
+                val field = (liveRoots().ifEmpty { roots(decor).filterIsInstance<ViewRootForTest>() }).asReversed()
+                    .flatMap { all(it.semanticsOwner.unmergedRootSemanticsNode) }
                     .firstOrNull { it.config.getOrNull(SemanticsProperties.Focused) == true && SemanticsActions.SetText in it.config }
                     ?: return "error: no text field has focus — tap one first"
                 val now = field.config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
@@ -115,9 +152,13 @@ internal object KilnInspector {
             }
             "key" -> {
                 val key = i.getStringExtra("key").orEmpty().uppercase().removePrefix("KEYCODE_")
-                if (key == "BACK") { (a as? androidx.activity.ComponentActivity)?.onBackPressedDispatcher?.onBackPressed() ?: a.finish(); return "back" }
                 val code = android.view.KeyEvent.keyCodeFromString("KEYCODE_$key")
                 if (code == android.view.KeyEvent.KEYCODE_UNKNOWN) return "error: unknown key $key"
+                // Keys go to the top window: Back closes an open dialog or sheet before leaving the screen.
+                val root = liveRoots().lastOrNull()?.view?.rootView ?: decor
+                if (key == "BACK" && root === decor.rootView) {
+                    (a as? androidx.activity.ComponentActivity)?.onBackPressedDispatcher?.onBackPressed() ?: a.finish(); return "back"
+                }
                 val t = android.os.SystemClock.uptimeMillis()
                 root.dispatchKeyEvent(android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_DOWN, code, 0))
                 root.dispatchKeyEvent(android.view.KeyEvent(t, t + 30, android.view.KeyEvent.ACTION_UP, code, 0))

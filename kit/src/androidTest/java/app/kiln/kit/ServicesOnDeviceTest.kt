@@ -123,6 +123,8 @@ class ServicesOnDeviceTest {
 
     @Test fun formatting() {
         assertEquals("$1,234.50", KFormat.money(1234.5, "USD", Locale.US))
+        assertEquals("₹1,234.50", KFormat.money(1234.5, "₹", Locale.US))          // a symbol works too
+        assertEquals("$1,234.50", KFormat.money(1234.5, "usd", Locale.US))
         assertEquals("1.2K", KFormat.compact(1234)); assertEquals("3.4M", KFormat.compact(3_400_000)); assertEquals("999", KFormat.compact(999))
         assertEquals("05:09", KFormat.duration(309)); assertEquals("1:05:09", KFormat.duration(3909))
         val now = System.currentTimeMillis()
