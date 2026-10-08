@@ -433,6 +433,7 @@ class ShellTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.NEEDS_APPROVAL, Trait.DESTRUCTIVE)
     override fun precheck(input: JsonObject): String? = input.str("command")?.let(::shellRefusal)
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
+        shellRefusal(input.req("command"))?.let { return ToolResult.error(it) }
         val r = warden.exec(listOf("sh", "-c", input.req("command")), timeoutMs = 60_000)
         return ToolResult(ctx.spill("exit ${r.code}\n${r.all}"), isError = !r.ok)
     }

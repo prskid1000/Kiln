@@ -99,6 +99,7 @@ class WriteFileTool : Tool {
     override val traits = emptySet<Trait>()
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val rel = input.req("path")
+        misplacedSource(rel)?.let { return ToolResult.error(it) }
         val f = ctx.project.resolveWritable(rel)
         val existed = f.exists()
         f.parentFile?.mkdirs()

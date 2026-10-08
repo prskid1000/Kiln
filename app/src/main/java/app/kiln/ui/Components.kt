@@ -170,17 +170,20 @@ object IconCache {
     /** Bumped after anything that may have built an APK; icons re-check their file when it changes. */
     val version = kotlinx.coroutines.flow.MutableStateFlow(0)
 
-    private val map = java.util.concurrent.ConcurrentHashMap<String, androidx.compose.ui.graphics.ImageBitmap?>()
+    // ConcurrentHashMap can't hold null: an APK without a readable icon is remembered as NONE.
+    private object NONE
+    private val map = java.util.concurrent.ConcurrentHashMap<String, Any>()
     fun load(ctx: android.content.Context, apk: java.io.File, px: Int): androidx.compose.ui.graphics.ImageBitmap? {
         if (!apk.isFile) return null
-        return map.getOrPut("${apk.path}@${apk.lastModified()}@$px") {
+        val v = map.getOrPut("${apk.path}@${apk.lastModified()}@$px") {
             runCatching {
                 val pm = ctx.packageManager
                 val info = pm.getPackageArchiveInfo(apk.path, 0)?.applicationInfo ?: return@runCatching null
                 info.sourceDir = apk.path; info.publicSourceDir = apk.path
                 info.loadIcon(pm).toBitmap(px, px).asImageBitmap()
-            }.getOrNull()
+            }.getOrNull() ?: NONE
         }
+        return v as? androidx.compose.ui.graphics.ImageBitmap
     }
 }
 
