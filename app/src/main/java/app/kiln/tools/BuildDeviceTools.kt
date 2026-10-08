@@ -83,6 +83,9 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     if (r.ok) return linted(r) to ""
     val unresolved = Regex("unresolved reference '([A-Z][A-Za-z0-9_]*)'")
     val fixes = linkedSetOf<String>()
+    // Kotlin reports Icons.Filled.Settings's 'Settings' only once 'Icons' resolves: up to three passes.
+    for (pass in 1..3) {
+    val before = fixes.size
     for (e in r.errors) {
         val name = unresolved.find(e.message)?.groupValues?.get(1) ?: continue
         val path = e.file ?: continue
@@ -108,9 +111,13 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         if (readCurrent) ctx.state.readStamps[rel] = f.lastModified()
         fixes += "$rel: import $fq"
     }
-    if (fixes.isEmpty()) return linted(r) to ""
+    if (fixes.size == before) break
     ctx.progress("fixed imports, rebuilding")
-    r = linted(builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) })
+    r = builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) }
+    if (r.ok) break
+    }
+    if (fixes.isEmpty()) return linted(r) to ""
+    r = linted(r)
     return r to "Kiln auto-fixed imports (only import lines changed; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n"
 }
 

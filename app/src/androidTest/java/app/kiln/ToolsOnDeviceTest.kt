@@ -157,7 +157,7 @@ class ToolsOnDeviceTest {
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun Probe() {\n    Icon(Icons.Filled.Settings, \"Settings\")\n}\n"}"""),
             Case("check", "{}", expect = "auto-fixed imports"),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.material.icons.filled.Settings"),
-            Case("grep", """{"pattern":"import androidx.compose.material3.Icon$","path":"$src"}""", expect = "Bad.kt"),
+            Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.material3.Icon\n"),
             // A misspelt project symbol gets a "did you mean".
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nfun HomeScreen() = 1\nfun probe() = HomeScren()\n"}"""),
             Case("check", "{}", expectError = true, expect = "Did you mean 'HomeScreen'"),

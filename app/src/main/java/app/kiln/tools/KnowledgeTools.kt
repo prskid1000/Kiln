@@ -99,7 +99,7 @@ class ClassIndex(private val toolchain: Toolchain) {
         val all = (where.keys.asSequence() + topLevel.asSequence())
             .filter { '$' !in it && it.substringAfterLast('.') == name && !it.contains(".internal.") }.distinct().toList()
         // Icons.Filled.X / Icons.Outlined.X …: the icon's style package comes from the code line.
-        ICON_STYLE.find(line)?.let { m ->
+        Regex(ICON_STYLE.pattern + Regex.escape(name) + "\\b").find(line)?.let { m ->
             val pkg = "androidx.compose.material.icons." + (if (m.groupValues[1] == "AutoMirrored") "automirrored." else "") +
                 m.groupValues[2].lowercase() + "."
             return all.firstOrNull { it == pkg + name }
