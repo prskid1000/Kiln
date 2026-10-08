@@ -19,6 +19,8 @@ Load this before starting any app with more than one screen or any saved data.
 - `ui/components/` — composables reused by two or more screens.
 - Keep files under ~300 lines; split by feature, not by layer, once a feature grows.
 
+**Lists of saved things** (expenses, notes, plants, tasks): use `KCrudList(items = Repo.x, newItem = { X() }, title = { … }) { draft, set -> form fields }`. It already does the list, search, swipe-to-delete with Undo, empty state, + button and the add/edit sheet with validation; open it from elsewhere with `rememberKCrudState()` → `crud.add()`. Don't hand-build these.
+
 **Navigation**: up to 5 top-level destinations → `KilnTabs`; drill-down (list → detail) → Navigation 3
 (see the kit reference). Pass ids between screens, not whole objects.
 
