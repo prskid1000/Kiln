@@ -480,6 +480,8 @@ private fun StepGroup(items: List<Activity>, live: Boolean) {
                     Text(current.progress.ifBlank { "$title…" }, style = T.bodySmall.copy(color = N.textLabel), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            // What the agent last saw on the device, as it tests.
+            if (shot != null) Screenshot(shot, Modifier.padding(top = 8.dp))
         }
         return
     }
