@@ -118,7 +118,8 @@ class MainActivity : KilnActivity() {
 - **Surface style** (`style = KStyle.…`, combines with any theme): `Flat` (default), `Glass` (glassmorphism:
   frosted translucent panes over a gradient backdrop), `Neumorphic` (soft extruded, best on light themes),
   `Outlined` (borders only), `Elevated` (floating shadows), `Brutalist` (thick borders, hard offset shadows,
-  forces sharp corners). Custom surfaces match with `Modifier.kSurface(shape, fill, border)`; full-screen
+  forces sharp corners), `Clay` (claymorphism: puffy pastel 3D, round), `Neon` (cyberpunk glowing edges,
+  dark themes), `Skeuomorphic` (gradients and bevels). Custom surfaces match with `Modifier.kSurface(shape, fill, border)`; full-screen
   custom layouts get the style's background with `Modifier.kBackdrop()`.
 - **Let the app's users choose**: `KThemePicker(selected, onSelect)` + `rememberStored("theme", …)` (see the theming skill).
 - **One component only** (rare; only when the user asks): `colors = KColors(container, content, border)`

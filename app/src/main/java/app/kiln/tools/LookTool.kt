@@ -21,10 +21,18 @@ object Looks {
         LookTheme("Sunset Boulevard", "SunsetBoulevard", 0xFFFDF6EC, 0xFFE76F51, 0xFFF4A261, false, "vibrant, warm"),
         LookTheme("Tech Innovation", "TechInnovation", 0xFF1E1E1E, 0xFF0066FF, 0xFF00E5E5, true, "bold, techy"),
     )
-    /** KStyle names with a few words each. */
+    /** A surface style: its KStyle code, the name people know, and a few words. */
+    data class LookStyle(val code: String, val label: String, val hint: String)
     val styles = listOf(
-        "Flat" to "solid, simple", "Glass" to "frosted glass", "Neumorphic" to "soft extruded",
-        "Outlined" to "borders only", "Elevated" to "floating shadows", "Brutalist" to "bold, hard shadows",
+        LookStyle("Flat", "Flat", "solid, simple"),
+        LookStyle("Glass", "Glass", "Glassmorphism · frosted glass over a gradient"),
+        LookStyle("Neumorphic", "Neumorphic", "Neumorphism · soft extruded, best on light themes"),
+        LookStyle("Clay", "Clay", "Claymorphism · puffy pastel 3D, very rounded"),
+        LookStyle("Elevated", "Elevated", "Material · cards floating on shadows"),
+        LookStyle("Outlined", "Outlined", "borders only, airy"),
+        LookStyle("Skeuomorphic", "Skeuo", "Skeuomorphism · gradients and bevels, real-object feel"),
+        LookStyle("Neon", "Neon", "Cyberpunk · glowing edges, best on dark themes"),
+        LookStyle("Brutalist", "Brutalist", "Neo-brutalism · bold borders, hard shadows"),
     )
     const val DEFAULT = "default"
 

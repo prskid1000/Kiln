@@ -12,7 +12,9 @@
   "Denser / fit more" → `KDensity.Compact`. "Rounder / sharper" → `corners = KCorners.Round / Sharp`.
 - A surface style: "glassy / glassmorphism / frosted" → `style = KStyle.Glass`; "soft UI / neumorphism" →
   `KStyle.Neumorphic` (pair with a light theme); "bold / brutalist / retro" → `KStyle.Brutalist`; "material / cards
-  that float" → `KStyle.Elevated`; "wireframe / outlined" → `KStyle.Outlined`.
+  that float" → `KStyle.Elevated`; "wireframe / outlined" → `KStyle.Outlined`; "clay / claymorphism / playful 3D" →
+  `KStyle.Clay`; "neon / cyberpunk / glow" → `KStyle.Neon` (dark theme); "skeuomorphic / realistic / retro gadget" →
+  `KStyle.Skeuomorphic`.
 - See-through cards over your own photo → `surfaceAlpha = 0.7f` and draw the image behind the content.
 - One element different (the user asked for exactly that) → `colors = KColors(container = …, content = …)` on that component.
 - Let the app's own users choose → `KThemePicker` + `rememberStored`, as below.

@@ -282,7 +282,7 @@ fun KilnTheme(
         if (a >= 1f) base else base.copy(surface = base.surface.copy(alpha = a), surfaceHi = base.surfaceHi.copy(alpha = a))
     }
     val f = font ?: theme.font
-    val c = corners ?: if (st == KStyle.Brutalist) KCorners.Sharp else theme.corners
+    val c = corners ?: when (st) { KStyle.Brutalist -> KCorners.Sharp; KStyle.Clay -> KCorners.Round; else -> theme.corners }
     // Publish before children compose, so Nocturne.* reads and K components see this theme.
     remember(p, f, c, density, textScale, st) {
         Nocturne.palette = p; Nocturne.font = f; Nocturne.cornerScale = c.scale; Nocturne.style = st

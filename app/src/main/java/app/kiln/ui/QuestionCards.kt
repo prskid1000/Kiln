@@ -135,9 +135,9 @@ fun LookPicker(title: String, onAnswer: (String) -> Unit) {
                 }
             }
         }
-        Text("Style · ${Looks.styles.first { it.first == style }.second}", style = T.label)
+        Text("Style · ${Looks.styles.first { it.code == style }.hint}", style = T.label)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Looks.styles.forEach { (s, _) -> KChip(s, s == style) { style = s } }
+            Looks.styles.forEach { s -> KChip(s.label, s.code == style) { style = s.code } }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             KField("", free, { free = it }, Modifier.weight(1f), hint = "Or describe it (\"pink and playful\")")
