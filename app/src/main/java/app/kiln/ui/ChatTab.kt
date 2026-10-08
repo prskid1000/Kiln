@@ -566,21 +566,8 @@ private fun Prompts(loop: AgentLoop) {
             }
         }
     }
-    question?.let { q ->
-        var free by remember(q) { mutableStateOf("") }
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().vCard(N.shapeLg, N.accent.copy(alpha = 0.6f)).padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(q.text, style = T.subtitle)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                q.options.forEach { o -> KChip(o, true) { loop.answerQuestion(o) } }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                KField("", free, { free = it }, Modifier.weight(1f), hint = "Or type an answer")
-                Spacer(Modifier.width(8.dp))
-                FilledIconBtn(Icons.Rounded.ArrowUpward, "Answer", enabled = free.isNotBlank()) { loop.answerQuestion(free.trim()) }
-            }
-        }
-    }
+    question?.takeIf { it.kind == "look" }?.let { q -> LookPicker(q.text) { loop.answerQuestion(it) } }
+    question?.takeIf { it.kind != "look" }?.let { q -> QuestionCard(q) { loop.answerQuestion(it) } }
 }
 
 @Composable
@@ -676,3 +663,4 @@ private fun Spend(loop: AgentLoop) {
         " · ${(prompt + usage.output) / 1000}k tokens · cache $cache%",
         style = T.monoSmall, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
 }
+

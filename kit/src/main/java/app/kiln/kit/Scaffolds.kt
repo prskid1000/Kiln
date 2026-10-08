@@ -54,8 +54,8 @@ fun KilnScreen(
     val scroll = if (large) TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
         else TopAppBarDefaults.pinnedScrollBehavior()
     val colors = TopAppBarDefaults.topAppBarColors(
-        containerColor = MaterialTheme.colorScheme.background,
-        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = if (Nocturne.surfaceStyle == KStyle.Glass) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.background,
+        scrolledContainerColor = if (Nocturne.surfaceStyle == KStyle.Glass) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceContainer,
     )
     val nav: @Composable () -> Unit = {
         if (onBack != null) IconButton(onClick = onBack) {
@@ -63,7 +63,7 @@ fun KilnScreen(
         }
     }
     Scaffold(
-        modifier = modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection),
+        modifier = modifier.fillMaxSize().kBackdrop().nestedScroll(scroll.nestedScrollConnection),
         topBar = {
             when {
                 large -> LargeTopAppBar(title = { Text(title) }, navigationIcon = nav, actions = actions,
@@ -77,7 +77,8 @@ fun KilnScreen(
         floatingActionButton = floatingAction,
         bottomBar = bottomBar,
         snackbarHost = { if (snackbar != null) SnackbarHost(snackbar) },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
     ) { padding -> content(padding) }
 }
 

@@ -268,7 +268,7 @@ class KitDocsTool(private val toolchain: Toolchain, private val skills: Skills? 
             for (w in words) {
                 if (n == w || n.substringAfterLast('.') == w) s += if (single) 60 else 20 else if (n.contains(w)) s += 25
                 if (e.category.lowercase().contains(w)) s += 10
-                s += minOf(3, Regex(Regex.escape(w)).findAll(e.doc.lowercase()).count()) * 4
+                s += minOf(3, Regex(Regex.escape(w)).findAll(e.doc.lowercase()).count()) * 8
                 if (e.signature.lowercase().contains(w)) s += 3
             }
             if (e.owner != null) s -= 5                       // prefer the object itself unless a member is named

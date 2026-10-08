@@ -27,34 +27,10 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-
-/** HTTP + JSON. Call from a coroutine; runs on the IO dispatcher. */
+/** The kit's shared HTTP client (connection pool, timeouts). Use [KHttp]; this is for raw OkHttp calls. */
 object KNet {
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-
-    suspend fun getText(url: String, headers: Map<String, String> = emptyMap()): String = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()
-        client.newCall(req).execute().use { r ->
-            if (!r.isSuccessful) throw IOException("HTTP ${r.code} for $url")
-            r.body.string()
-        }
-    }
-
-    suspend fun postJson(url: String, json: String, headers: Map<String, String> = emptyMap()): String =
-        withContext(Dispatchers.IO) {
-            val req = Request.Builder().url(url).post(json.toRequestBody("application/json".toMediaType()))
-                .apply { headers.forEach { (k, v) -> header(k, v) } }.build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) throw IOException("HTTP ${r.code} for $url")
-                r.body.string()
-            }
-        }
-
-    suspend fun <T> getJson(url: String, strategy: DeserializationStrategy<T>): T =
-        KJson.decodeFromString(strategy, getText(url))
-
-    suspend inline fun <reified T> getJson(url: String): T = getJson(url, serializer<T>())
 }
 
 /** Notifications with one default channel. Ask for the permission with [rememberPermission]. */
@@ -96,14 +72,4 @@ fun rememberPermission(permission: String): KPermission {
     val perm = remember(permission) { KPermission(initial) { launcher.launch(permission) } }
     holder = perm
     return perm
-}
-
-/** Open a URL, the dialer, share sheet etc. without boilerplate. */
-object KIntents {
-    fun openUrl(context: Context, url: String) =
-        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-
-    fun share(context: Context, text: String) =
-        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-            .putExtra(Intent.EXTRA_TEXT, text), null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }

@@ -400,7 +400,7 @@ object KOpen {
     fun wifiSettings(context: Context) = go(context, Intent(Settings.ACTION_WIFI_SETTINGS))
     /** This app's Play Store page (for "Rate us"). */
     fun playStore(context: Context, pkg: String = context.packageName) = go(context, Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")))
-    /** Share plain text (also [KIntents.share]). */
+    /** Share plain text. */
     fun shareText(context: Context, text: String, subject: String? = null) =
         go(context, Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
             .apply { subject?.let { putExtra(Intent.EXTRA_SUBJECT, it) } }, null))

@@ -141,6 +141,43 @@ class ThemeOnDeviceTest {
         shot("theme_translucent")
     }
 
+    @Test fun everySurfaceStyleRenders() {
+        var style by mutableStateOf(KStyle.Flat)
+        var theme by mutableStateOf(KThemes.Nocturne)
+        rule.setContent {
+            KilnTheme(theme = theme, style = style) {
+                KilnScreen("Style: ${style.name}") { pad ->
+                    Column(Modifier.screenPadding(pad), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        KCardBox(Modifier.testTag("card"), height = 90.dp) { Text("Card"); KTag("Tag", KTone.Ok) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            KButton("Primary") {}; KButton("Tonal", variant = KVariant.Tonal) {}; KButton("Outline", variant = KVariant.Outline) {}
+                        }
+                        KSearchBar("", {}, hint = "Search")
+                        KSegmented(listOf("Day", "Week", "Month"), 1, {})
+                        KSelect(listOf("One"), null, {}, label = "Select")
+                        KAlert("An alert", tone = KTone.Warn)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { KStat("Steps", "8,412", Modifier.weight(1f)); KStat("Kcal", "512", Modifier.weight(1f)) }
+                        KChip("Chip", selected = true)
+                    }
+                }
+            }
+        }
+        for (s in KStyle.entries) for (t in listOf(KThemes.Nocturne, KThemes.ArcticFrost)) {
+            rule.runOnIdle { style = s; theme = t }; rule.waitForIdle()
+            assertEquals(s, Nocturne.surfaceStyle)
+            val bmp = rule.onNodeWithTag("card").captureToImage().asAndroidBitmap()
+            val mid = bmp.getPixel(bmp.width / 2, bmp.height - 6)
+            when (s) {
+                KStyle.Outlined -> assertTrue("outlined card is see-through", near(Nocturne.bg, mid, 10))
+                KStyle.Glass -> assertTrue("glass card isn't the flat surface", !near(Nocturne.surface, mid, 3))
+                else -> {}
+            }
+            shot("style_${s.name.lowercase()}_${t.name.replace(" ", "_").lowercase()}")
+        }
+        rule.runOnIdle { style = KStyle.Brutalist }; rule.waitForIdle()
+        assertEquals(KCorners.Sharp.scale, Nocturne.cornerScale)            // brutalist forces sharp corners
+    }
+
     @Test fun themePickerSwitchesTheApp() {
         var name by mutableStateOf(KThemes.Nocturne.name)
         rule.setContent {

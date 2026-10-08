@@ -59,7 +59,7 @@ def _signature(lines, i):
         if cut is not None or depth <= 0:
             break
     text = re.sub(r"\s+", " ", " ".join(b.strip() for b in buf)).strip()
-    text = re.sub(r"\(\s+", "(", text).replace(" )", ")").replace(", )", ")")
+    text = re.sub(r"\(\s+", "(", text).replace(" )", ")").replace(", )", ")").rstrip(" {")
     return text, i
 
 
@@ -100,7 +100,7 @@ def parse_file(path: Path):
             name = re.sub(r"<[^>]*>", "", nm.group(1)) if nm else None
             if name and re.match(r"\w*Scope\.", name):            # BoxScope.KToastHost is called as KToastHost
                 name = name.split(".", 1)[1]
-            if kw == "class" and "enum" in mods and "{" in line:  # one-line enums: show their values
+            if kw == "class" and "enum" in mods and "{" in line and "}" in line:  # one-line enums: show their values
                 sig += " " + line[line.index("{"):].strip()
             if top and kw in ("class", "object", "interface", "fun") and name:
                 body = lines[nxt - 1] if nxt > i else line

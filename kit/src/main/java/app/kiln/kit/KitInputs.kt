@@ -119,10 +119,12 @@ data class KColors(val container: Color? = null, val content: Color? = null, val
 internal fun toneColors(tone: KTone, variant: KVariant): Pair<Color, Color> {
     val c = tone.color()
     val onFilled = if (Nocturne.isDark) Nocturne.bg else Color.White
+    // On glass the pane sits over an accent gradient: accent text would sink into it, so lift it.
+    val ink = if (Nocturne.surfaceStyle == KStyle.Glass) androidx.compose.ui.graphics.lerp(c, if (Nocturne.isDark) Color.White else Color.Black, 0.45f) else c
     return when (variant) {
         KVariant.Filled -> (if (tone == KTone.Neutral) Nocturne.surfaceHi else c) to (if (tone == KTone.Neutral) Nocturne.text else onFilled)
-        KVariant.Tonal -> c.copy(alpha = 0.18f) to (if (tone == KTone.Neutral) Nocturne.text else c)
-        KVariant.Outline, KVariant.Ghost -> Color.Transparent to (if (tone == KTone.Neutral) Nocturne.text else c)
+        KVariant.Tonal -> c.copy(alpha = 0.18f) to (if (tone == KTone.Neutral) Nocturne.text else ink)
+        KVariant.Outline, KVariant.Ghost -> Color.Transparent to (if (tone == KTone.Neutral) Nocturne.text else ink)
     }
 }
 
@@ -169,8 +171,8 @@ fun KButton(
         modifier
             .then(if (fullWidth) Modifier.fillMaxWidth() else Modifier)
             .kSize(width, height ?: size.height).heightIn(min = size.height)
-            .clip(shape).background(bg.copy(alpha = bg.alpha * alpha))
-            .then(if (line != null && border > 0.dp) Modifier.border(border, line.copy(alpha = line.alpha * alpha), shape) else Modifier)
+            .kSurface(shape, bg.copy(alpha = bg.alpha * alpha), if (line != null && border > 0.dp) line.copy(alpha = line.alpha * alpha) else null,
+                neutral = variant == KVariant.Ghost || (variant == KVariant.Outline && colors?.container == null), borderWidth = border)
             .clickable(enabled = enabled && !loading, onClick = onClick)
             .padding(contentPadding ?: PaddingValues(horizontal = size.padH)),
         verticalAlignment = Alignment.CenterVertically,
@@ -229,7 +231,7 @@ fun KSegmented(
     icons: List<ImageVector?> = emptyList(),
 ) {
     Row(modifier.then(if (fullWidth) Modifier.fillMaxWidth() else Modifier).height(size.height)
-        .clip(RoundedCornerShape(kr(12))).background(Nocturne.surface).border(1.dp, Nocturne.divider, RoundedCornerShape(kr(12))).padding(3.dp)) {
+        .kSurface(RoundedCornerShape(kr(12)), Nocturne.surface, Nocturne.divider).padding(3.dp)) {
         options.forEachIndexed { i, o ->
             val on = i == selected
             Row(Modifier.then(if (fullWidth) Modifier.weight(1f) else Modifier).fillMaxWidth().clip(RoundedCornerShape(kr(9)))
@@ -337,8 +339,7 @@ fun KTextArea(value: String, onChange: (String) -> Unit, modifier: Modifier = Mo
 @Composable
 fun KSearchBar(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier, hint: String = "Search",
                trailing: (@Composable () -> Unit)? = null, height: Dp = ks(48), colors: KColors? = null) {
-    Row(modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(50)).background(colors?.container ?: Nocturne.surface)
-        .border(1.dp, colors?.border ?: Nocturne.divider, RoundedCornerShape(50)).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().height(height).kSurface(RoundedCornerShape(50), colors?.container ?: Nocturne.surface, colors?.border ?: Nocturne.divider).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Filled.Search, null, tint = Nocturne.textMuted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Box(Modifier.weight(1f)) {
@@ -394,8 +395,7 @@ fun KSelect(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modi
     Box(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         Column {
             if (label != null) Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
-            Row(Modifier.fillMaxWidth().height(ks(52)).clip(RoundedCornerShape(kr(12))).background(colors?.container ?: Nocturne.surface)
-                .border(1.dp, colors?.border ?: if (open) Nocturne.accent else Nocturne.neutral700, RoundedCornerShape(kr(12)))
+            Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), colors?.container ?: Nocturne.surface, colors?.border ?: if (open) Nocturne.accent else Nocturne.neutral700)
                 .clickable(enabled = enabled) { open = true }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(selected?.let { options.getOrNull(it) } ?: placeholder, color = if (selected == null) Nocturne.textMuted else Nocturne.text,
                     fontSize = kt(15), modifier = Modifier.weight(1f), maxLines = 1)
@@ -548,8 +548,7 @@ fun KTimeField(time: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modifi
 private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Modifier, onClick: () -> Unit) =
     Column(modifier.fillMaxWidth()) {
         Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
-        Row(Modifier.fillMaxWidth().height(ks(52)).clip(RoundedCornerShape(kr(12))).background(Nocturne.surface)
-            .border(1.dp, Nocturne.neutral700, RoundedCornerShape(kr(12))).clickable(onClick = onClick).padding(horizontal = 14.dp),
+        Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), Nocturne.surface, Nocturne.neutral700).clickable(onClick = onClick).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = if (empty) Nocturne.textMuted else Nocturne.text, fontSize = kt(15), modifier = Modifier.weight(1f))
             Icon(Icons.Filled.KeyboardArrowDown, null, tint = Nocturne.textMuted)

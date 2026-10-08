@@ -66,7 +66,11 @@ data class Activity(
 }
 
 data class ApprovalRequest(val tool: String, val input: String, val answer: CompletableDeferred<Pair<Boolean, Boolean>>) // (allow, forSession)
-data class Question(val text: String, val options: List<String>, val answer: CompletableDeferred<String>)
+data class Question(val text: String, val options: List<String>, val answer: CompletableDeferred<String>, val kind: String = "text",
+                    val questions: List<app.kiln.tools.AskQ> = emptyList())
+
+/** Separates the answers of a multi-question card in [Question.answer]. */
+const val ANSWER_SEP = "\u001F"
 
 /**
  * The harness loop (SPEC §3). One instance per session; [send] runs a user
@@ -423,6 +427,19 @@ class AgentLoop(
         }
         override suspend fun ask(question: String, options: List<String>): String {
             val q = Question(question, options, CompletableDeferred())
+            this@AgentLoop.question.value = q
+            return try { q.answer.await() } finally { this@AgentLoop.question.value = null }
+        }
+        override suspend fun askMany(questions: List<app.kiln.tools.AskQ>): List<String> {
+            val first = questions.first()
+            val q = Question(first.question, first.options.map { it.label }, CompletableDeferred(), kind = "multi", questions = questions)
+            this@AgentLoop.question.value = q
+            val raw = try { q.answer.await() } finally { this@AgentLoop.question.value = null }
+            val parts = raw.split(ANSWER_SEP)
+            return questions.indices.map { parts.getOrNull(it)?.trim().orEmpty() }
+        }
+        override suspend fun chooseLook(appName: String?): String {
+            val q = Question("Pick a look for ${appName ?: "this app"}", emptyList(), CompletableDeferred(), kind = "look")
             this@AgentLoop.question.value = q
             return try { q.answer.await() } finally { this@AgentLoop.question.value = null }
         }

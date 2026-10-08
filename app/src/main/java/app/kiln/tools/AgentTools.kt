@@ -25,13 +25,37 @@ class TodoTool : Tool {
 
 class AskUserTool : Tool {
     override val name = "ask_user"
-    override val description = "Ask the user a question when a decision is genuinely theirs (e.g. which of two designs). Give 2–4 short options; they may also answer freely. Don't ask what you can decide sensibly yourself."
-    override val schema = schema { str("question", "The question."); strList("options", "2–4 short options.", required = false) }
+    override val description = "Ask the user 1–4 questions at once, only when you're blocked on a decision that is genuinely theirs " +
+        "(which features, a design direction, a trade-off) and you can't settle it from the request or sensible defaults. " +
+        "Each question has a short header (≤12 chars) and 2–4 distinct options with a label (1–5 words) and a description of " +
+        "what choosing it means. Put the option you recommend first and end its label with \"(Recommended)\". Use multiSelect " +
+        "when choices aren't exclusive. Give options a preview (ASCII layout mockup, code snippet) when the user should compare " +
+        "how they look. The user can always answer in their own words, so don't add an \"Other\" option. Never ask what you can decide."
+    override val schema = schema {
+        objList("questions", "1–4 questions.", {
+            str("question", "The full question, ending with a question mark.")
+            str("header", "A very short label shown as a chip, e.g. \"Layout\", \"Sync\" (≤12 chars).")
+            objList("options", "2–4 distinct choices.", {
+                str("label", "1–5 words.")
+                str("description", "What choosing it means: trade-offs, consequences.")
+                str("preview", "Optional mockup or code shown when this option is focused (single-select only).", required = false)
+            })
+            bool("multiSelect", "Let the user pick several.", required = false)
+        })
+    }
     override val traits = setOf(Trait.READ_ONLY)
     override val timeoutMs = 24 * 3_600_000L
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val answer = ctx.ask(input.req("question"), input.a("options")?.map { (it as JsonPrimitive).content } ?: emptyList())
-        return ToolResult.ok("user answered: $answer")
+        val qs = input.a("questions")?.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val opts = o.a("options")?.mapNotNull { op -> (op as? JsonObject)?.let { AskOption(it.str("label") ?: return@let null, it.str("description").orEmpty(), it.str("preview")) } }.orEmpty()
+            AskQ(o.str("question") ?: return@mapNotNull null, o.str("header").orEmpty().take(16), opts.take(4), o["multiSelect"]?.let { (it as? JsonPrimitive)?.content == "true" } ?: false)
+        }?.take(4).orEmpty()
+        if (qs.isEmpty()) return ToolResult.error("give 1–4 `questions`, each with a question, a header and 2–4 options")
+        val answers = ctx.askMany(qs)
+        val lines = qs.mapIndexed { i, q -> "\"${q.question}\" = \"${answers.getOrNull(i).orEmpty().ifBlank { "(no answer — decide sensibly and say what you chose)" }}\"" }
+        return ToolResult.ok("The user answered your questions:\n" + lines.joinToString("\n") + "\nContinue with these answers in mind.",
+            "Asked ${qs.size} question${if (qs.size > 1) "s" else ""}")
     }
 }
 

@@ -133,7 +133,6 @@ class ServicesUiOnDeviceTest {
             val inner = it.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)!!
             val uri = inner.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)!!
             assertEquals("text/csv", inner.type); assertEquals("a,b\n1,2", KFiles.readUriText(a, uri)) }
-        interceptAny { KIntents.openUrl(a, "https://example.org") }.let { assertEquals("https://example.org", it.dataString) }
     }
 
     @Test fun pickersOpenTheRightSystemScreens() {

@@ -57,6 +57,13 @@ interface ToolContext {
     fun progress(line: String)
     /** Ask the user a question with options (blocks until answered). */
     suspend fun ask(question: String, options: List<String>): String
+    /** Ask up to 4 structured questions at once (Claude Code style); one answer per question, multi-select answers joined by ", ". */
+    suspend fun askMany(questions: List<AskQ>): List<String> = questions.map { q -> ask(q.question, q.options.map { it.label }) }
+    /** Show the look picker (themes + styles) for a new app; answers "theme=…; style=…", "default" or the user's words. */
+    suspend fun chooseLook(appName: String?): String = ask("Which look should ${appName ?: "this app"} have?",
+        listOf("Kiln default", "Ocean Depths", "Sunset Boulevard", "Modern Minimalist")).let { a ->
+            app.kiln.tools.Looks.themes.firstOrNull { it.name.equals(a, true) }?.let { app.kiln.tools.Looks.answer(it.name, "Flat") }
+                ?: if (a.equals("Kiln default", true)) app.kiln.tools.Looks.DEFAULT else a }
     /** Text over [maxChars] is cut to head + tail and saved; the agent can fetch the rest with read_output. */
     fun spill(text: String, maxChars: Int = 24_000): String
     val spillDir: File
@@ -136,3 +143,9 @@ private fun validateAgainst(schema: JsonObject, input: JsonObject, at: String): 
     }
     return null
 }
+
+/** One choice in an [AskQ]: a short label, what it means, and an optional preview (mockup, code) shown when focused. */
+data class AskOption(val label: String, val description: String = "", val preview: String? = null)
+
+/** A structured question for the user: the question, a short header chip, 2–4 options, single or multi-select. */
+data class AskQ(val question: String, val header: String = "", val options: List<AskOption>, val multiSelect: Boolean = false)

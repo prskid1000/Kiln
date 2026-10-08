@@ -40,7 +40,7 @@ Never call `setContent` or `enableEdgeToEdge`. To change the look, override `The
 | Dialog | `KConfirm(...)` or Material 3 `AlertDialog` |
 | Pull to refresh | `PullToRefreshBox(isRefreshing, onRefresh) { … }` |
 | Tabs inside a screen | `PrimaryTabRow` + `Tab` |
-| Search | `KSearchField` (simple) or Material 3 `SearchBar` |
+| Search | `KSearchBar` |
 | Carousel | `HorizontalMultiBrowseCarousel` |
 | Date / time | `DatePicker`, `DatePickerDialog`, `TimePicker` |
 
@@ -115,6 +115,11 @@ class MainActivity : KilnActivity() {
   `corners = KCorners.Sharp | Default | Soft | Round`, `density = KDensity.Compact | Default |
   Comfortable | Large` (heights, padding, icons of every component), `textScale = 1.15f`,
   `surfaceAlpha = 0.8f` (translucent cards/fields over a background image or gradient).
+- **Surface style** (`style = KStyle.…`, combines with any theme): `Flat` (default), `Glass` (glassmorphism:
+  frosted translucent panes over a gradient backdrop), `Neumorphic` (soft extruded, best on light themes),
+  `Outlined` (borders only), `Elevated` (floating shadows), `Brutalist` (thick borders, hard offset shadows,
+  forces sharp corners). Custom surfaces match with `Modifier.kSurface(shape, fill, border)`; full-screen
+  custom layouts get the style's background with `Modifier.kBackdrop()`.
 - **Let the app's users choose**: `KThemePicker(selected, onSelect)` + `rememberStored("theme", …)` (see the theming skill).
 - **One component only** (rare; only when the user asks): `colors = KColors(container, content, border)`
   on KButton, KIconButton, KCardBox, KChip, KTextField, KSearchBar, KSelect; `color =` on KAlert,
@@ -172,11 +177,11 @@ manifest already points at it). It is a 108×108 vector drawable:
 
 | API | Purpose |
 |---|---|
-| `KNet.getText(url)`, `KNet.getJson<T>(url)`, `KNet.postJson(url, json)` | HTTP (suspend; IO dispatcher) |
+| `KHttp.get<T>(url)`, `KHttp.post<B, T>(url, body)`, `put`, `patch`, `delete` | HTTP + JSON (suspend; throws KHttpException) |
 | `AsyncImage(model = url, contentDescription)` | images (Coil 3) |
 | `KNotify.post(context, title, text)` | notification (needs POST_NOTIFICATIONS granted) |
 | `rememberPermission(Manifest.permission.X)` → `.granted`, `.request()` | runtime permissions |
-| `KIntents.openUrl(ctx, url)`, `KIntents.share(ctx, text)` | intents |
+| `KOpen.url / dial / sms / email / map / shareText / calendarEvent / appSettings / playStore` | hand off to other apps |
 | `KLog.i/w/e(msg)` | logging (tag `KILN-APP`, what `logcat` shows first) |
 
 Coroutines: `rememberCoroutineScope()`, `LaunchedEffect`, `viewModelScope`.

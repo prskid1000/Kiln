@@ -111,7 +111,7 @@ object KFonts {
 
 /** A named look: palette + font + corners. Pass one to [KilnTheme] (`theme = KThemes.OceanDepths`). */
 data class KTheme(val name: String, val palette: KPalette, val font: FontFamily = KFonts.Inter,
-                  val corners: KCorners = KCorners.Default, val description: String = "")
+                  val corners: KCorners = KCorners.Default, val description: String = "", val style: KStyle = KStyle.Flat)
 
 /**
  * Ready-made themes. Nocturne is Kiln's own and the default whenever the user hasn't asked for a look.
@@ -166,8 +166,11 @@ object Nocturne {
     internal var sizeScale by mutableFloatStateOf(1f)
     internal var textScale by mutableFloatStateOf(1f)
     internal var font by mutableStateOf(KFonts.Inter)
+    internal var style by mutableStateOf(KStyle.Flat)
 
     val isDark: Boolean get() = palette.dark
+    /** The theme's surface style (Flat, Glass, Neumorphic…). */
+    val surfaceStyle: KStyle get() = style
     val bg get() = palette.bg
     val surface get() = palette.surface
     val surfaceHi get() = palette.surfaceHi
@@ -248,7 +251,8 @@ private fun shapes() = Shapes(
  * ```
  * Explicit arguments override the [theme]'s. [density] scales component heights, padding and icons;
  * [textScale] all text; [surfaceAlpha] (0–1) makes cards, fields and sheets translucent, for a
- * background image or gradient. [palette] replaces the colours entirely.
+ * background image or gradient. [style] draws every surface as Flat, Glass (glassmorphism), Neumorphic,
+ * Outlined, Elevated or Brutalist. [palette] replaces the colours entirely.
  */
 @Composable
 fun KilnTheme(
@@ -262,9 +266,11 @@ fun KilnTheme(
     density: KDensity = KDensity.Default,
     textScale: Float = 1f,
     surfaceAlpha: Float = 1f,
+    style: KStyle? = null,
     palette: KPalette? = null,
     content: @Composable () -> Unit,
 ) {
+    val st = style ?: theme.style
     val p = remember(theme, accent, accent2, dark, background, palette, surfaceAlpha) {
         val base = palette ?: if (accent == null && accent2 == null && dark == null && background == null) theme.palette else {
             val sameMode = dark == null || dark == theme.palette.dark
@@ -276,10 +282,10 @@ fun KilnTheme(
         if (a >= 1f) base else base.copy(surface = base.surface.copy(alpha = a), surfaceHi = base.surfaceHi.copy(alpha = a))
     }
     val f = font ?: theme.font
-    val c = corners ?: theme.corners
+    val c = corners ?: if (st == KStyle.Brutalist) KCorners.Sharp else theme.corners
     // Publish before children compose, so Nocturne.* reads and K components see this theme.
-    remember(p, f, c, density, textScale) {
-        Nocturne.palette = p; Nocturne.font = f; Nocturne.cornerScale = c.scale
+    remember(p, f, c, density, textScale, st) {
+        Nocturne.palette = p; Nocturne.font = f; Nocturne.cornerScale = c.scale; Nocturne.style = st
         Nocturne.sizeScale = density.scale; Nocturne.textScale = textScale; Unit
     }
     // Status and navigation bar icons dark on a light theme, light on a dark one.

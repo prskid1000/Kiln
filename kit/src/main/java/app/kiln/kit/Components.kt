@@ -42,23 +42,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Surface card with the Nocturne hairline ring. Clickable when [onClick] is set. */
-@Composable
-fun KCard(
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-    padding: Int = 14,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val colors = CardDefaults.cardColors(containerColor = Nocturne.surface, contentColor = Nocturne.text)
-    val border = BorderStroke(1.dp, Nocturne.neutral700)
-    val inner: @Composable ColumnScope.() -> Unit = {
-        Column(Modifier.padding(padding.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
-    }
-    if (onClick != null) Card(onClick = onClick, modifier = modifier.fillMaxWidth(), colors = colors, border = border, content = inner)
-    else Card(modifier = modifier.fillMaxWidth(), colors = colors, border = border, content = inner)
-}
-
 /** Small uppercase accent heading above a group ("Nocturne kicker"). */
 @Composable
 fun KSection(title: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
@@ -130,25 +113,22 @@ fun KTag(text: String, tone: KTone = KTone.Neutral, modifier: Modifier = Modifie
         KTone.Warn -> Nocturne.warn.copy(alpha = 0.16f) to Nocturne.warn
         KTone.Danger -> Nocturne.danger.copy(alpha = 0.16f) to Nocturne.danger
     }
-    Text(text, color = ink, fontSize = kt(11), fontWeight = FontWeight.Medium,
-        modifier = modifier.clip(RoundedCornerShape(kr(6))).background(ground).padding(horizontal = 10.dp, vertical = 3.dp))
+    // On glass a faint tint vanishes into the pane: give the pill more body and lift the text.
+    val glass = Nocturne.surfaceStyle == KStyle.Glass
+    val g = if (glass) tone.color().copy(alpha = 0.30f) else ground
+    val i = if (glass) androidx.compose.ui.graphics.lerp(tone.color(), if (Nocturne.isDark) Color.White else Color.Black, 0.5f) else ink
+    Text(text, color = i, fontSize = kt(11), fontWeight = FontWeight.Medium,
+        modifier = modifier.clip(RoundedCornerShape(kr(6))).background(g).padding(horizontal = 10.dp, vertical = 3.dp))
 }
 
 /** Metric tile: label over a big value, optional caption. */
 @Composable
 fun KStat(label: String, value: String, modifier: Modifier = Modifier, caption: String? = null) =
-    KCard(modifier) {
+    KCardBox(modifier) {
         Text(label.uppercase(), color = Nocturne.textMuted, fontSize = kt(11), letterSpacing = 1.sp)
         Text(value, style = MaterialTheme.typography.headlineMedium)
         if (caption != null) Text(caption, style = MaterialTheme.typography.bodySmall, color = Nocturne.textMuted)
     }
-
-/** Search field with a leading search icon. */
-@Composable
-fun KSearchField(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier, hint: String = "Search") =
-    OutlinedTextField(value = query, onValueChange = onQuery, singleLine = true, placeholder = { Text(hint) },
-        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-        shape = RoundedCornerShape(kr(8)), modifier = modifier.fillMaxWidth())
 
 /** Full-area loading spinner. */
 @Composable
@@ -158,7 +138,7 @@ fun KLoading(modifier: Modifier = Modifier) =
 /** Inline error with an optional retry. */
 @Composable
 fun KError(message: String, onRetry: (() -> Unit)? = null, modifier: Modifier = Modifier) =
-    KCard(modifier) {
+    KCardBox(modifier) {
         Text(message, color = Nocturne.danger, style = MaterialTheme.typography.bodyMedium)
         if (onRetry != null) TextButton(onClick = onRetry) { Text("Retry") }
     }

@@ -10,7 +10,10 @@
 - A specific colour ("make it pink", a brand hex) → `KilnTheme(accent = Color(0xFFE91E63))`; add `dark = false` for a light app.
 - "Bigger / easier to tap / for older users" → `density = KDensity.Comfortable` or `Large`, `textScale = 1.15f`.
   "Denser / fit more" → `KDensity.Compact`. "Rounder / sharper" → `corners = KCorners.Round / Sharp`.
-- "Glassy / see-through cards over a photo" → `surfaceAlpha = 0.7f` and draw the image behind the content.
+- A surface style: "glassy / glassmorphism / frosted" → `style = KStyle.Glass`; "soft UI / neumorphism" →
+  `KStyle.Neumorphic` (pair with a light theme); "bold / brutalist / retro" → `KStyle.Brutalist`; "material / cards
+  that float" → `KStyle.Elevated`; "wireframe / outlined" → `KStyle.Outlined`.
+- See-through cards over your own photo → `surfaceAlpha = 0.7f` and draw the image behind the content.
 - One element different (the user asked for exactly that) → `colors = KColors(container = …, content = …)` on that component.
 - Let the app's own users choose → `KThemePicker` + `rememberStored`, as below.
 - After changing the theme, redraw the launcher icon in the new palette (make_graphic) and re-check screens with run_app.
@@ -67,7 +70,13 @@ fun AppearanceScreen() {
     }
 }
 
-// 4. Glass cards over a gradient (KilnTheme(surfaceAlpha = 0.7f) in Theme())
+// 4. A theme + a surface style
+class GlassActivity : KilnActivity() {
+    @Composable override fun Theme(content: @Composable () -> Unit) = KilnTheme(theme = KThemes.MidnightGalaxy, style = KStyle.Glass, content = content)
+    @Composable override fun Content() { GlassHome() }
+}
+
+// 5. Translucent cards over your own gradient (KilnTheme(surfaceAlpha = 0.7f) in Theme())
 @Composable
 fun GlassHome() {
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Nocturne.accent, Nocturne.bg)))) {

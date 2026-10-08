@@ -99,15 +99,14 @@ fun KCardBox(
         Column(
             modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)).kSize(height = height)
                 .then(if (elevation > 0.dp) Modifier.shadow(elevation, shape) else Modifier)
-                .clip(shape).background(bg)
-                .then(if (line != null && border > 0.dp) Modifier.border(border, line, shape) else Modifier)
+                .kSurface(shape, bg, if (border > 0.dp) line else null, neutral = colors?.container == null && (tone == KTone.Neutral || variant == KVariant.Outline), borderWidth = border)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                 .padding(padding),
             verticalArrangement = Arrangement.spacedBy(spacing), content = content,
         )
     }
-    if (colors?.content != null) androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides colors.content, content = body)
-    else body()
+    // Cards always set their text colour, so they read right on any backdrop (glass, gradients, images).
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides (colors?.content ?: Nocturne.text), content = body)
 }
 
 /** Divider, optionally with a centred label ("or"). */
@@ -126,7 +125,7 @@ fun KDivider(modifier: Modifier = Modifier, label: String? = null, thickness: Dp
 fun KAccordion(title: String, modifier: Modifier = Modifier, subtitle: String? = null, initiallyOpen: Boolean = false,
                icon: ImageVector? = null, content: @Composable ColumnScope.() -> Unit) {
     var open by rememberSaveable { mutableStateOf(initiallyOpen) }
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(14))).background(Nocturne.surface).border(1.dp, Nocturne.divider, RoundedCornerShape(kr(14)))) {
+    Column(modifier.fillMaxWidth().kSurface(RoundedCornerShape(kr(14)), Nocturne.surface, Nocturne.divider)) {
         Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) { Icon(icon, null, tint = Nocturne.accent2, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)) }
             Column(Modifier.weight(1f)) {
@@ -187,7 +186,7 @@ fun KBadge(count: Int?, modifier: Modifier = Modifier, tone: KTone = KTone.Dange
 fun KChip(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, tone: KTone = KTone.Neutral, selected: Boolean = false,
           onClick: (() -> Unit)? = null, onClose: (() -> Unit)? = null, colors: KColors? = null) {
     val (bg, fg, _) = resolveColors(if (selected) KTone.Accent else tone, KVariant.Tonal, colors)
-    Row(modifier.height(ks(32)).clip(RoundedCornerShape(50)).background(bg).border(1.dp, fg.copy(alpha = 0.3f), RoundedCornerShape(50))
+    Row(modifier.height(ks(32)).kSurface(RoundedCornerShape(50), bg, fg.copy(alpha = 0.3f), neutral = false)
         .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (icon != null) { Icon(icon, null, tint = fg, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)) }
@@ -200,7 +199,7 @@ fun KChip(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null
 @Composable
 fun KKbd(key: String, modifier: Modifier = Modifier) =
     Text(key, color = Nocturne.text, fontSize = kt(12), fontFamily = Nocturne.mono,
-        modifier = modifier.clip(RoundedCornerShape(kr(6))).background(Nocturne.surfaceHi).border(1.dp, Nocturne.neutral700, RoundedCornerShape(kr(6)))
+        modifier = modifier.kSurface(RoundedCornerShape(kr(6)), Nocturne.surfaceHi, Nocturne.neutral700)
             .padding(horizontal = 6.dp, vertical = 2.dp))
 
 /** Image from a URL with a rounded frame, aspect ratio and placeholder colour. */
@@ -222,7 +221,7 @@ fun KAlert(message: String, modifier: Modifier = Modifier, tone: KTone = KTone.A
     val c = color ?: tone.color()
     val glyph = icon ?: when (tone) { KTone.Ok -> Icons.Filled.CheckCircle; KTone.Warn -> Icons.Filled.Warning
         KTone.Danger -> Icons.Filled.Error; else -> Icons.Filled.Info }
-    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(12))).background(c.copy(alpha = 0.12f)).border(1.dp, c.copy(alpha = 0.4f), RoundedCornerShape(kr(12)))
+    Row(modifier.fillMaxWidth().kSurface(RoundedCornerShape(kr(12)), c.copy(alpha = if (Nocturne.isDark) 0.10f else 0.12f), c.copy(alpha = 0.22f), neutral = false)
         .padding(12.dp), verticalAlignment = Alignment.Top) {
         Icon(glyph, null, tint = c, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
