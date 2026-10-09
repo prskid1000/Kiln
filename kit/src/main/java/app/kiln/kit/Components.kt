@@ -52,7 +52,10 @@ fun KSection(title: String, modifier: Modifier = Modifier, action: (@Composable 
     }
 }
 
-/** One list row: optional leading icon, title, subtitle, trailing slot. */
+/**
+ * One list row: optional leading icon, title, subtitle, and on the right either [trailing] text
+ * ("₹500.00") or any [trailingContent] (a switch, a badge, an icon button).
+ */
 @Composable
 fun KListRow(
     title: String,
@@ -60,7 +63,8 @@ fun KListRow(
     subtitle: String? = null,
     icon: ImageVector? = null,
     onClick: (() -> Unit)? = null,
-    trailing: (@Composable () -> Unit)? = null,
+    trailing: String? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8)))
@@ -75,15 +79,16 @@ fun KListRow(
             if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Nocturne.textMuted,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        trailing?.invoke()
+        if (trailing != null) Text(trailing, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+        trailingContent?.invoke()
     }
 }
 
 /** A setting with a switch. */
 @Composable
-fun KSwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit, subtitle: String? = null) =
-    KListRow(title = title, subtitle = subtitle, onClick = { onChange(!checked) }, trailing = {
-        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(
+fun KSwitchRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, subtitle: String? = null) =
+    KListRow(title = title, subtitle = subtitle, onClick = { onCheckedChange(!checked) }, trailingContent = {
+        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(
             checkedTrackColor = Nocturne.accent, checkedThumbColor = Nocturne.bg,
             uncheckedTrackColor = Nocturne.surfaceHi, uncheckedBorderColor = Nocturne.divider))
     })
@@ -148,15 +153,15 @@ fun KError(message: String, onRetry: (() -> Unit)? = null, modifier: Modifier = 
 /** Yes/no confirmation dialog. Show it while [open] is true. */
 @Composable
 fun KConfirm(open: Boolean, title: String, body: String, confirmLabel: String = "OK",
-             destructive: Boolean = false, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+             destructive: Boolean = false, onConfirm: () -> Unit, onDismissRequest: () -> Unit) {
     if (!open) return
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = onDismissRequest,
         title = { Text(title) }, text = { Text(body) },
-        confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) {
+        confirmButton = { TextButton(onClick = { onConfirm(); onDismissRequest() }) {
             Text(confirmLabel, color = if (destructive) Nocturne.danger else Nocturne.accent)
         } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismissRequest) { Text("Cancel") } },
         containerColor = Nocturne.surface,
     )
 }

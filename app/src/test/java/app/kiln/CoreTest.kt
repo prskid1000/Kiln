@@ -168,14 +168,21 @@ class CoreTest {
             app.kiln.tools.qaResultLines(report))
     }
 
-    @Test fun `a QA re-run focuses on failures and changed files`() {
-        assertEquals("", app.kiln.tools.qaFocus(null, mapOf("src/A.kt" to 1), 0))       // first run: test everything
-        val last = app.kiln.tools.QaMemory(listOf("PASS — Home shows total — saw ₹500", "FAIL — swipe deletes — row stayed"),
-            mapOf("src/Home.kt" to 1, "src/List.kt" to 2, "src/Old.kt" to 3), at = 0)
-        val note = app.kiln.tools.qaFocus(last, mapOf("src/Home.kt" to 1, "src/List.kt" to 9, "src/New.kt" to 4), 5 * 60_000)
-        assertTrue(note, "5 min ago" in note && "FAIL — swipe deletes — row stayed" in note)
-        assertTrue(note, "Files changed since then: src/List.kt, src/New.kt, src/Old.kt" in note)   // edited, added, removed; Home unchanged
-        assertTrue(note, "carried over (unaffected by the changes)" in note)
+    @Test fun `a QA re-run tests only what failed or is new, and carries the passes`() {
+        // Run 13's criteria, numbered on one line.
+        val criteria = app.kiln.tools.criteriaLines("1. Home tab shows monthly total and donut chart 2. Expenses tab: search and swipe to delete 3. Settings: monthly budget and reminder 4. Data survives restarts")
+        assertEquals(4, criteria.size)
+        val last = app.kiln.tools.QaMemory(listOf(
+            "FAIL — Home tab shows monthly total and donut chart — crashed on launch",
+            "PASS — Expenses tab: search and swipe to delete — worked",
+            "PASS — Settings: monthly budget and reminder — saved"), emptyMap(), 0)
+        val plan = app.kiln.tools.qaPlan(criteria, last)
+        // Home failed → tested; restarts is new → tested; Expenses and Settings passed → carried.
+        assertEquals(listOf("Home tab shows monthly total and donut chart", "Data survives restarts"), plan.test)
+        assertEquals(listOf("Expenses tab: search and swipe to delete", "Settings: monthly budget and reminder"), plan.carried.map { it.first })
+        // No earlier run, or nothing failed: everything is tested.
+        assertEquals(criteria, app.kiln.tools.qaPlan(criteria, null).test)
+        assertEquals(criteria, app.kiln.tools.qaPlan(criteria, last.copy(results = last.results.map { it.replace("FAIL", "PASS") })).test)
     }
 
     @Test fun `project agents are read from the project agents folder`() {

@@ -145,6 +145,7 @@ class ToolsOnDeviceTest {
             Case("web_fetch", """{"url":"http://example.com"}""", expectError = true),
             Case("check", "{}", expect = "BUILD OK"),
             Case("load_skill", """{"name":"timers"}""", expect = "LaunchedEffect"),
+            Case("load_skill", """{"names":["timers","persistence","teleport"]}""", expect = "Not found: teleport"),
             Case("load_skill", """{"name":"teleport"}""", expectError = true, expect = "available"),
             Case("propose_rule", """{"rule":"Show volumes in ml, never oz","why":"user said so"}""", expect = "Proposed"),
             Case("security_check", "{}", expect = "security"),

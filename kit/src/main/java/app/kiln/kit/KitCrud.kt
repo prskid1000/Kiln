@@ -115,7 +115,7 @@ fun <T> KCrudList(
                                 KListRow(
                                     title(row.value), subtitle = subtitle?.invoke(row.value), icon = icon?.invoke(row.value),
                                     onClick = { onOpen?.invoke(row) ?: state.edit(row) },
-                                    trailing = trailing?.invoke(row.value)?.let { t -> { Text(t) } },
+                                    trailing = trailing?.invoke(row.value),
                                 )
                             }
                         }

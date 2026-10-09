@@ -295,7 +295,7 @@ class ComponentsOnDeviceTest {
             }
             KDialog(dialog, "Rename", { dialog = false }, confirmLabel = "Save", onConfirm = { saved = true }) { Text("Dialog body") }
             KBottomSheet(sheet, { sheet = false }, title = "Filters") { Text("Sheet body") }
-            KConfirm(confirm, "Delete all?", "Can't be undone.", "Delete", destructive = true, onConfirm = { deleted = true }, onDismiss = { confirm = false })
+            KConfirm(confirm, "Delete all?", "Can't be undone.", "Delete", destructive = true, onConfirm = { deleted = true }, onDismissRequest = { confirm = false })
         }
         rule.onNodeWithText("Open dialog").performClick(); rule.onNodeWithText("Dialog body").assertIsDisplayed(); shot("dialog")
         rule.onNodeWithText("Save").performClick(); assertTrue(saved); rule.onNodeWithText("Dialog body").assertDoesNotExist()

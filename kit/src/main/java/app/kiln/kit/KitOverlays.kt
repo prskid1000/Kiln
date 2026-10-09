@@ -82,16 +82,16 @@ import kotlinx.coroutines.launch
  * Leave [confirmLabel] null for an info dialog with just "Close".
  */
 @Composable
-fun KDialog(open: Boolean, title: String, onDismiss: () -> Unit, confirmLabel: String? = null, onConfirm: () -> Unit = {},
+fun KDialog(open: Boolean, title: String, onDismissRequest: () -> Unit, confirmLabel: String? = null, onConfirm: () -> Unit = {},
             destructive: Boolean = false, dismissLabel: String = if (confirmLabel == null) "Close" else "Cancel",
             content: @Composable ColumnScope.() -> Unit) {
     if (!open) return
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Nocturne.surface,
+    AlertDialog(onDismissRequest = onDismissRequest, containerColor = Nocturne.surface,
         title = { Text(title) },
         text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = content) },
-        confirmButton = { if (confirmLabel != null) TextButton({ onConfirm(); onDismiss() }) {
+        confirmButton = { if (confirmLabel != null) TextButton({ onConfirm(); onDismissRequest() }) {
             Text(confirmLabel, color = if (destructive) Nocturne.danger else Nocturne.accent) } },
-        dismissButton = { TextButton(onDismiss) { Text(dismissLabel, color = Nocturne.textLabel) } })
+        dismissButton = { TextButton(onDismissRequest) { Text(dismissLabel, color = Nocturne.textLabel) } })
 }
 
 /**
@@ -100,11 +100,11 @@ fun KDialog(open: Boolean, title: String, onDismiss: () -> Unit, confirmLabel: S
  * first (for a long list the user drags up).
  */
 @Composable
-fun KBottomSheet(open: Boolean, onDismiss: () -> Unit, title: String? = null, peek: Boolean = false,
+fun KBottomSheet(open: Boolean, onDismissRequest: () -> Unit, title: String? = null, peek: Boolean = false,
                  content: @Composable ColumnScope.() -> Unit) {
     if (!open) return
     // Half-open by default left forms' buttons below the screen edge (runs 9 and 12).
-    ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = !peek), containerColor = Nocturne.surface) {
+    ModalBottomSheet(onDismissRequest, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = !peek), containerColor = Nocturne.surface) {
         // imePadding: the keyboard pushes the sheet's content (and its Save button) up instead of covering it.
         Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)

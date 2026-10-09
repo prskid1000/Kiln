@@ -156,6 +156,6 @@ fun ComponentGallery() {
     }
     KDialog(dialog, "Rename", { dialog = false }, confirmLabel = "Save", onConfirm = {}) { KTextField(name, { name = it }, label = "Name") }
     KBottomSheet(sheet, { sheet = false }, title = "Filters") { KChipGroup(listOf("A", "B"), tags, { tags = it }) }
-    KConfirm(confirm, "Delete item?", "This can't be undone.", "Delete", destructive = true, onConfirm = {}, onDismiss = { confirm = false })
+    KConfirm(confirm, "Delete item?", "This can't be undone.", "Delete", destructive = true, onConfirm = {}, onDismissRequest = { confirm = false })
 }
 ```

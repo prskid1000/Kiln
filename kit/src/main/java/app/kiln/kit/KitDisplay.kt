@@ -235,11 +235,11 @@ fun KAlert(message: String, modifier: Modifier = Modifier, tone: KTone = KTone.A
     }
 }
 
-/** Progress bar (0–1); [label] and the percentage above it; null [progress] = indeterminate. */
+/** Progress bar (0–1, Float or Double); [label] and the percentage above it; null [progress] = indeterminate. */
 @Composable
-fun KProgressBar(progress: Float?, modifier: Modifier = Modifier, label: String? = null, showPercent: Boolean = true,
+fun KProgressBar(progress: Number?, modifier: Modifier = Modifier, label: String? = null, showPercent: Boolean = true,
                  tone: KTone = KTone.Accent, height: Dp = 8.dp, width: Dp? = null, color: Color? = null) {
-    val bar = color ?: tone.color()
+    val bar = color ?: tone.color(); val progress = progress?.toFloat()
     Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (label != null || (showPercent && progress != null)) Row(Modifier.fillMaxWidth()) {
             Text(label.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Nocturne.textLabel, modifier = Modifier.weight(1f))
@@ -252,16 +252,16 @@ fun KProgressBar(progress: Float?, modifier: Modifier = Modifier, label: String?
     }
 }
 
-/** Circular progress (0–1) with text in the middle (goal rings, timers). */
+/** Circular progress (0–1, Float or Double) with text in the middle (goal rings, timers). */
 @Composable
-fun KProgressRing(progress: Float, modifier: Modifier = Modifier, size: Dp = ks(120), stroke: Dp = 10.dp, tone: KTone = KTone.Accent, color: Color? = null,
-                  center: (@Composable () -> Unit)? = { Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleLarge) }) {
+fun KProgressRing(progress: Number, modifier: Modifier = Modifier, size: Dp = ks(120), stroke: Dp = 10.dp, tone: KTone = KTone.Accent, color: Color? = null,
+                  center: (@Composable () -> Unit)? = { Text("${(progress.toFloat() * 100).toInt()}%", style = MaterialTheme.typography.titleLarge) }) {
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
         val c = color ?: tone.color()
         Canvas(Modifier.size(size)) {
             val s = stroke.toPx(); val d = this.size.minDimension - s
             drawArc(Nocturne.surfaceHi, 0f, 360f, false, Offset(s / 2, s / 2), Size(d, d), style = Stroke(s, cap = StrokeCap.Round))
-            drawArc(c, -90f, 360f * progress.coerceIn(0f, 1f), false, Offset(s / 2, s / 2), Size(d, d), style = Stroke(s, cap = StrokeCap.Round))
+            drawArc(c, -90f, 360f * progress.toFloat().coerceIn(0f, 1f), false, Offset(s / 2, s / 2), Size(d, d), style = Stroke(s, cap = StrokeCap.Round))
         }
         center?.invoke()
     }

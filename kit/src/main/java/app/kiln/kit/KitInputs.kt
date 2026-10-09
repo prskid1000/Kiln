@@ -284,7 +284,7 @@ fun KToggleGroup(options: List<String>, selected: Set<Int>, onChange: (Set<Int>)
 @Composable
 fun KTextField(
     value: String,
-    onChange: (String) -> Unit,
+    onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     label: String? = null,
     placeholder: String? = null,
@@ -313,7 +313,7 @@ fun KTextField(
     Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         OutlinedTextField(
             value = value,
-            onValueChange = { v -> if (maxLength == null || v.length <= maxLength) onChange(v) },
+            onValueChange = { v -> if (maxLength == null || v.length <= maxLength) onValueChange(v) },
             // Named for TalkBack and UI automation: tap("Amount") / type_text(target = "Amount") find it.
             modifier = Modifier.fillMaxWidth().kSize(height = height)
                 .semantics { (label ?: placeholder)?.let { contentDescription = it } },
@@ -350,11 +350,11 @@ fun KTextField(
 
 /** Multi-line text area (notes, descriptions). */
 @Composable
-fun KTextArea(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, label: String? = null,
+fun KTextArea(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, label: String? = null,
               placeholder: String? = null, minLines: Int = 4, maxLines: Int = 10, maxLength: Int? = null, height: Dp? = null,
               keyboard: KeyboardType = KeyboardType.Text, keyboardOptions: KeyboardOptions? = null,
               width: Dp? = null, error: String? = null, helper: String? = null, enabled: Boolean = true) =
-    KTextField(value, onChange, modifier, label = label, placeholder = placeholder, singleLine = false,
+    KTextField(value, onValueChange, modifier, label = label, placeholder = placeholder, singleLine = false,
         minLines = minLines, maxLines = maxLines, maxLength = maxLength, height = height, keyboard = keyboard, keyboardOptions = keyboardOptions, width = width, error = error, helper = helper, enabled = enabled)
 /** Search bar with a clear button. Parameter names follow Material: `KSearchBar(query, onQueryChange = { query = it }, placeholder = "Search notes")`. */
 /** Search bar with a clear button; [onSubmit] runs on the keyboard's search action. */
@@ -376,10 +376,10 @@ fun KSearchBar(query: String, onQueryChange: (String) -> Unit, modifier: Modifie
 
 /** One-time code: [length] boxes, digits only. */
 @Composable
-fun KOtpField(code: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, length: Int = 6, boxSize: Dp = ks(48)) {
+fun KOtpField(code: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, length: Int = 6, boxSize: Dp = ks(48)) {
     val focus = remember { FocusRequester() }
     Box(modifier) {
-        BasicTextField(code, { v -> val d = v.filter(Char::isDigit).take(length); onChange(d) },
+        BasicTextField(code, { v -> val d = v.filter(Char::isDigit).take(length); onValueChange(d) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             modifier = Modifier.focusRequester(focus).size(1.dp).semantics { contentDescription = "Code" }, textStyle = TextStyle(color = Color.Transparent))
         Row(Modifier.clickable { focus.requestFocus() }, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -397,13 +397,13 @@ fun KOtpField(code: String, onChange: (String) -> Unit, modifier: Modifier = Mod
 
 /** − value + with bounds and step (quantities, servings, counts). */
 @Composable
-fun KStepper(value: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier, min: Int = 0, max: Int = 99, step: Int = 1,
+fun KStepper(value: Int, onValueChange: (Int) -> Unit, modifier: Modifier = Modifier, min: Int = 0, max: Int = 99, step: Int = 1,
              label: String? = null, size: KSize = KSize.Medium) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (label != null) Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        KIconButton(Icons.Filled.Remove, "Decrease", variant = KVariant.Tonal, size = size, enabled = value - step >= min) { onChange((value - step).coerceAtLeast(min)) }
+        KIconButton(Icons.Filled.Remove, "Decrease", variant = KVariant.Tonal, size = size, enabled = value - step >= min) { onValueChange((value - step).coerceAtLeast(min)) }
         Text("$value", fontSize = (size.text + 3).sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.width(size.height))
-        KIconButton(Icons.Filled.Add, "Increase", variant = KVariant.Tonal, size = size, enabled = value + step <= max) { onChange((value + step).coerceAtMost(max)) }
+        KIconButton(Icons.Filled.Add, "Increase", variant = KVariant.Tonal, size = size, enabled = value + step <= max) { onValueChange((value + step).coerceAtMost(max)) }
     }
 }
 
@@ -455,11 +455,11 @@ fun KCombobox(options: List<String>, selected: String?, onSelect: (String) -> Un
 
 /** Checkbox with its label (tap either). */
 @Composable
-fun KCheckbox(checked: Boolean, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier,
+fun KCheckbox(checked: Boolean, onCheckedChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier,
               subtitle: String? = null, enabled: Boolean = true) {
-    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).clickable(enabled = enabled) { onChange(!checked) }.padding(vertical = 4.dp),
+    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).clickable(enabled = enabled) { onCheckedChange(!checked) }.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked, onChange, enabled = enabled, colors = CheckboxDefaults.colors(checkedColor = Nocturne.accent, checkmarkColor = Nocturne.bg))
+        Checkbox(checked, onCheckedChange, enabled = enabled, colors = CheckboxDefaults.colors(checkedColor = Nocturne.accent, checkmarkColor = Nocturne.bg))
         Column {
             Text(label, style = MaterialTheme.typography.bodyLarge)
             if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Nocturne.textMuted)
@@ -483,8 +483,8 @@ fun KRadioGroup(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, 
 
 /** Bare switch (for your own row layouts; [KSwitchRow] is the labelled one). */
 @Composable
-fun KSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) =
-    Switch(checked, onChange, modifier, enabled = enabled, colors = SwitchDefaults.colors(checkedTrackColor = Nocturne.accent,
+fun KSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) =
+    Switch(checked, onCheckedChange, modifier, enabled = enabled, colors = SwitchDefaults.colors(checkedTrackColor = Nocturne.accent,
         checkedThumbColor = Nocturne.bg, uncheckedTrackColor = Nocturne.surfaceHi, uncheckedBorderColor = Nocturne.divider))
 
 /** Filter chips: single ([multi] = false) or multiple choice. */
@@ -505,21 +505,21 @@ fun KChipGroup(options: List<String>, selected: Set<Int>, onChange: (Set<Int>) -
 
 /** Slider with a label and the current value. */
 @Composable
-fun KSlider(value: Float, onChange: (Float) -> Unit, modifier: Modifier = Modifier, range: ClosedFloatingPointRange<Float> = 0f..100f,
+fun KSlider(value: Float, onValueChange: (Float) -> Unit, modifier: Modifier = Modifier, range: ClosedFloatingPointRange<Float> = 0f..100f,
             steps: Int = 0, label: String? = null, format: (Float) -> String = { "%.0f".format(it) }, width: Dp? = null) {
     Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         if (label != null) Row(Modifier.fillMaxWidth()) {
             Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Text(format(value), style = MaterialTheme.typography.bodyMedium, color = Nocturne.accent2)
         }
-        Slider(value, onChange, valueRange = range, steps = steps,
+        Slider(value, onValueChange, valueRange = range, steps = steps,
             colors = SliderDefaults.colors(thumbColor = Nocturne.accent, activeTrackColor = Nocturne.accent, inactiveTrackColor = Nocturne.surfaceHi))
     }
 }
 
 /** Two-thumb range slider (price from–to, time window). */
 @Composable
-fun KRangeSlider(value: ClosedFloatingPointRange<Float>, onChange: (ClosedFloatingPointRange<Float>) -> Unit, modifier: Modifier = Modifier,
+fun KRangeSlider(value: ClosedFloatingPointRange<Float>, onValueChange: (ClosedFloatingPointRange<Float>) -> Unit, modifier: Modifier = Modifier,
                  range: ClosedFloatingPointRange<Float> = 0f..100f, steps: Int = 0, label: String? = null,
                  format: (Float) -> String = { "%.0f".format(it) }) {
     Column(modifier.fillMaxWidth()) {
@@ -527,25 +527,25 @@ fun KRangeSlider(value: ClosedFloatingPointRange<Float>, onChange: (ClosedFloati
             Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Text("${format(value.start)} – ${format(value.endInclusive)}", style = MaterialTheme.typography.bodyMedium, color = Nocturne.accent2)
         }
-        RangeSlider(value, onChange, valueRange = range, steps = steps,
+        RangeSlider(value, onValueChange, valueRange = range, steps = steps,
             colors = SliderDefaults.colors(thumbColor = Nocturne.accent, activeTrackColor = Nocturne.accent, inactiveTrackColor = Nocturne.surfaceHi))
     }
 }
 
 /** Star rating; [onChange] null makes it display-only. */
 @Composable
-fun KRating(value: Int, onChange: ((Int) -> Unit)? = null, modifier: Modifier = Modifier, max: Int = 5, starSize: Dp = ks(28),
+fun KRating(value: Int, onValueChange: ((Int) -> Unit)? = null, modifier: Modifier = Modifier, max: Int = 5, starSize: Dp = ks(28),
             tone: KTone = KTone.Warn) {
     Row(modifier) {
         for (i in 1..max) Icon(if (i <= value) Icons.Filled.Star else Icons.Filled.StarBorder, "$i of $max",
             tint = if (i <= value) tone.color() else Nocturne.neutral600,
-            modifier = Modifier.size(starSize).then(if (onChange != null) Modifier.clickable { onChange(if (i == value) 0 else i) } else Modifier))
+            modifier = Modifier.size(starSize).then(if (onValueChange != null) Modifier.clickable { onValueChange(if (i == value) 0 else i) } else Modifier))
     }
 }
 
 /** Date field: shows [value], opens a calendar picker; like every input, `value` + `onChange`. */
 @Composable
-fun KDateField(value: LocalDate?, onChange: (LocalDate) -> Unit, modifier: Modifier = Modifier, label: String = "Date",
+fun KDateField(value: LocalDate?, onValueChange: (LocalDate) -> Unit, modifier: Modifier = Modifier, label: String = "Date",
                format: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy"), width: Dp? = null,
                error: String? = null, helper: String? = null, enabled: Boolean = true) {
     var open by remember { mutableStateOf(false) }
@@ -553,22 +553,22 @@ fun KDateField(value: LocalDate?, onChange: (LocalDate) -> Unit, modifier: Modif
     if (open) {
         val state = rememberDatePickerState(initialSelectedDateMillis = value?.atStartOfDay()?.toInstant(ZoneOffset.UTC)?.toEpochMilli())
         DatePickerDialog(onDismissRequest = { open = false },
-            confirmButton = { TextButton({ state.selectedDateMillis?.let { onChange(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }; open = false }) { Text("OK") } },
+            confirmButton = { TextButton({ state.selectedDateMillis?.let { onValueChange(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }; open = false }) { Text("OK") } },
             dismissButton = { TextButton({ open = false }) { Text("Cancel") } }) { DatePicker(state) }
     }
 }
 
 /** Time field: shows [value], opens a picker. */
 @Composable
-fun KTimeField(value: LocalTime?, onChange: (LocalTime) -> Unit, modifier: Modifier = Modifier, label: String = "Time", is24h: Boolean = true,
+fun KTimeField(value: LocalTime?, onValueChange: (LocalTime) -> Unit, modifier: Modifier = Modifier, label: String = "Time", is24h: Boolean = true,
                width: Dp? = null, error: String? = null, helper: String? = null, enabled: Boolean = true) {
     var open by remember { mutableStateOf(false) }
     KPickerBox(label, value?.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm a")) ?: "Pick a time", value == null, modifier,
         width, error, helper, enabled) { open = true }
     if (open) {
         val state = rememberTimePickerState(value?.hour ?: 9, value?.minute ?: 0, is24h)
-        KDialog(open = true, title = label, onDismiss = { open = false }, confirmLabel = "OK",
-            onConfirm = { onChange(LocalTime.of(state.hour, state.minute)) }) { TimeInput(state) }
+        KDialog(open = true, title = label, onDismissRequest = { open = false }, confirmLabel = "OK",
+            onConfirm = { onValueChange(LocalTime.of(state.hour, state.minute)) }) { TimeInput(state) }
     }
 }
 

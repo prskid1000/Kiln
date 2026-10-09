@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import app.kiln.core.a
 import app.kiln.core.str
 import app.kiln.device.Device
 import app.kiln.device.UiNode
@@ -36,13 +37,24 @@ class Skills(private val context: Context) {
 
 class LoadSkillTool(private val skills: Skills) : Tool {
     override val name = "load_skill"
-    override val description = "Load a kit recipe (tested code + rules) before building a feature it covers — the list is in your instructions under Skills."
-    override val schema = schema { str("name", "Skill name, e.g. permissions, notifications, background-work.") }
+    override val description = "Load kit recipes (tested code + rules) before building the features they cover — load every skill you'll " +
+        "need in ONE call, e.g. names: [\"architecture\", \"persistence\", \"charts\"]. The list is in your instructions under Skills."
+    override val schema = schema {
+        raw("names", app.kiln.core.obj("type" to "array", "items" to app.kiln.core.obj("type" to "string"),
+            "description" to "Skill names, e.g. [\"architecture\", \"notifications\"]."))
+    }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val n = input.req("name").trim().lowercase().removeSuffix(".md")
-        return skills.read(n)?.let { ToolResult.ok(it, "skill $n") }
-            ?: ToolResult.error("no skill \"$n\"; available: ${skills.names().joinToString()}")
+        // Runs spent ~7 steps loading skills one by one; a list loads them in one.
+        val names = (input.a("names")?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: listOfNotNull(input.str("name")))
+            .map { it.trim().lowercase().removeSuffix(".md") }.filter { it.isNotEmpty() }.distinct()
+        if (names.isEmpty()) return ToolResult.error("give names: [\"architecture\", …]; available: ${skills.names().joinToString()}")
+        val found = names.mapNotNull { n -> skills.read(n)?.let { n to it } }
+        val missing = names - found.map { it.first }.toSet()
+        if (found.isEmpty()) return ToolResult.error("no skill ${missing.joinToString { "\"$it\"" }}; available: ${skills.names().joinToString()}")
+        return ToolResult.ok(found.joinToString("\n\n---\n\n") { it.second } +
+            (if (missing.isEmpty()) "" else "\n\n(Not found: ${missing.joinToString()}. Available: ${skills.names().joinToString()})"),
+            "skills ${found.joinToString { it.first }}")
     }
 }
 
@@ -250,8 +262,16 @@ class QaCheckTool(
         val last = runCatching { app.kiln.core.KJ.decodeFromString(QaMemory.serializer(), memoryFile.readText()) }.getOrNull()
         val snapshot = sourceSnapshot(ctx.project)
         prepare(ctx)?.let { return ToolResult.error(it) }
-        val criteria = input.req("criteria") + qaFocus(last, snapshot, System.currentTimeMillis())
-        ctx.progress(if (last == null) "QA agent testing the app" else "QA agent re-checking (focused on failures and changes)")
+        // Re-runs are focused by Kiln, not by asking the model (run 13's QA was told to carry passes over and re-tested
+        // everything anyway): only failed and new criteria go to the QA agent, plus a quick look at every screen.
+        val plan = qaPlan(criteriaLines(input.req("criteria")), last)
+        val criteria = if (plan.carried.isEmpty()) input.req("criteria") else
+            "Test these criteria fully:\n" + plan.test.joinToString("\n") { "- $it" } +
+                "\n\nThese passed in the last QA run and are carried over — don't test them:\n" + plan.carried.joinToString("\n") { "- ${it.first}" } +
+                "\n\nThen a quick smoke check: open each main screen once and confirm it shows and nothing crashes (no deep testing). " +
+                "Report one line per criterion you tested, then 'SMOKE: OK' or 'SMOKE: <what broke>', then VERDICT: FAIL if a tested " +
+                "criterion failed or the smoke check found a problem, else VERDICT: PASS."
+        ctx.progress(if (plan.carried.isEmpty()) "QA agent testing the app" else "QA agent re-testing ${plan.test.size} criteria (${plan.carried.size} carried over)")
         val video = File(ctx.spillDir, "qa-${System.currentTimeMillis()}.mp4")
         val rec = device.testDisplay?.record(video, CoroutineScope(SupervisorJob() + Dispatchers.IO))
         // The QA agent's own steps: live in the chat while it works, and listed under its report.
@@ -261,13 +281,17 @@ class QaCheckTool(
         ctx.addCost(usd)
         val clip = runCatching { rec?.stop() }.getOrNull()
         val verdict = Regex("""VERDICT:\s*(PASS|FAIL)""", RegexOption.IGNORE_CASE).find(report)?.groupValues?.get(1)?.uppercase()
+        // Carried criteria go back into the report and the memory as passes.
+        val carriedLines = plan.carried.map { "PASS — ${it.first} — carried over from the last QA run" }
+        val fullReport = if (carriedLines.isEmpty()) report.trim() else
+            report.trim() + "\n\nCarried over from the last QA run (passed then):\n" + carriedLines.joinToString("\n")
         // Remember the per-criterion lines and what the source looked like, for the next run.
-        val lines = qaResultLines(report)
+        val lines = qaResultLines(report) + carriedLines
         if (lines.isNotEmpty()) runCatching {
             memoryFile.parentFile?.mkdirs()
             memoryFile.writeText(app.kiln.core.KJ.encodeToString(QaMemory.serializer(), QaMemory(lines, snapshot, System.currentTimeMillis())))
         }
-        return ToolResult(report.trim(), isError = verdict != "PASS", summary = "QA: ${verdict ?: "no verdict"}", video = clip?.path,
+        return ToolResult(fullReport, isError = verdict != "PASS", summary = "QA: ${verdict ?: "no verdict"}", video = clip?.path,
             detail = trail.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n").ifBlank { null })
     }
 }
@@ -289,21 +313,30 @@ internal fun sourceSnapshot(project: app.kiln.build.Project): Map<String, Int> =
     project.files().filter { f -> f.isFile && (f.extension in setOf("kt", "xml", "json")) && "/.kiln/" !in f.path.replace('\\', '/') }
         .associate { project.rel(it) to it.readBytes().contentHashCode() }
 
+/** The criteria in a qa_check input, one per item: lines, or "1. … 2. …" run together on one line. */
+internal fun criteriaLines(text: String): List<String> =
+    text.replace(Regex("""\s+(?=\d+[.)]\s)"""), "\n").lines()
+        .map { it.trim().replace(Regex("""^(?:[-*•]\s+|\d+[.)]\s*)+"""), "").trim() }.filter { it.length > 3 }
+
+/** What a QA run tests fully, and which criteria it carries over as passes from [QaMemory] (with the old line). */
+internal data class QaPlan(val test: List<String>, val carried: List<Pair<String, String>>)
+
 /**
- * The note added to a QA task when an earlier run exists: what it found, which files changed since,
- * and to re-test only failures, new criteria and what the changes could affect. Empty for a first run.
+ * After a failed QA run, re-test only what failed or is new; a criterion that passed last time is carried
+ * over. With no earlier run, or nothing failed, everything is tested.
  */
-internal fun qaFocus(last: QaMemory?, now: Map<String, Int>, nowMs: Long): String {
-    if (last == null) return ""
-    val changed = (now.keys + last.files.keys).filter { now[it] != last.files[it] }.sorted()
-    val mins = ((nowMs - last.at) / 60_000).coerceAtLeast(0)
-    return "\n\nA QA run ${if (mins == 0L) "just now" else "$mins min ago"} reported:\n" + last.results.joinToString("\n") { "  $it" } +
-        "\nFiles changed since then: " + (if (changed.isEmpty()) "none" else changed.take(25).joinToString(", ") +
-            if (changed.size > 25) " (+${changed.size - 25} more)" else "") +
-        "\n\nDon't repeat that whole run. Re-test properly: every criterion that FAILED, every criterion that is new, and any " +
-        "criterion whose screen or data the changed files could affect. A criterion that PASSED and that these changes can't " +
-        "affect: at most glance at its screen, and report it as `PASS — <criterion> — carried over (unaffected by the changes)`. " +
-        "Still report every criterion, and end with the VERDICT line."
+internal fun qaPlan(criteria: List<String>, last: QaMemory?): QaPlan {
+    fun verdict(line: String) = Regex("""^\**(PASS|FAIL)""").find(line)?.groupValues?.get(1)
+    if (last == null || last.results.none { verdict(it) == "FAIL" } || criteria.isEmpty()) return QaPlan(criteria, emptyList())
+    fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length > 2 }.toSet()
+    val test = mutableListOf<String>(); val carried = mutableListOf<Pair<String, String>>()
+    for (c in criteria) {
+        val w = words(c)
+        val best = last.results.maxByOrNull { (words(it) intersect w).size }
+        val overlap = best?.let { if (w.isEmpty()) 0.0 else (words(it) intersect w).size.toDouble() / w.size } ?: 0.0
+        if (best != null && overlap >= 0.6 && verdict(best) == "PASS") carried += c to best else test += c
+    }
+    return if (test.isEmpty()) QaPlan(criteria, emptyList()) else QaPlan(test, carried)
 }
 
 /** A full-resolution screenshot saved into the project, for the store listing. */

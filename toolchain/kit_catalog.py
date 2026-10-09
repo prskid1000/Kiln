@@ -165,8 +165,64 @@ def build(src_dir: Path, index_txt: Path, out_dir: Path, toolchain: dict):
     out.append(f"- **Libraries** (on the classpath, {len(libs)}): " + ", ".join(sorted(set(
         l for l in libs if not l.endswith(("-android", "-jvm", "-desktop"))))))
     out.append("- **Toolchain**: " + entries[-1]["signature"])
+    # The components apps use most, with their parameters: runs 11–13 guessed names (onValueChange vs onChange,
+    # body vs message) or spent a dozen kit_search calls looking them up.
+    out.append("\n## Common components — parameters (required: type; optional: name only)")
+    by_name = {e["name"]: e for e in entries if e["kind"] in ("function", "composable", "class") and not e.get("owner")}
+    for n in COMMON:
+        e = by_name.get(n)
+        if e:
+            out.append("- " + compact_signature(n, e["signature"]))
     (out_dir / "INDEX.md").write_text("\n".join(out) + "\n", encoding="utf-8")
     return entries
+
+
+COMMON = ["KilnScreen", "KilnTabs", "KCrudList", "KListRow", "KSection", "KCardBox", "KButton", "KFab", "KTextField",
+          "KTextArea", "KSearchBar", "KSelect", "KSegmented", "KChipGroup", "KSwitch", "KSwitchRow", "KCheckbox", "KDateField",
+          "KTimeField", "KAlert", "KConfirm", "KDialog", "KBottomSheet", "KProgressBar", "KDonutChart", "KBarChart",
+          "KEmptyState", "KStat", "KTag", "rememberKToast"]
+
+
+def compact_signature(name: str, sig: str) -> str:
+    """`KTextField(value: String, onValueChange: (String) -> Unit; label, placeholder, error, …)` from a full signature."""
+    # Doc comments inside the parameter list, and the ">" of "->" (not a closing bracket).
+    sig = re.sub(r"/\*.*?\*/", "", sig, flags=re.S).replace("->", "→")
+    start = sig.find("(")
+    if start < 0:
+        return name
+    depth, end = 0, len(sig)
+    for i in range(start, len(sig)):
+        if sig[i] in "([{<":
+            depth += 1
+        elif sig[i] in ")]}>":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    params, cur, d = [], "", 0
+    for ch in sig[start + 1:end]:
+        if ch in "([{<":
+            d += 1
+        elif ch in ")]}>":
+            d -= 1
+        if ch == "," and d == 0:
+            params.append(cur.strip()); cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        params.append(cur.strip())
+    required, optional = [], []
+    for p in params:
+        p = re.sub(r"^(?:@\w+\s+)*(?:vararg\s+|noinline\s+|crossinline\s+)*", "", p).strip()
+        pname = p.split(":")[0].strip()
+        if not pname or pname == "modifier":
+            continue
+        if "=" in p.split(":", 1)[-1]:
+            optional.append(pname)
+        else:
+            required.append(re.sub(r"\s+", " ", p.split("=")[0]).replace("@Composable ", ""))
+    text = (f"{name}(" + ", ".join(required) + ("; " + ", ".join(optional) if optional else "") + ")").replace("→", "->")
+    return text if len(text) <= 260 else text[:257] + "…)"
 
 
 if __name__ == "__main__":
