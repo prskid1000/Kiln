@@ -114,7 +114,9 @@ class MainActivity : ComponentActivity() {
 
     /** "Fix with Kiln" on a crash notification: open that project with the crash in the message box. */
     private fun handle(intent: android.content.Intent?) {
-        val project = intent?.getStringExtra(EXTRA_PROJECT) ?: return
+        // A best-of copy's crash ("Fix with Kiln") opens its parent: a fix made in the copy is discarded with it.
+        val project = intent?.getStringExtra(EXTRA_PROJECT)
+            ?.let { p -> app.kiln.agent.Attempts.ownerOf(app.kiln.build.Project(java.io.File(app.kiln.Graph.paths.projects, p))) ?: p } ?: return
         intent.getStringExtra(EXTRA_DRAFT)?.let { vm.state(project).draft.value = it }
         vm.openRequest.value = project
         intent.removeExtra(EXTRA_PROJECT)

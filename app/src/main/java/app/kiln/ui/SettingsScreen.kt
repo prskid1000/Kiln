@@ -398,7 +398,8 @@ private fun EvalsCard() {
             "models or settings to see whether results got better. It takes a while and uses API credit (free with a local model).",
             style = T.bodySmall)
         KButton(if (state.running) "Running ${state.done}/${state.total}…" else "Run evals", Tone.Accent, enabled = !state.running) {
-            scope.launch(Dispatchers.IO) { Evals.run() }
+            // In the runs' scope: leaving Settings cancelled the benchmark half-way.
+            KilnVM.runScope.launch { Evals.run() }
         }
         if (state.report.isNotBlank()) Text(state.report, style = T.mono)
     }

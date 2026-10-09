@@ -186,7 +186,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                     // A prompt notification still up (the watcher was stopped before seeing it answered) goes with the run.
                     app.kiln.agent.Attention.clear(ctx, name)
                     val last = l.feed.value.lastOrNull { it.kind == app.kiln.agent.Activity.Kind.ASSISTANT }?.text ?: ""
-                    app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
+                    // Not for a project being deleted: tapping it opened a project that no longer exists.
+                    if (name !in deleting) app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
                     s.stopping.value = false
                     if (synchronized(serviceLock) { (active.decrementAndGet() == 0).also { if (it) ctx.stopService(Intent(ctx, RunService::class.java)) } }) {
@@ -258,6 +259,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         val s = synchronized(states) { states.remove(name) }
         // Let a cancelled run actually stop (a tool may be mid-write) before its files go.
         s?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
+        app.kiln.agent.Attention.clear(Graph.app, name)   // its prompts and "is ready" go with it
         // The package the project really uses (kiln.json; the agent may have changed it), not one derived from the name.
         val pkg = runCatching { Project(File(Graph.paths.projects, name)).meta().`package` }.getOrNull() ?: Project.packageFor(name)
         // Always: the cached installed list can be stale (the agent installed it during this run).

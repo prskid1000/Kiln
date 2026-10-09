@@ -56,8 +56,15 @@ fun PreviewSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit, onAsk: (St
     val name = ps.project.name
     val scope = rememberCoroutineScope()
     // Launching for the preview hides the phone's crash dialogs: they come back when it closes, unless a run still needs them hidden.
+    // Hidden again each time it opens (the app may already be showing, so no launch hides them).
+    androidx.compose.runtime.LaunchedEffect(Unit) { KilnVM.runScope.launch { runCatching { app.kiln.Graph.testDevice.hideCrashDialogs() } } }
     androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { if (KilnVM.idle()) KilnVM.runScope.launch { runCatching { app.kiln.Graph.testDevice.restoreCrashDialogs() } } }
+        // The sheet covers the chat's approval and question cards: their notifications must post meanwhile.
+        if (app.kiln.agent.Attention.onScreen == name) app.kiln.agent.Attention.onScreen = null
+        onDispose {
+            if (app.kiln.agent.Attention.onScreen == null) app.kiln.agent.Attention.onScreen = name
+            if (KilnVM.idle()) KilnVM.runScope.launch { runCatching { app.kiln.Graph.testDevice.restoreCrashDialogs() } }
+        }
     }
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var disp by remember { mutableStateOf(0 to 0) }

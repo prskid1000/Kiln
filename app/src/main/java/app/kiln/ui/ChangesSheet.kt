@@ -82,7 +82,8 @@ private fun DiffView(lines: List<Pair<Char, String>>) {
 
 /** Line diff (LCS) with up to [context] unchanged lines around changes; big files are summarised. */
 fun lineDiff(old: List<String>, new: List<String>, context: Int = 2): List<Pair<Char, String>> {
-    if (old.size * new.size > 4_000_000) return listOf(' ' to "(file too large to diff: ${old.size} → ${new.size} lines)")
+    // As Long: the Int product wrapped negative for big files and the table ran out of memory.
+    if (old.size.toLong() * new.size > 4_000_000L) return listOf(' ' to "(file too large to diff: ${old.size} → ${new.size} lines)")
     val dp = Array(old.size + 1) { IntArray(new.size + 1) }
     for (i in old.indices.reversed()) for (j in new.indices.reversed())
         dp[i][j] = if (old[i] == new[j]) dp[i + 1][j + 1] + 1 else maxOf(dp[i + 1][j], dp[i][j + 1])

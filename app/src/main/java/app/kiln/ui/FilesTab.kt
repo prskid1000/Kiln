@@ -227,6 +227,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
     var readAt by b.readAt
     var text by b.text
     var tooBig by b.tooBig
+    var unreadable by b.unreadable
     var confirmDiscard by remember { mutableStateOf(false) }
     // System Back closes the editor (not the whole project), and never drops unsaved edits silently.
     val onClose = { if (original != null && text != original) confirmDiscard = true else close() }
@@ -244,7 +245,9 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
                 is Open.Source -> runCatching { readAt = o.file.lastModified(); if (o.file.length() > MAX_EDIT) ByteArray(0).also { tooBig = true } else o.file.readBytes() }.getOrNull()
                 is Open.Data -> Graph.device.readData(ps.pkg, o.path)?.also { if (it.size > MAX_EDIT) tooBig = true }
             }
-        } ?: ByteArray(0)
+        }
+        // A read that failed isn't an empty file: shown as unreadable, so saving can't replace the real file.
+        if (bytes == null) { unreadable = true; binary = true; original = ""; return@LaunchedEffect }
         // A multi-MB file in a text field freezes the UI: show it as not editable here.
         binary = tooBig || looksBinary(bytes)
         val raw = if (binary) "" else bytes.decodeToString()
@@ -285,6 +288,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
             original == null -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(22.dp), color = N.accent, strokeWidth = 2.dp)
             }
+            unreadable -> EmptyState(iconFor(o.path), "Couldn't read this file", "Close it and open it again.")
             binary && tooBig -> EmptyState(iconFor(o.path), "Too large", "This file is over 1 MB, too big to edit here.")
             binary -> EmptyState(iconFor(o.path), "Binary file", "This file isn't text, so it can't be edited here.")
             else -> {
@@ -339,5 +343,6 @@ internal class EditorBuffer(val open: Open) {
     val original = androidx.compose.runtime.mutableStateOf<String?>(null)
     val binary = androidx.compose.runtime.mutableStateOf(false)
     val tooBig = androidx.compose.runtime.mutableStateOf(false)
+    val unreadable = androidx.compose.runtime.mutableStateOf(false)
     val readAt = androidx.compose.runtime.mutableStateOf(0L)
 }

@@ -73,7 +73,10 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
     // crashed the app). Then the service is held for the whole round: between attempts the count fell to 0 and it
     // stopped, and Android 12+ won't start it again from the background.
     val tries = runCatching { Attempts.create(Graph.paths.projects, s.project, n, request) }
-        .getOrElse { message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
+        .getOrElse {
+            // Copies made before the failure (a full disk on copy 3) would show later as attempts that never ran.
+            runCatching { Attempts.discard(Graph.paths.projects, name) }
+            message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
     val app = getApplication<android.app.Application>()
     if (!KilnVM.holdService(app)) {
         Attempts.discard(Graph.paths.projects, name)

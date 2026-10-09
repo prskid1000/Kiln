@@ -70,7 +70,7 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
      * While an app is tested on the hidden display its crashes must not pop "keeps stopping" over the
      * user's screen (it also blocks the next test): hide crash/ANR dialogs, remembering the user's setting.
      */
-    private suspend fun hideCrashDialogs() {
+    internal suspend fun hideCrashDialogs() {
         if (testDisplay == null || dialogsBefore != null) return
         // A value saved by an earlier run that wasn't restored yet (Kiln restarted) is the user's: reading the
         // setting now would record Kiln's own "1" instead.
