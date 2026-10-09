@@ -17,7 +17,7 @@ import java.util.zip.ZipFile
 private fun JsonObject.req(k: String) = str(k) ?: throw IllegalArgumentException("missing '$k'")
 
 /** Public static method names of a class file (a Kotlin file facade's top-level functions; getX → X). */
-internal fun classPublicStatics(b: ByteArray): List<String> {
+internal fun classPublicStatics(b: ByteArray, upperVals: Boolean = true): List<String> {
     val d = java.io.DataInputStream(b.inputStream())
     if (d.readInt() != 0xCAFEBABE.toInt()) return emptyList()
     d.readUnsignedShort(); d.readUnsignedShort()
@@ -52,8 +52,11 @@ internal fun classPublicStatics(b: ByteArray): List<String> {
         val name = raw.substringBefore('-')
         if (access and 0x9 == 0x9 && access and 0x1000 == 0 && name.isNotEmpty() && name.none { it == '$' || it == '<' })
             if (name.length > 3 && name.startsWith("get") && name[3].isUpperCase()) {
-                // A top-level val: `val Nocturne` and `val kilnColors` both compile to getX.
-                out += name.substring(3); out += name[3].lowercase() + name.substring(4)
+                // A top-level val compiles to getX: its name is the lower-case form (`val kilnColors`). The capitalised
+                // form only where vals are capitalised on purpose ([upperVals]: the kit's `val Nocturne`) — for androidx it
+                // invented names: semantics' getText() became a second `Text`, so Text was ambiguous and never imported.
+                out += name[3].lowercase() + name.substring(4)
+                if (upperVals) out += name.substring(3)
             } else out += name
     }
     return out.distinct()
@@ -110,7 +113,7 @@ class ClassIndex(private val toolchain: Toolchain) {
                 if (fq.endsWith("Kt") && '$' !in fq && (fq.startsWith("app.kiln.kit.") ||
                         (fq.startsWith("androidx.") && !fq.startsWith("androidx.compose.material.icons.")))) {
                     val pkg = fq.substringBeforeLast('.')
-                    runCatching { z.getInputStream(e).use { classPublicStatics(it.readBytes()) } }.getOrNull()
+                    runCatching { z.getInputStream(e).use { classPublicStatics(it.readBytes(), upperVals = fq.startsWith("app.kiln.kit.")) } }.getOrNull()
                         ?.forEach { topLevel += "$pkg.$it"; facadeOf.getOrPut("$pkg.$it") { mutableListOf() } += fq }
                 }
             }
@@ -660,7 +663,8 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
         val m = e.message; val src = e.source.orEmpty()
         // A name of its own it misspelt or never wrote (formatMony, monthTotal): the closest it did write, and the kit's.
         Regex("unresolved reference '([a-z]\\w*)'(?! on receiver)").find(m)?.groupValues?.get(1)?.let { n ->
-            if (n in setOf("id", "value", "context", "appContext", "applicationContext", "instance")) return@let
+            // (Nor `it`, `this` or a one- or two-letter name: "it isn't declared — did you mean kt, kr" was noise.)
+            if (n in setOf("id", "value", "context", "appContext", "applicationContext", "instance", "it", "this", "field") || n.length <= 2) return@let
             // `Repo.currentMonthTotal()`: the compiler often names no receiver for an object's member — the source line does.
             val recv = Regex("""\b([A-Z]\w*)\.${Regex.escape(n)}\b""").find(src)?.groupValues?.get(1)
             val recvMembers = recv?.let { symbols.members(it) }.orEmpty()

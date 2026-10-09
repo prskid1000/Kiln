@@ -273,6 +273,10 @@ class ToolsOnDeviceTest {
                 expect = "Exp2.date: LocalDate → KDate"),
             Case("check", "{}", expect = "BUILD OK"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // Text is imported by the build (a getter-derived semantics.Text made it ambiguous, and it never was).
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun T2() { Text(\"hi\") }\n"}"""),
+            Case("check", "{}", expect = "import androidx.compose.material3.Text"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
             // A member asked for by name gets the member's (Kotlin) signature from the kit catalog.
             Case("sdk_lookup", """{"query":"KFormat.money"}""", expect = "fun money(amount: Double"),
             // Every overload is answered (date(date: LocalDate…) as well as date(iso: String…)).
