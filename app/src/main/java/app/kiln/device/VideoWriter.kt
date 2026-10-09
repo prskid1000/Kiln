@@ -37,7 +37,8 @@ class VideoWriter(private val file: File, width: Int, height: Int, private val f
         val bmp = if (frame.width == w && frame.height == h) frame else Bitmap.createScaledBitmap(frame, w, h, true)
         val idx = codec.dequeueInputBuffer(10_000)
         if (idx >= 0) {
-            val img = codec.getInputImage(idx) ?: return
+            // No image: hand the buffer back empty, or the encoder loses it for good (and finish() can't end the stream).
+            val img = codec.getInputImage(idx) ?: run { codec.queueInputBuffer(idx, 0, 0, frames * 1_000_000L / fps, 0); return }
             val px = IntArray(w * h).also { bmp.getPixels(it, 0, w, 0, 0, w, h) }
             val (yP, uP, vP) = img.planes
             for (y in 0 until h) for (x in 0 until w) {
@@ -59,9 +60,14 @@ class VideoWriter(private val file: File, width: Int, height: Int, private val f
     /** Finish the file; returns it, or null if nothing was recorded. */
     fun finish(): File? {
         runCatching {
-            val idx = codec.dequeueInputBuffer(10_000)
-            if (idx >= 0) codec.queueInputBuffer(idx, 0, 0, frames * 1_000_000L / fps, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-            drain(true)
+            // Wait (bounded) for an input buffer to carry end-of-stream; without one the drain below could never end.
+            var idx = -1
+            val until = System.currentTimeMillis() + 2_000
+            while (idx < 0 && System.currentTimeMillis() < until) idx = codec.dequeueInputBuffer(10_000)
+            if (idx >= 0) {
+                codec.queueInputBuffer(idx, 0, 0, frames * 1_000_000L / fps, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                drain(true)
+            }
         }
         runCatching { codec.stop() }; codec.release()
         val ok = track >= 0
@@ -70,10 +76,12 @@ class VideoWriter(private val file: File, width: Int, height: Int, private val f
     }
 
     private fun drain(end: Boolean) {
+        // At the end, wait for the end-of-stream buffer — but not forever (a codec that never sends it hung stop()).
+        val until = System.currentTimeMillis() + 5_000
         while (true) {
             val out = codec.dequeueOutputBuffer(info, if (end) 10_000 else 0)
             when {
-                out == MediaCodec.INFO_TRY_AGAIN_LATER -> if (!end) return
+                out == MediaCodec.INFO_TRY_AGAIN_LATER -> if (!end || System.currentTimeMillis() > until) return
                 out == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> { track = muxer.addTrack(codec.outputFormat); muxer.start() }
                 out >= 0 -> {
                     val buf = codec.getOutputBuffer(out)!!

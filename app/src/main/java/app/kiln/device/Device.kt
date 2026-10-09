@@ -66,18 +66,22 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
      */
     private suspend fun hideCrashDialogs() {
         if (testDisplay == null || dialogsBefore != null) return
-        dialogsBefore = warden.exec(listOf("settings", "get", "global", "hide_error_dialogs")).out.trim().ifBlank { "null" }
+        // A value saved by an earlier run that wasn't restored yet (Kiln restarted) is the user's: reading the
+        // setting now would record Kiln's own "1" instead.
+        dialogsBefore = dialogsFile?.takeIf { it.isFile }?.readText()?.trim()?.ifBlank { null }
+            ?: warden.exec(listOf("settings", "get", "global", "hide_error_dialogs")).out.trim().ifBlank { "null" }
         dialogsFile?.writeText(dialogsBefore!!)
         warden.exec(listOf("settings", "put", "global", "hide_error_dialogs", "1"))
     }
 
-    /** Put the user's crash-dialog setting back (when a run ends). */
+    /** Put the user's crash-dialog setting back (when a run ends). The saved value is kept until that works. */
     suspend fun restoreCrashDialogs() {
         val before = dialogsBefore ?: dialogsFile?.takeIf { it.isFile }?.readText()?.trim() ?: return
+        val r = if (before == "null") warden.exec(listOf("settings", "delete", "global", "hide_error_dialogs"))
+            else warden.exec(listOf("settings", "put", "global", "hide_error_dialogs", before))
+        if (!r.ok) return          // Warden not ready (e.g. right after a reboot): try again later, don't lose it
         dialogsBefore = null
         dialogsFile?.delete()
-        if (before == "null") warden.exec(listOf("settings", "delete", "global", "hide_error_dialogs"))
-        else warden.exec(listOf("settings", "put", "global", "hide_error_dialogs", before))
     }
 
     /** Launch the app's launcher activity and wait for it to draw. */
@@ -253,7 +257,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
 
     private fun parseTree(xml: String): List<UiNode> {
         if (!xml.startsWith("<")) return emptyList()
-        val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.byteInputStream())
+        // Truncated or malformed XML (an app dying mid-dump) reads as an empty screen, not a crashed tool.
+        val doc = runCatching { DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.byteInputStream()) }.getOrNull() ?: return emptyList()
         val nodes = doc.getElementsByTagName("node")
         val out = mutableListOf<UiNode>()
         val bounds = Regex("""\[(\d+),(\d+)]\[(\d+),(\d+)]""")
@@ -355,7 +360,8 @@ private val SYMBOLS = mapOf(
 fun findNode(nodes: List<UiNode>, target: String): UiNode? {
     // A symbol names a button by its icon (run 10: "+" matched the text "Tap + to add…", not the + button).
     SYMBOLS[target.trim()]?.let { words ->
-        nodes.filter { it.clickable }.firstOrNull { n -> words.any { w -> "${n.desc} ${n.text}".lowercase().contains(w) } }?.let { return it }
+        // Whole words: "+" must find "Add expense", not "Renew" or "Edit address".
+        nodes.filter { it.clickable }.firstOrNull { n -> words.any { w -> Regex("""\b${Regex.escape(w)}\b""").containsMatchIn("${n.desc} ${n.text}".lowercase()) } }?.let { return it }
     }
     val filler = setOf("button", "btn", "text", "textview", "view", "image", "imageview", "icon", "the", "a", "an",
         "tab", "label", "field", "edittext", "switch", "checkbox", "item", "element", "on", "labeled", "labelled", "called")

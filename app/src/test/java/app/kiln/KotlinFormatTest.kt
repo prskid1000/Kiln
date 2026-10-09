@@ -131,6 +131,17 @@ class KotlinFormatTest {
         assertEquals("", app.kiln.tools.wholeFileHint(file, "class MainActivity"))    // a small edit: no such hint
     }
 
+    @Test fun `raw strings come through byte for byte`() {
+        // A tab, trailing spaces and a double blank line inside a raw string are content (review).
+        val src = "val tsv = \"\"\"\nname\tamount   \n\n\nrent\t500\n\"\"\"\n"
+        assertEquals(src, KotlinFormat.format(src))
+    }
+
+    @Test fun `n++ and i-- don't indent the next line`() {
+        val src = "fun f() {\n    if (x) {\n        n++\n        go()\n    }\n    i--\n    stop()\n}\n"
+        assertEquals(src, KotlinFormat.format(src))
+    }
+
     @Test fun `star imports don't indent the next line`() {
         val src = "package a\n\nimport b.*\nimport c.D\n\nfun x() = 1\n"
         assertEquals(src, KotlinFormat.format(src))

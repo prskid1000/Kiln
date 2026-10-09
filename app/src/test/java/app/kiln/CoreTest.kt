@@ -68,6 +68,9 @@ class CoreTest {
         val fab = node("", "Add expense", true)
         assertEquals(fab, app.kiln.device.findNode(listOf(hint, fab), "+"))
         assertEquals(hint, app.kiln.device.findNode(listOf(hint), "+"))            // no such button: fall back to text
+        // Whole words only: "Renew plan" contains "new" but isn't an add button (review).
+        val renew = node("Renew plan", "", true)
+        assertEquals(fab, app.kiln.device.findNode(listOf(renew, fab), "+"))
     }
 
     @Test fun `a KilnScreen that ignores its padding fails the lint`() {
@@ -83,6 +86,9 @@ class CoreTest {
         assertEquals(0, errors("fun E() { KilnScreen(title = \"T\", actions = { Icon() }) { pad -> Column(Modifier.screenPadding(pad)) { Text(\"x\") } } }").size)
         assertEquals(0, errors("fun E() { KilnScreen(\"T\") { LazyColumn(contentPadding = it) { } } }").size)
         assertEquals(0, errors("fun E() { KilnScreen(\"T\", content = { p -> Box(Modifier.padding(p)) }) }").size)
+        // Comments and strings don't count (review): a commented-out KilnScreen, a "}" before the padding is used.
+        assertEquals(0, errors("// KilnScreen(\"A\") { Text(\"x\") }\nfun E() { }\n").size)
+        assertEquals(0, errors("fun E() { KilnScreen(\"T\") { pad -> Text(\"}\"); Column(Modifier.padding(pad)) { } } }").size)
         // A typed parameter is a parameter too (review: it was flagged).
         assertEquals(0, errors("fun E() { KilnScreen(\"Home\") { pad: PaddingValues -> Column(Modifier.padding(pad)) { } } }").size)
         assertEquals(1, errors("fun E() { KilnScreen(\"Home\") { pad: PaddingValues -> Text(\"x\") } }").size)

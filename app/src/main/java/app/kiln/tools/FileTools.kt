@@ -240,7 +240,9 @@ internal fun occurrences(text: String, needle: String): Int {
 
 /** Kotlin outside src/ is never compiled: say so before the file is written, with the right path. */
 internal fun misplacedSource(path: String?): String? {
-    val p = path?.replace('\\', '/')?.trimStart('/') ?: return null
+    val p = path?.replace('\\', '/')?.removePrefix("./")?.trimStart('/') ?: return null
+    // Java isn't compiled by Kiln's on-device build (kotlinc only): it would pass the build and crash at runtime.
+    if (p.endsWith(".java")) return "Kiln builds Kotlin only — a .java file wouldn't be compiled. Write it as a .kt file under src/."
     if (!p.endsWith(".kt") || p.startsWith("src/")) return null
     return "Kotlin sources must be under src/ (the app's package directory, e.g. src/kiln/app/<name>/$p) or they won't be compiled. " +
         "Write it there instead — project_info shows the package."
