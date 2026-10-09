@@ -312,7 +312,9 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
      * for a window without focus make Android report Kiln as not responding.
      */
     private suspend fun inApp(vararg extras: String): ExecResult {
-        val pkg = foregroundPackage() ?: return ExecResult(1, "", "nothing is showing on the test display", 0)
+        val pkg = foregroundPackage() ?: return ExecResult(1, "", "can't tell which app is showing", 0)
+        // Only Kiln's own apps get the input (the agent's text, maybe a test password): not whatever the user switched to.
+        if (!pkg.startsWith("kiln.app.")) return ExecResult(1, "", "$pkg is in front, not the app under test — launch it first", 0)
         val r = warden.exec(listOf("am", "broadcast", "-a", "app.kiln.kit.INPUT", "-p", pkg) + extras, timeoutMs = 15_000)
         val data = r.out.substringAfter("data=\"", "").substringBefore("\"")
         return when {

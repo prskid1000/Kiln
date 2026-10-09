@@ -47,16 +47,27 @@ class BuildEngine(private val toolchain: Toolchain, private val host: ToolHost,
     /** What a build is for: running here (debuggable), or shipping (APK or Play bundle). */
     enum class Kind { DEBUG, RELEASE_APK, RELEASE_AAB }
 
+    private val running = java.util.concurrent.atomic.AtomicInteger()
+    private val switching = kotlinx.coroutines.sync.Mutex()
+    private object PAUSE
+
+    /** Wait for running builds to finish and hold new ones until [resumeBuilds] (the toolchain is being swapped). */
+    suspend fun pauseBuilds() { switching.lock(PAUSE); while (running.get() > 0) kotlinx.coroutines.delay(200) }
+    fun resumeBuilds() { if (switching.holdsLock(PAUSE)) switching.unlock(PAUSE) }   // only the pause's own hold
+
     suspend fun build(project: Project, checkOnly: Boolean = false, kind: Kind = Kind.DEBUG, onStep: (String) -> Unit = {}): BuildResult {
         val lock = locks.getOrPut(project.dir.path) { kotlinx.coroutines.sync.Mutex() }
         if (lock.isLocked) onStep("waiting for the other build")
         return lock.withLock {
+            // Counted, and held off while the toolchain is being swapped (its old files are deleted after).
+            switching.withLock { running.incrementAndGet() }
             // A bad kiln.json, a missing toolchain or a packaging failure is a failed build, not a crash.
             try { buildLocked(project, checkOnly, kind, onStep) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) {
                 BuildResult(false, null, listOf(Diagnostic("error", "build failed: ${e.message ?: e}", tool = "kiln")))
             }
+            finally { running.decrementAndGet() }
         }
     }
 

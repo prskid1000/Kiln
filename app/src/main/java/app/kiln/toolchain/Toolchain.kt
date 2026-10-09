@@ -48,6 +48,8 @@ class Toolchain(private val paths: Paths) {
 
     /** Called before the active toolchain is swapped (the warm compiler JVM must not outlive its files). */
     var beforeSwitch: (suspend () -> Unit)? = null
+    /** Called once the old toolchain's files are gone (builds paused by [beforeSwitch] may resume). */
+    var afterSwitch: (() -> Unit)? = null
     private val installLock = kotlinx.coroutines.sync.Mutex()
     fun require(): File = dir ?: error("The toolchain isn't set up yet — reopen Kiln to finish setting it up.")
 
@@ -162,12 +164,14 @@ class Toolchain(private val paths: Paths) {
             deleteTree(set)
             check(tmp.renameTo(set)) { "could not activate the toolchain" }
         }
-        if ((state.value as? State.Ready)?.dir?.canonicalPath != set.canonicalPath) {
-            beforeSwitch?.invoke()
-            File(paths.toolchainRoot, "current.tmp").apply { writeText("sets/$setId") }.renameTo(File(paths.toolchainRoot, "current"))
-        }
-        refresh()
-        prune(setId, bundled.map { dirOf(it).canonicalPath }.toSet())
+        // Builds are paused across the switch and the prune: a running build used the old files being deleted.
+        val switch = (state.value as? State.Ready)?.dir?.canonicalPath != set.canonicalPath
+        try {
+            if (switch) beforeSwitch?.invoke()
+            if (switch) File(paths.toolchainRoot, "current.tmp").apply { writeText("sets/$setId") }.renameTo(File(paths.toolchainRoot, "current"))
+            refresh()
+            prune(setId, bundled.map { dirOf(it).canonicalPath }.toSet())
+        } finally { if (switch) afterSwitch?.invoke() }
         setId
     }.onFailure {
         refresh()   // the installed toolchain, if there is one, stays in use

@@ -48,7 +48,8 @@ object Graph {
         toolchain = Toolchain(paths)
         toolHost = ToolHost(paths, toolchain)
         builds = BuildEngine(toolchain, toolHost) { p, name -> secrets.get(AppSecrets.storeId(p, name)) }
-        toolchain.beforeSwitch = { toolHost.shutdown() }
+        toolchain.beforeSwitch = { builds.pauseBuilds(); toolHost.shutdown() }
+        toolchain.afterSwitch = { builds.resumeBuilds() }
         warden = Warden(app)
         device = Device(warden)
         testDevice = Device(warden, TestDisplay(app), java.io.File(app.filesDir, "crash-dialogs-before"))
