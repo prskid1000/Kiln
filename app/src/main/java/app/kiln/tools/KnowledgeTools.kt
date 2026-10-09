@@ -683,6 +683,12 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                     similar.joinToString("\n") { "      ${it.signature}  ${where(it)}" } + "\n    Use the existing name, or declare $n."
             }
         }
+        // The item's own field read off a KCollection row (`it.amount` on KRow<Expense>): the item is row.value.
+        Regex("unresolved reference '(\\w+)' on receiver of type 'KRow<(\\w+)>'").find(m)?.let { r ->
+            val (field, type) = r.destructured
+            out += "These are rows (KRow<$type>: id + value), not $type items: write `it.value.$field` — or use `.items` " +
+                "(plain $type values) where you don't need ids, e.g. `Repo.x.items.sumOf { it.$field }`."
+        }
         // `it.id` on the app's own item type: the id lives on the KCollection row, not the item.
         Regex("unresolved reference '(id|value)' on receiver of type '(\\w+)'").find(m)?.let { r ->
             val (field, type) = r.destructured

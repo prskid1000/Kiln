@@ -157,7 +157,8 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         // `by remember { … }` without getValue/setValue imports is reported as a missing method, not a name.
         val delegate = Regex("""has no method '(getValue|setValue)\(""").find(e.message)?.groupValues?.get(1)
         val name = delegate ?: icon?.groupValues?.get(3) ?: unresolved.find(e.message)?.groupValues?.get(1) ?: continue
-        if (name[0].isLowerCase() && name !in COMMON_FUNCTIONS) continue
+        // Lower-case names: the common Compose ones, and the kit's own functions (rememberKToast, rememberPref…).
+        if (name[0].isLowerCase() && name !in COMMON_FUNCTIONS && name !in runCatching { index.kitNames() }.getOrDefault(emptySet())) continue
         // A lower-case name is imported only where it's called (items(…), Modifier.size(…)): `list.items`
         // or `x.size` are properties of something else. dp/sp/viewModelScope and by-delegates are the exceptions.
         if (name[0].isLowerCase() && delegate == null && name !in setOf("dp", "sp", "viewModelScope") &&

@@ -229,6 +229,15 @@ class ToolsOnDeviceTest {
                 expect = "Icons.Filled.Hoem isn't a Material icon. Closest: Icons.Filled.Home", absent = "Icons isn't in the kit"),
             Case("grep", """{"pattern":"import app.kiln.kit.Icons","glob":"**/Bad2.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // An import of a name that doesn't exist and isn't used is dropped; a kit function called without its import gets it.
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\nimport app.kiln.kit.KText\nimport app.kiln.kit.Tone\n\n@Composable\nfun T() { val t = rememberKToast() }\n"}""",
+                expect = "removed import app.kiln.kit.KText", absent = "KText isn't"),
+            Case("read_file", """{"path":"$src/Bad2.kt"}""", expect = "import app.kiln.kit.rememberKToast"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // A KCollection row's value read as the item: told to use row.value.
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport app.kiln.kit.KCollection\nimport kotlinx.serialization.Serializable\n\n@Serializable data class Exp(val amount: Double = 0.0)\nval exps = KCollection<Exp>(\"exps\")\nval total = exps.rows.value.sumOf { it.amount }\n"}"""),
+            Case("check", "{}", expectError = true, expect = "it.value.amount"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
             // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).
             Case("sdk_lookup", """{"query":"DatePickerDialog"}""", expect = "androidx.compose.material3.DatePickerDialog — a top-level function"),
             // A name a letter off another component is suggested, never swapped in (KSlide meant KSwipeRow).

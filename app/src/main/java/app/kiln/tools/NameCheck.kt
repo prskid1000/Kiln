@@ -55,7 +55,12 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
                         corrections += Correction(fq, "app.kiln.kit.$name", import = true) }
                     is Fix.Typo -> { text = rename(replaceImport(text, fq, "app.kiln.kit.${s.to}"), name, s.to); renamed += name
                         fixed += "$name → ${s.to} (the kit's name; import and every use)"; corrections += Correction(name, s.to, import = false) }
-                    is Fix.None -> problems += unknown(name, lineOf(original, m.range.first), s.closest)
+                    // An import of a name that doesn't exist and isn't used (import app.kiln.kit.KText, …Kt): dropping it
+                    // is certain. Reported as missing, the model looked for it in its code, called the errors "phantom".
+                    is Fix.None -> if (!Regex("""(?<![\w.$])${Regex.escape(name)}\b""").containsMatchIn(codeOnly(text).replace(IMPORT, ""))) {
+                        text = Regex("""(?m)^import\s+${Regex.escape(fq)}\s*\n?""").replace(text, "")
+                        fixed += "removed import $fq (no such name, and the file doesn't use it)"
+                    } else problems += unknown(name, lineOf(original, m.range.first), s.closest)
                 }
             } else if (CHECKED.any { fq.startsWith(it) } && !index.exists(fq) && !index.exists(pkg) && !index.packageExists(pkg)) {
                 val alt = runCatching { index.uniqueClass(name) }.getOrNull()
@@ -81,6 +86,11 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
                     fixed += "$n → ${s.to} (the kit's name; every use)"; corrections += Correction(n, s.to, import = false) }
                 is Fix.None -> if (KIT_SHAPED.matches(n)) problems += unknown(n, lineOf(text, code.indexOf(n).coerceAtLeast(0)), s.closest)
             }
+        }
+        // Lower-case kit functions called without their import (rememberKToast(), rememberPref(…)).
+        if (!wildcard) for (m in LOWER_CALL.findAll(code)) {
+            val n = m.groupValues[1]
+            if (n in kit && n !in imported && n !in declared) missing += n
         }
         for (n in missing) { text = addImport(text, "app.kiln.kit.$n"); fixed += "added import app.kiln.kit.$n" }
 
@@ -184,6 +194,8 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         val USE = Regex("""(?<![\w.$])(?:K[A-Z]\w*|Kiln[A-Z]\w*|K[a-z]{2,4}[A-Z]\w*)\b""")
         val KIT_SHAPED = Regex("""K[A-Z]\w*|Kiln[A-Z]\w*""")
         val ICON = Regex("""(?<![\w.])Icons\.(AutoMirrored\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.([A-Z]\w*)""")
+        /** A bare lower-case call (not a member: no "." before it). */
+        val LOWER_CALL = Regex("""(?<![\w.$])([a-z]\w*)\s*[({]""")
         val DECL = Regex("""\b(?:class|object|interface|typealias|fun|val|var)\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)""")
         val WORDS = Regex("""[A-Z][a-z0-9]+|[a-z0-9]+""")
         val CHECKED = listOf("androidx.", "kotlinx.", "android.", "java.", "javax.", "com.google.")
