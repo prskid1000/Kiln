@@ -131,7 +131,8 @@ class AgentLoop(
     private var todosAtStart: List<SessionState.Todo> = emptyList()
     private val approvalLock = kotlinx.coroutines.sync.Mutex()
     /** A helper's loop: nobody sees its approval prompts, so a tool that needs approval is refused, not waited on. */
-    private var headless = false
+    /** Unattended (a helper, or an eval): nobody can answer, so approvals are refused and questions answered at once. */
+    internal var headless = false
     /** A helper started by a read-only (plan) request: read-only too. */
     private var inheritReadOnly = false
     /** A helper's chat's spend when it started (counted toward the session cap). */
@@ -409,6 +410,7 @@ class AgentLoop(
 
     /** Show the look picker and wait for the user's choice. */
     private suspend fun askLook(appName: String?): String {
+        if (headless) return ""   // the default look
         val q = Question("Pick a look for ${appName ?: "this app"}", emptyList(), CompletableDeferred(), kind = "look")
         question.value = q
         return try { q.answer.await() } finally { question.value = null }
@@ -577,11 +579,13 @@ class AgentLoop(
             session.updateMeta { it.copy(costUsd = cost.value) }
         }
         override suspend fun ask(question: String, options: List<String>): String {
+            if (headless) return UNATTENDED
             val q = Question(question, options, CompletableDeferred())
             this@AgentLoop.question.value = q
             return try { q.answer.await() } finally { this@AgentLoop.question.value = null }
         }
         override suspend fun askMany(questions: List<app.kiln.tools.AskQ>): List<String> {
+            if (headless) return questions.map { UNATTENDED }
             val first = questions.first()
             val q = Question(first.question, first.options.map { it.label }, CompletableDeferred(), kind = "multi", questions = questions)
             this@AgentLoop.question.value = q
@@ -829,3 +833,6 @@ internal fun withoutImages(m: Msg): Msg {
     })
     return m.copy(content = strip(m.content))
 }
+
+/** What an unattended loop's questions get: nobody is there to answer. */
+private const val UNATTENDED = "(No one can answer — this run is unattended. Decide yourself, sensibly, and say what you chose.)"

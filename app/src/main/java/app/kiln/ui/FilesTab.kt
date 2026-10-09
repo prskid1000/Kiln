@@ -66,7 +66,8 @@ import java.io.File
 internal sealed interface Open {
     val path: String
     data class Source(val file: File, override val path: String) : Open
-    data class Data(override val path: String) : Open
+    /** [size] as listed: a file over the edit limit isn't read at all (a 150 MB cache ran Kiln out of memory). */
+    data class Data(override val path: String, val size: Long = 0) : Open
 }
 
 /**
@@ -207,7 +208,7 @@ private fun DataList(vm: KilnVM, ps: ProjectState, uploads: Int, onOpen: (Open) 
                                 IconBtn(Icons.Rounded.Delete, "Delete", tint = N.textMuted) {
                                     scope.launch { withContext(Dispatchers.IO) { Graph.device.deleteData(ps.pkg, f.path) }; tick++ }
                                 }
-                            }) { onOpen(Open.Data(f.path)) }
+                            }) { onOpen(Open.Data(f.path, f.size)) }
                         }
                     }
                 }
@@ -243,7 +244,8 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
         val bytes = withContext(Dispatchers.IO) {
             when (o) {
                 is Open.Source -> runCatching { readAt = o.file.lastModified(); if (o.file.length() > MAX_EDIT) ByteArray(0).also { tooBig = true } else o.file.readBytes() }.getOrNull()
-                is Open.Data -> Graph.device.readData(ps.pkg, o.path)?.also { if (it.size > MAX_EDIT) tooBig = true }
+                is Open.Data -> if (o.size > MAX_EDIT) ByteArray(0).also { tooBig = true }
+                    else Graph.device.readData(ps.pkg, o.path)?.also { if (it.size > MAX_EDIT) tooBig = true }
             }
         }
         // A read that failed isn't an empty file: shown as unreadable, so saving can't replace the real file.

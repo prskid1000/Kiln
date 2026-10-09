@@ -268,7 +268,9 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         runCatching { val p = Project(File(Graph.paths.projects, name)); app.kiln.build.AppSecrets.names(p).forEach { Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, it), null) } }
         app.kiln.agent.Attempts.list(Graph.paths.projects, name).forEach { t ->
             // Its attempts' runs stop first (they wrote into the deleted folders), and their state goes with them.
+            deleting += t.name   // its run's end must not post "is ready" for a project that's going
             synchronized(states) { states.remove(t.name) }?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
+            app.kiln.agent.Attention.clear(Graph.app, t.name); deleting -= t.name
             runCatching { Graph.device.uninstall(t.meta().`package`) }; t.dir.deleteRecursively()
             Session.list(Graph.paths.sessions, t.name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
         }

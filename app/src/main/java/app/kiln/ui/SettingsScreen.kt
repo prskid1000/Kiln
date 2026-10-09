@@ -391,15 +391,16 @@ private fun ExtraToolsCard() {
 @Composable
 private fun EvalsCard() {
     val state by Evals.state.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     Section(Icons.Rounded.Science, "Evals", "A benchmark for your model setup") {
         Text("Builds six test apps from scratch with your current models (Counter, Todo, Timer, Tabs, Notes, Weather) " +
             "and scores each: does it build, does it run without crashing, plus steps, cost and time. Run it after changing " +
             "models or settings to see whether results got better. It takes a while and uses API credit (free with a local model).",
             style = T.bodySmall)
         KButton(if (state.running) "Running ${state.done}/${state.total}…" else "Run evals", Tone.Accent, enabled = !state.running) {
-            // In the runs' scope: leaving Settings cancelled the benchmark half-way.
-            KilnVM.runScope.launch { Evals.run() }
+            // In the runs' scope (leaving Settings cancelled it), with the run service held so it isn't killed in the background.
+            val app = ctx.applicationContext
+            KilnVM.runScope.launch { if (KilnVM.holdService(app)) try { Evals.run() } finally { KilnVM.releaseService(app) } }
         }
         if (state.report.isNotBlank()) Text(state.report, style = T.mono)
     }

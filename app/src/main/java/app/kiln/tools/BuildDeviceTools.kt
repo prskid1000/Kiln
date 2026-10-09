@@ -309,8 +309,9 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
 
     internal fun pointIn(s: String, nodes: List<app.kiln.device.UiNode>): Pair<Int, Int>? =
         // Exact labels only: the fuzzy finder matched "540,1200" to any "₹1200" on screen and tapped that instead.
-        // "1,200" (a thousands group: no space, no brackets) is an amount, never a point, even before it shows.
-        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { !Regex("""^\d{1,3},\d{3}$""").matches(s.trim()) }
+        // "1,200" or "5,000" (one digit, then a thousands group) is an amount, never a point, even before it shows: a tap
+        // at x < 10 is the screen's very edge. Points like "250,289" look the same otherwise, so only that case.
+        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { !Regex("""^\d,\d{3}$""").matches(s.trim()) }
             ?.takeIf { nodes.none { n -> shows(listOf(n), s) } }   // "1,000" in "₹1,000" is a label; "540,960" in "₹1,540,960" isn't
             ?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
 
@@ -391,7 +392,8 @@ class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device, private 
         if (!inst.out.contains("Success")) return ToolResult.error("install failed: ${inst.all.trim()}")
         val marker = device.logMarker()
         ctx.progress("launch")
-        device.launch(pkg)
+        // A launch that failed (no launcher activity) is said plainly, not left to look like a crash.
+        device.launch(pkg).let { l -> if (!l.ok) return ToolResult.error("launch failed: ${l.all.trim().take(300)}") }
         delay((input.int("wait_ms") ?: 2500).toLong().coerceIn(1000, 10_000))
         ctx.state.logMarkers[pkg] = marker
         val crash = device.lastCrash(pkg, marker)

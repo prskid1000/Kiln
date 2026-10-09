@@ -52,7 +52,8 @@ object Evals {
             val name = "eval_${c.id}_$stamp".lowercase().replace(Regex("[^a-z0-9_]"), "_").take(40)
             scores += runCatching {
                 val p = Project.create(Graph.paths.projects, name, c.label, File(Graph.toolchain.templates(), "compose"))
-                val loop = Graph.kiln.newSession(p)
+                // Unattended: a prompt nobody can see would hang the benchmark for good.
+                val loop = Graph.kiln.newSession(p).also { it.headless = true }
                 loop.send(c.prompt + "\n\nWork autonomously; do not ask questions. Verify on the device before finishing.")
                 val feed = loop.feed.value
                 val tools = feed.filter { it.kind == Activity.Kind.TOOL }

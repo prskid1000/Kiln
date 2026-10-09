@@ -47,6 +47,8 @@ class CoreTest {
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
         // Review: other keys beside a group aren't a failing step of their own.
         assertEquals(listOf("""{"expect":"Saved"}"""), steps("""{"step":3,"timeout_ms":5000,"actions":[{"expect":"Saved"}]}"""))
+        // Review round 10: a coordinate pair stays a point after expand (the amount rule must not swallow it).
+        assertEquals(listOf("""{"tap":"250,289"}"""), steps("""{"tap":{"x":250,"y":289}}"""))
         // Review: an action beside a group runs too ("then" after it).
         assertEquals(listOf("""{"tap":"Save"}""", """{"expect":"Saved"}"""), steps("""{"tap":"Save","then":[{"expect":"Saved"}]}"""))
         // Review: target beside a swipe is the row, not a second tap; a type object's label names the field.

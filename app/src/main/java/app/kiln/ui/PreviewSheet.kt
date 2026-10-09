@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,12 +61,15 @@ fun PreviewSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit, onAsk: (St
     androidx.compose.runtime.LaunchedEffect(Unit) { KilnVM.runScope.launch { runCatching { app.kiln.Graph.testDevice.hideCrashDialogs() } } }
     androidx.compose.runtime.DisposableEffect(Unit) {
         // The sheet covers the chat's approval and question cards: their notifications must post meanwhile.
-        if (app.kiln.agent.Attention.onScreen == name) app.kiln.agent.Attention.onScreen = null
+        // Put back only what we took (opened from Files or Logs, the chat wasn't on screen to begin with).
+        val hid = app.kiln.agent.Attention.onScreen == name
+        if (hid) app.kiln.agent.Attention.onScreen = null
         onDispose {
-            if (app.kiln.agent.Attention.onScreen == null) app.kiln.agent.Attention.onScreen = name
+            if (hid && app.kiln.agent.Attention.onScreen == null) app.kiln.agent.Attention.onScreen = name
             if (KilnVM.idle()) KilnVM.runScope.launch { runCatching { app.kiln.Graph.testDevice.restoreCrashDialogs() } }
         }
     }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var disp by remember { mutableStateOf(0 to 0) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -75,7 +79,10 @@ fun PreviewSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit, onAsk: (St
     LaunchedEffect(Unit) {
         disp = vm.previewSize()
         if (!vm.previewIsShowing(name)) { status = "Opening the app…"; status = vm.previewLaunch(name) }
-        while (true) { vm.previewFrame()?.let { frame = it.asImageBitmap() }; delay(350) }
+        // Only while Kiln is visible: in the background it kept capturing every 350 ms, draining the battery.
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (true) { vm.previewFrame()?.let { frame = it.asImageBitmap() }; delay(350) }
+        }
     }
     ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = N.surface) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

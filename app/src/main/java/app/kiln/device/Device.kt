@@ -3,6 +3,7 @@ package app.kiln.device
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import app.kiln.core.ExecResult
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import org.w3c.dom.Element
 import java.io.ByteArrayOutputStream
@@ -70,7 +71,13 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
      * While an app is tested on the hidden display its crashes must not pop "keeps stopping" over the
      * user's screen (it also blocks the next test): hide crash/ANR dialogs, remembering the user's setting.
      */
-    internal suspend fun hideCrashDialogs() {
+    // Hide and restore take turns: interleaved (Preview opened and closed at once), a late "1" landed after the
+    // restore with no record kept, and the user's setting was lost for good.
+    private val dialogsLock = kotlinx.coroutines.sync.Mutex()
+
+    internal suspend fun hideCrashDialogs(): Unit = dialogsLock.withLock { hideLocked() }
+
+    private suspend fun hideLocked() {
         if (testDisplay == null || dialogsBefore != null) return
         // A value saved by an earlier run that wasn't restored yet (Kiln restarted) is the user's: reading the
         // setting now would record Kiln's own "1" instead.
@@ -83,7 +90,9 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
     }
 
     /** Put the user's crash-dialog setting back (when a run ends). The saved value is kept until that works. */
-    suspend fun restoreCrashDialogs() {
+    suspend fun restoreCrashDialogs(): Unit = dialogsLock.withLock { restoreLocked() }
+
+    private suspend fun restoreLocked() {
         val before = dialogsBefore ?: dialogsFile?.takeIf { it.isFile }?.readText()?.trim() ?: return
         val r = if (before == "null") warden.exec(listOf("settings", "delete", "global", "hide_error_dialogs"))
             else warden.exec(listOf("settings", "put", "global", "hide_error_dialogs", before))
@@ -253,7 +262,12 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
             kotlinx.coroutines.delay(300)
         }
         // Never another window's tree for an app we expected (Kiln's own chat after a BACK or crash): "nothing" instead.
-        if (expect != null && "package=\"$expect\"" !in xml) return emptyList()
+        // Except a system window the app opened over itself (permission prompt, photo picker, share sheet): that is
+        // what the user sees, and the agent must see it to answer it.
+        if (expect != null && "package=\"$expect\"" !in xml) {
+            val shown = Regex("""package="([^"]+)"""").find(xml)?.groupValues?.get(1)
+            return if (shown in SYSTEM_DIALOGS) parseTree(xml) else emptyList()
+        }
         return parseTree(xml)
     }
 
@@ -389,3 +403,10 @@ fun findNode(nodes: List<UiNode>, target: String): UiNode? {
     val best = ordered.map { n -> n to words.count { w -> hay(n).any { it.contains(w) } } }.maxByOrNull { it.second } ?: return null
     return best.first.takeIf { best.second * 2 >= words.size && best.second > 0 }
 }
+
+/** System windows an app opens over itself (permission prompts, pickers, share sheets): shown to the agent as its screen. */
+private val SYSTEM_DIALOGS = setOf(
+    "com.android.permissioncontroller", "com.google.android.permissioncontroller", "com.android.systemui",
+    "com.android.documentsui", "com.google.android.documentsui", "com.android.intentresolver", "android",
+    "com.google.android.providers.media.module", "com.android.providers.media.module", "com.android.camera2",
+)
