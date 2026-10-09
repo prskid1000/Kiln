@@ -185,9 +185,9 @@ class ComponentsOnDeviceTest {
             }
         }
         shot("selection")
-        rule.onNodeWithContentDescription("Increase").performClick(); rule.onNodeWithContentDescription("Increase").performClick()
-        assertEquals(3, qty); rule.onNodeWithContentDescription("Increase").assertIsNotEnabled()
-        rule.onNodeWithContentDescription("Decrease").performClick(); assertEquals(2, qty)
+        rule.onNodeWithContentDescription("Increase Servings").performClick(); rule.onNodeWithContentDescription("Increase Servings").performClick()
+        assertEquals(3, qty); rule.onNodeWithContentDescription("Increase Servings").assertIsNotEnabled()
+        rule.onNodeWithContentDescription("Decrease Servings").performClick(); assertEquals(2, qty)
         rule.onNodeWithText("Choose…").performClick(); rule.onNodeWithText("Delhi").performClick(); assertEquals(1, city)
         rule.onNodeWithText("Delhi").assertIsDisplayed()
         rule.onNode(hasSetTextAction() and hasText("Fruit")).performTextInput("ban")

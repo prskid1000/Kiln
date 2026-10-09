@@ -13,7 +13,7 @@ android {
     compileSdk = 37
     defaultConfig {
         minSdk = 30
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "app.kiln.kit.KitTestRunner"   // removes the test app from Recents when the run ends
     }
     buildFeatures { compose = true }
     compileOptions {

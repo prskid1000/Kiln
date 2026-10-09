@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import app.kiln.kit.KBilling
+import app.kiln.kit.rememberBilling
 
 @Composable
 fun ProUpgrade(productId: String = "pro_upgrade") {
