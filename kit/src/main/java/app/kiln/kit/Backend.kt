@@ -35,10 +35,12 @@ import java.io.IOException
  */
 /** Inserts leave out nulls, so the server fills its own columns (`val id: Long? = null`, created_at) — real values, defaults included, are sent. */
 internal val insertJson = kotlinx.serialization.json.Json(KJson) { explicitNulls = false }
+/** Updates send nulls: clearing a field (a removed due date) must reach the server, not be left out. */
+internal val updateJson = kotlinx.serialization.json.Json(KJson) { explicitNulls = true }
 
 /** A row for insert: placeholder server columns (id 0, created_at "") are left out so the server fills them. */
-private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row: T): String {
-    val o = insertJson.encodeToJsonElement(serializer, row) as? JsonObject ?: return insertJson.encodeToString(serializer, row)
+private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row: T, with: kotlinx.serialization.json.Json = insertJson): String {
+    val o = with.encodeToJsonElement(serializer, row) as? JsonObject ?: return with.encodeToString(serializer, row)
     fun placeholder(k: String, v: kotlinx.serialization.json.JsonElement) = (v as? kotlinx.serialization.json.JsonPrimitive)?.content.let { c ->
         (k == "id" && (c == "0" || c == "")) || (k in setOf("created_at", "updated_at") && c == "") }
     return JsonObject(o.filterNot { (k, v) -> placeholder(k, v) }).toString()
@@ -49,7 +51,8 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
     private val prefs = context.getSharedPreferences("kiln_supabase", Context.MODE_PRIVATE)
     // One per project URL in the process: a sign-out by any instance (a refused refresh) shows in every screen's
     // userId, not just the instance that refreshed.
-    private val _user = users.getOrPut(url) { MutableStateFlow(prefs.getString("user_id", null)) }
+    // Keyed like requests are ("…co/" and "…co" are one project).
+    private val _user = users.getOrPut(url.trimEnd('/')) { MutableStateFlow(prefs.getString("user_id", null)) }
     /** The signed-in user's id, or null. */
     val userId: StateFlow<String?> = _user
 
@@ -120,7 +123,7 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         }
         /** Change the rows matching [filter] to [row]'s fields (dates sent with this device's offset, like insert). */
         suspend fun <T> update(filter: String, serializer: KSerializer<T>, row: T) {
-            send(Request.Builder().url(at(filter)).patch(insertBody(serializer, row).toRequestBody(json)))
+            send(Request.Builder().url(at(filter)).patch(insertBody(serializer, row, updateJson).toRequestBody(json)))
         }
         suspend inline fun <reified T> update(filter: String, row: T) = update(filter, KJson.serializersModule.serializer<T>(), row)
 

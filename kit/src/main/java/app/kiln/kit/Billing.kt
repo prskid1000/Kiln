@@ -50,12 +50,13 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
         .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
         .build()
 
-    @Volatile private var pending: List<Purchase> = emptyList()
+    // Appended on the main thread, taken on an IO thread: atomic, so an update landing mid-refresh isn't dropped.
+    private val pending = java.util.concurrent.atomic.AtomicReference<List<Purchase>>(emptyList())
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     // A purchase just finished: acknowledge (or consume) it and update [owned] right away.
     private fun handlePending(list: List<Purchase>) {
         // Added to: a second update must not drop purchases not processed yet.
-        pending = pending + list; KLog.i("billing: ${list.size} purchase(s) updated")
+        pending.updateAndGet { it + list }; KLog.i("billing: ${list.size} purchase(s) updated")
         scope.launch { refresh() }
     }
 
@@ -110,8 +111,7 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
         fun ok(r: com.android.billingclient.api.PurchasesResult) = r.billingResult.responseCode == BillingClient.BillingResponseCode.OK ||
             r.billingResult.responseCode == BillingClient.BillingResponseCode.FEATURE_NOT_SUPPORTED
         val complete = results.all(::ok)
-        val all = results.filter(::ok).flatMap { it.purchasesList } + pending
-        pending = emptyList()
+        val all = results.filter(::ok).flatMap { it.purchasesList } + pending.getAndSet(emptyList())
         val owned = mutableSetOf<String>()
         for (p in all.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }.distinctBy { it.purchaseToken }) {
             val ids = p.products

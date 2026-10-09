@@ -297,12 +297,16 @@ fun rememberImagePicker(max: Int = 1, onPicked: (List<Uri>) -> Unit): () -> Unit
     return { if (max <= 1) one.launch(request) else many.launch(request) }
 }
 
-/** Take a quick photo with the camera app (no permission needed): `val shoot = rememberCameraShot { bitmap -> }; shoot()`. */
+/**
+ * Take a quick photo with the camera app: `val shoot = rememberCameraShot { bitmap -> }; shoot()`. No permission is
+ * needed — unless the app declares CAMERA, which must then be granted first. `shoot()` is false if the camera
+ * couldn't open (no camera app, CAMERA not granted): tell the user.
+ */
 @Composable
-fun rememberCameraShot(onPhoto: (Bitmap) -> Unit): () -> Unit {
+fun rememberCameraShot(onPhoto: (Bitmap) -> Unit): () -> Boolean {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { it?.let(onPhoto) }
     // Guarded: no camera app, or CAMERA declared but not granted, threw and crashed the app.
-    return { runCatching { launcher.launch(null) }.onFailure { KLog.w("camera: ${it.message}") } }
+    return { runCatching { launcher.launch(null) }.onFailure { KLog.w("camera: ${it.message}") }.isSuccess }
 }
 
 /** Images and media helpers. */

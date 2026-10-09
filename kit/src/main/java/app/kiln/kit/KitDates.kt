@@ -61,7 +61,7 @@ object KDateTimeSerializer : KSerializer<LocalDateTime> {
     // Stored as the plain local time (an appointment at 10:00 stays at 10:00 in another time zone). Only rows sent to
     // Supabase carry this device's offset, since the server would read a bare time as UTC.
     override fun serialize(encoder: Encoder, value: LocalDateTime) = encoder.encodeString(
-        if ((encoder as? kotlinx.serialization.json.JsonEncoder)?.json === insertJson)
+        if ((encoder as? kotlinx.serialization.json.JsonEncoder)?.json.let { it === insertJson || it === updateJson })
             value.atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime().toString() else value.toString())
     // Server timestamps carry an offset ("…+00:00", "…Z", Supabase's timestamptz): read them in local time.
     override fun deserialize(decoder: Decoder): LocalDateTime = decoder.decodeString().let { s ->

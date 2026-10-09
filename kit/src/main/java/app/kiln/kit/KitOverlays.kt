@@ -187,6 +187,10 @@ fun KSwipeRow(modifier: Modifier = Modifier, onDelete: (() -> Boolean)? = null, 
         when (v) { SwipeToDismissBoxValue.EndToStart -> delete.value?.invoke() ?: false
             SwipeToDismissBoxValue.StartToEnd -> archive.value?.invoke() ?: false; else -> false }
     })
+    // The swipe state is saved per row key: a row brought back by Undo came back still swiped away (an empty red slot).
+    androidx.compose.runtime.LaunchedEffect(state) {
+        if (state.currentValue != SwipeToDismissBoxValue.Settled) state.snapTo(SwipeToDismissBoxValue.Settled)
+    }
     SwipeToDismissBox(state, modifier = modifier, enableDismissFromStartToEnd = onArchive != null, enableDismissFromEndToStart = onDelete != null,
         backgroundContent = {
             val toDelete = state.dismissDirection == SwipeToDismissBoxValue.EndToStart

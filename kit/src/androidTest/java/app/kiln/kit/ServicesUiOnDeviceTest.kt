@@ -137,7 +137,7 @@ class ServicesUiOnDeviceTest {
 
     @Test fun pickersOpenTheRightSystemScreens() {
         lateinit var pickDoc: () -> Unit; lateinit var save: (String) -> Unit; lateinit var pickImg: () -> Unit
-        lateinit var pickImgs: () -> Unit; lateinit var shoot: () -> Unit; lateinit var dictate: () -> Unit
+        lateinit var pickImgs: () -> Unit; lateinit var shoot: () -> Boolean; lateinit var dictate: () -> Unit
         rule.setContent {
             pickDoc = rememberFilePicker(arrayOf("text/csv")) {}; save = rememberFileSaver("text/csv") {}
             pickImg = rememberImagePicker {}; pickImgs = rememberImagePicker(max = 3) {}
