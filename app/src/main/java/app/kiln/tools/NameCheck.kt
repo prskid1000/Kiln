@@ -29,7 +29,11 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         if (file.extension != "kt") return null
         var text = original
         val fixed = mutableListOf<String>()
-        val problems = mutableListOf<String>()
+        // Each problem points at its import line or its first use; the line number is read from the final text, after the
+        // imports added or removed above it (it was taken before them, and was off by as many lines).
+        class Problem(val at: Regex, val inImports: Boolean, val msg: (Int) -> String)
+        val problems = mutableListOf<Problem>()
+        fun use(n: String) = Regex("""(?<![\w.$])${Regex.escape(n)}\b""")
         val kit = index.kitNames()
         val own = Regex("""(?m)^package\s+([\w.]+)""").find(text)?.groupValues?.get(1).orEmpty().split('.').take(3).joinToString(".")
         val declared = declarations(project, file, text)
@@ -69,14 +73,17 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
                     is Fix.None -> if (!Regex("""(?<![\w.$])${Regex.escape(m.groupValues[2].ifEmpty { name })}\b""").containsMatchIn(codeOnly(text).replace(IMPORT, ""))) {
                         text = importLine(fq).replace(text, "")
                         fixed += "removed import $fq (no such name, and the file doesn't use it)"
-                    } else problems += unknown(name, lineOf(original, m.range.first), s.closest)
+                    } else problems += Problem(importLine(fq), true,
+                        // Declared in the project, just not at top level (nested, a parameter): not "missing" — wrongly imported.
+                        if (name in declared) { l -> "line $l: $name is declared in this project (nested or local), not in the kit — import it from where it's declared, or remove `import $fq`." }
+                        else { l -> unknown(name, l, s.closest) })
                 }
             } else if (CHECKED.any { fq.startsWith(it) } && !index.exists(fq) && !index.exists(pkg) && !index.packageExists(pkg)) {
                 val alt = runCatching { index.uniqueClass(name) }.getOrNull()
                 if (alt != null && alt != fq) { text = replaceImport(text, fq, alt); fixed += "import $fq → $alt (package $pkg isn't on this classpath)"
                     corrections += Correction(fq, alt, import = true) }
-                else problems += "line ${lineOf(original, m.range.first)}: package $pkg isn't on this classpath (only the kit and the libraries in its reference exist) — " +
-                    "remove `import $fq` and use a bundled alternative (kit_search \"$name\")."
+                else problems += Problem(importLine(fq), true) { l -> "line $l: package $pkg isn't on this classpath (only the kit and the libraries in its reference exist) — " +
+                    "remove `import $fq` and use a bundled alternative (kit_search \"$name\")." }
             }
         }
 
@@ -104,8 +111,8 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
                 is Fix.Typo -> if (GARBLED_KILN.matches(n)) {
                     text = rename(text, n, s.to); renamed += n; if (!wildcard && s.to !in imported) missing += s.to
                     fixed += "$n → ${s.to} (the kit's name; every use)"; corrections += Correction(n, s.to, import = false)
-                } else if (!fromWildcard(n)) problems += unknown(n, lineOf(text, firstUse[n] ?: 0), listOf(s.to))
-                is Fix.None -> if (KIT_SHAPED.matches(n) && !fromWildcard(n)) problems += unknown(n, lineOf(text, firstUse[n] ?: 0), s.closest)
+                } else if (!fromWildcard(n)) problems += Problem(use(n), false) { l -> unknown(n, l, listOf(s.to)) }
+                is Fix.None -> if (KIT_SHAPED.matches(n) && !fromWildcard(n)) problems += Problem(use(n), false) { l -> unknown(n, l, s.closest) }
             }
         }
         // Lower-case kit functions called without their import (rememberKToast(), rememberPref(…)).
@@ -132,9 +139,10 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             val mapped = MATERIAL_ICON_NAMES[name.lowercase()]?.takeIf { it in names }
             val near = (listOfNotNull(mapped) + names.map { it to distance(name.lowercase(), it.lowercase()) }
                 .filter { it.second <= maxOf(2, name.length / 3) }.sortedBy { it.second }.map { it.first }).distinct().take(4)
-            problems += "line ${lineOf(text, m.range.first)}: ${m.value} isn't a Material icon" +
+            val used = m.value
+            problems += Problem(Regex("""(?<![\w.])${Regex.escape(used)}\b"""), false) { l -> "line $l: $used isn't a Material icon" +
                 (if (near.isEmpty()) " — pick another (Icons.${if (mirrored.isNotEmpty()) "AutoMirrored." else ""}$style has Home, Settings, Add, Delete, Edit, Search, Star, Info…)."
-                 else ". Closest: " + near.joinToString { "Icons.${if (mirrored.isNotEmpty()) "AutoMirrored." else ""}$style.$it" })
+                 else ". Closest: " + near.joinToString { "Icons.${if (mirrored.isNotEmpty()) "AutoMirrored." else ""}$style.$it" }) }
         }
 
         if (fixed.isEmpty() && problems.isEmpty()) return Result(text, "")
@@ -145,7 +153,12 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         }
         if (problems.isNotEmpty()) {
             out.append("Still to fix — these will fail the build:\n")
-            problems.forEach { out.append("  ✗ ").append(it).append('\n') }
+            // Lines from the text as saved; a use is looked for outside import lines (blanked, keeping offsets).
+            val finalCode = codeOnly(text).let { c -> IMPORT.replace(c) { " ".repeat(it.value.length) } }
+            problems.forEach { p ->
+                val at = (if (p.inImports) p.at.find(text) else p.at.find(finalCode))?.range?.first ?: 0
+                out.append("  ✗ ").append(p.msg(lineOf(text, at))).append('\n')
+            }
             out.append("Fix only those lines with edit_file (read_file the lines first if you need them); don't rewrite the file.\n")
         }
         if (fixed.isNotEmpty()) out.append("The fixes above are already saved: edit from the file as it is now, not from what you sent.\n")
@@ -226,7 +239,8 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
     private fun projectFq(project: Project, name: String): String? = runCatching {
         project.files().filter { it.extension == "kt" }.firstNotNullOfOrNull { f ->
             val t = f.readText()
-            if (!Regex("""(?m)^(?:[\w@]+\s+)*(?:class|object|interface|typealias|fun)\s+(?:<[^>]*>\s*)?${Regex.escape(name)}\b""").containsMatchIn(t)) null
+            // Annotations may take arguments (@Entity(tableName = "x")); `fun Expense.label()` is an extension, not Expense.
+            if (!Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+|\w+\s+)*(?:class|object|interface|typealias|fun)\s+(?:<[^>]*>\s*)?${Regex.escape(name)}\b(?!\??\.)""").containsMatchIn(t)) null
             else Regex("""(?m)^package\s+([\w.]+)""").find(t)?.groupValues?.get(1)?.let { "$it.$name" }
         }
     }.getOrNull()
@@ -240,7 +254,7 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         val ICON = Regex("""(?<![\w.])Icons\.(AutoMirrored\.)?(Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.([A-Z]\w*)""")
         val OWN_ICON = Regex("""\bva[lr]\s+Icons\.(?:AutoMirrored\.)?\w+\.(\w+)""")
         /** "Kiln" with one letter garbled (KolnScreen, KilmTabs…): the only K-names renamed without asking. */
-        val GARBLED_KILN = Regex("""K(?:[a-z]ln|i[a-z]n|il[a-z])[A-Z]\w*""")
+        val GARBLED_KILN = Regex("""K(?!iln)(?:[a-z]ln|i[a-z]n|il[a-z])[A-Z]\w*""")   // never a correct Kiln… (the project's own KilnTags)
         val PARAM = Regex("""[(,]\s*(?:@\w+\s+)*(?:(?:private|internal|override|open|vararg|crossinline|noinline)\s+)*(?:val\s+|var\s+)?([A-Za-z_]\w*)\s*:""")
         val LAMBDA = Regex("""\{\s*((?:[A-Za-z_]\w*(?:\s*:\s*[\w.<>?]+)?\s*,\s*)*[A-Za-z_]\w*(?:\s*:\s*[\w.<>?]+)?)\s*->""")
         val ENUM = Regex("""\benum\s+class\s+\w+[^{]*\{([^}]*)""")
@@ -292,7 +306,11 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
                             if (b[i] == '$' && i + 1 < b.length && b[i + 1] == '{') {
                                 b.setCharAt(i, ' '); i++
                                 var depth = 0
-                                while (i < b.length && b[i] != '\n') { if (b[i] == '{') depth++ else if (b[i] == '}') { depth--; if (depth == 0) { i++; break } }; i++ }
+                                while (i < b.length && b[i] != '\n') {
+                                    // A string nested in the template (${if (metric) "KM" else "MI"}) is text again.
+                                    if (b[i] == '"') { i++; while (i < b.length && b[i] != '"' && b[i] != '\n') { if (b[i] == '\\' && i + 1 < b.length) { b.setCharAt(i, ' '); i++ }; b.setCharAt(i, ' '); i++ }; i++; continue }
+                                    if (b[i] == '{') depth++ else if (b[i] == '}') { depth--; if (depth == 0) { i++; break } }; i++
+                                }
                                 continue
                             }
                             b.setCharAt(i, ' '); i++

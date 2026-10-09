@@ -257,6 +257,17 @@ class ToolsOnDeviceTest {
             Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material3.Icon\nimport androidx.compose.runtime.Composable\n\nsealed class Screen { object Settings : Screen() }\n@Composable\nfun I() { Icon(Icons.Default.Settings, null) }\n"}"""),
             Case("check", "{}", expect = "BUILD OK"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // Round 3: the icon, not the project's data class Settings, is imported for Icons.Filled.Settings.
+            Case("write_file", """{"path":"$src/data/Settings.kt","content":"package kiln.app.tooltest.data\n\ndata class Settings(val budget: Double = 0.0)\n"}"""),
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material3.Icon\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun S() { Icon(Icons.Filled.Settings, null) }\n"}"""),
+            Case("check", "{}", expect = "BUILD OK"),
+            Case("delete", """{"path":"$src/data"}"""),
+            // A string inside a template isn't a name (KM); a correct Kiln… name of the project's isn't "garbled"; the line
+            // reported is the line as saved, after the import Kiln added.
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun W(dist: Int, metric: Boolean) { KCardBox { androidx.compose.material3.Text(\"${'$'}{dist} ${'$'}{if (metric) \"KM\" else \"MI\"}\") }; KilnTags(); KSlide() }\n"}""",
+                expect = "line 7: KSlide", absent = "KM isn't"),
+            Case("grep", """{"pattern":"KilnTabs","glob":"**/Bad2.kt"}""", expect = "(no matches)"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
             // A member asked for by name gets the member's (Kotlin) signature from the kit catalog.
             Case("sdk_lookup", """{"query":"KFormat.money"}""", expect = "fun money(amount: Double"),
             // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).

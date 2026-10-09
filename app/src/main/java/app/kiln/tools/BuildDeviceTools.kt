@@ -168,11 +168,12 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
         if (!f.isFile || f.extension != "kt") continue
         val filePkg = Regex("(?m)^package\\s+([\\w.]+)").find(f.readText())?.groupValues?.get(1).orEmpty()
-        val own = decls[name]?.singleOrNull()?.takeIf { it.substringBeforeLast('.') != filePkg }
+        // Used as an icon on this line (Icons.Filled.Settings): the icon, never the project's Settings data class or a
+        // Screen.Settings — those were imported instead and the error stayed.
+        val asIcon = Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.${Regex.escape(name)}\b""").containsMatchIn(e.source.orEmpty())
+        val own = if (asIcon) null else decls[name]?.singleOrNull()?.takeIf { it.substringBeforeLast('.') != filePkg }
         // A name the project declares somewhere (nested ones too: Repo.Location) is never a library's of the same name
         // (android.location.Location was imported over it, and the errors turned into type mismatches).
-        // (Not when the line uses it as an icon — Icons.Filled.Settings with a project's Screen.Settings around.)
-        val asIcon = Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.${Regex.escape(name)}\b""").containsMatchIn(e.source.orEmpty())
         if (icon == null && !asIcon && own == null && (decls[name] != null || projectNames.contains(name))) continue
         val fq = (if (icon != null) "androidx.compose.material.icons." + (if (icon.groupValues[1].isNotEmpty()) "automirrored." else "") +
             icon.groupValues[2].lowercase() + "." + name else own ?: index.uniqueClass(name, e.source ?: "")) ?: continue

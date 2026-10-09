@@ -665,7 +665,7 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             }
             // A kit function that's only missing its import: say exactly that ("isn't in the kit — did you mean <itself>"
             // contradicted itself).
-            if (index?.kitNames()?.contains(n) == true) {
+            if (index?.kitSignature(n) != null) {   // a documented kit function (not an extension helper such as color)
                 out += "$n is the kit's (${index.kitSignature(n) ?: "app.kiln.kit.$n"}): add `import app.kiln.kit.$n`."
                 return@let
             }
