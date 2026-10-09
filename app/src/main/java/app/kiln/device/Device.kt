@@ -414,7 +414,18 @@ fun findNode(nodes: List<UiNode>, target: String): UiNode? {
     fun hay(n: UiNode) = listOf(n.text, n.desc, n.id.substringAfter(":id/")).map { it.lowercase() }
     val ordered = nodes.sortedBy { if (it.clickable) 0 else 1 }
     for (c in candidates) ordered.firstOrNull { n -> hay(n).any { it == c } }?.let { return it }
-    for (c in candidates) ordered.firstOrNull { n -> hay(n).any { it.isNotEmpty() && (it.contains(c) || (c.length > 3 && c.contains(it) && it.length > 2)) } }?.let { return it }
+    // Partial matches: several labels can sit inside one request ("Transport category" holds both the option "Transport"
+    // and the field "Category"). Models name a target as "<label> <kind>", so the label earliest in the request wins
+    // (then the longer one) — first-in-screen-order tapped the Category field again instead of the option.
+    for (c in candidates) {
+        val hits = ordered.mapNotNull { n ->
+            val at = hay(n).filter { it.isNotEmpty() }.mapNotNull { h ->
+                when { h.contains(c) -> 0 to h.length; c.length > 3 && c.contains(h) && h.length > 2 -> c.indexOf(h) to h.length; else -> null }
+            }.minWithOrNull(compareBy({ it.first }, { -it.second })) ?: return@mapNotNull null
+            n to at
+        }
+        hits.minWithOrNull(compareBy({ it.second.first }, { -it.second.second }))?.let { return it.first }
+    }
     if (words.isEmpty()) return null
     val best = ordered.map { n -> n to words.count { w -> hay(n).any { it.contains(w) } } }.maxByOrNull { it.second } ?: return null
     return best.first.takeIf { best.second * 2 >= words.size && best.second > 0 }

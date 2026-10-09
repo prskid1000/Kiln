@@ -80,6 +80,11 @@ class CoreTest {
         // Whole words only: "Renew plan" contains "new" but isn't an add button (review).
         val renew = node("Renew plan", "", true)
         assertEquals(fab, app.kiln.device.findNode(listOf(renew, fab), "+"))
+        // "<label> <kind>": the label first in the request wins over another one inside it (a run's tap on
+        // "Transport category" hit the Category field, listed first, instead of the open dropdown's option).
+        val category = node("Category", "", true); val transport = node("Transport", "", true)
+        assertEquals(transport, app.kiln.device.findNode(listOf(category, transport), "Transport category"))
+        assertEquals(category, app.kiln.device.findNode(listOf(category, transport), "Category select"))
     }
 
     @Test fun `a KilnScreen that ignores its padding fails the lint`() {
