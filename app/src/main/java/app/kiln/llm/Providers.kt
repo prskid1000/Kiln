@@ -36,30 +36,43 @@ class Providers(dir: File, val secrets: Secrets) {
     var roles: Map<String, RoleBinding> = loadRoles()
         private set
 
-    private fun load(): List<Profile> = runCatching {
-        KJ.decodeFromString(ListSerializer(Profile.serializer()), file.readText())
-    }.getOrElse { PRESETS }
+    // Only a missing file means "first run": a damaged one falls back to its last good copy, never silently to the
+    // presets (custom profiles vanished and the roles moved to a paid model).
+    private fun load(): List<Profile> = if (!file.isFile && !File(file.path + ".bak").isFile) PRESETS else
+        readAtomic(file) { KJ.decodeFromString(ListSerializer(Profile.serializer()), it) } ?: PRESETS
 
-    private fun loadRoles(): Map<String, RoleBinding> = runCatching {
+    private fun loadRoles(): Map<String, RoleBinding> = readAtomic(rolesFile) {
         KJ.decodeFromString(kotlinx.serialization.builtins.MapSerializer(
-            kotlinx.serialization.serializer<String>(), RoleBinding.serializer()), rolesFile.readText())
-    }.getOrElse { mapOf("agent" to RoleBinding("anthropic", "claude-opus-5-5"),
-                        "subagent" to RoleBinding("anthropic", "claude-sonnet-5-5")) }
+            kotlinx.serialization.serializer<String>(), RoleBinding.serializer()), it)
+    } ?: (mapOf("agent" to RoleBinding("anthropic", "claude-opus-5-5"),
+                        "subagent" to RoleBinding("anthropic", "claude-sonnet-5-5")))
+
+    /** Written aside and renamed over, keeping the previous copy as .bak. */
+    private fun writeAtomic(f: File, text: String) {
+        val tmp = File(f.path + ".tmp")
+        java.io.FileOutputStream(tmp).use { o -> o.write(text.toByteArray()); o.fd.sync() }
+        if (f.isFile) runCatching { f.copyTo(File(f.path + ".bak"), overwrite = true) }
+        if (!tmp.renameTo(f)) { f.writeText(text); tmp.delete() }
+    }
+
+    /** The file decoded, or its .bak when the file is damaged; null if neither reads. */
+    private fun <T> readAtomic(f: File, decode: (String) -> T): T? =
+        runCatching { decode(f.readText()) }.getOrNull() ?: runCatching { decode(File(f.path + ".bak").readText()) }.getOrNull()
 
     fun save(p: Profile) {
         profiles = profiles.filter { it.id != p.id } + p
-        file.writeText(KJ.encodeToString(ListSerializer(Profile.serializer()), profiles))
+        writeAtomic(file, KJ.encodeToString(ListSerializer(Profile.serializer()), profiles))
     }
 
     fun remove(id: String) {
         profiles = profiles.filter { it.id != id }
-        file.writeText(KJ.encodeToString(ListSerializer(Profile.serializer()), profiles))
+        writeAtomic(file, KJ.encodeToString(ListSerializer(Profile.serializer()), profiles))
         secrets.put("key-$id", null)
     }
 
     fun setRole(role: String, binding: RoleBinding) {
         roles = roles + (role to binding)
-        rolesFile.writeText(KJ.encodeToString(kotlinx.serialization.builtins.MapSerializer(
+        writeAtomic(rolesFile, KJ.encodeToString(kotlinx.serialization.builtins.MapSerializer(
             kotlinx.serialization.serializer<String>(), RoleBinding.serializer()), roles))
     }
 
@@ -90,7 +103,9 @@ class Providers(dir: File, val secrets: Secrets) {
 
     /** model id → $/million tokens, from OpenRouter's public model list (prices there are $/token). */
     private fun openRouterPrices(): Map<String, Price> {
-        val body = java.net.URL("https://openrouter.ai/api/v1/models").openStream().use { it.readBytes().decodeToString() }
+        // With time limits: a stalled network left "Testing…" forever.
+        val body = (java.net.URL("https://openrouter.ai/api/v1/models").openConnection() as java.net.HttpURLConnection)
+            .apply { connectTimeout = 10_000; readTimeout = 20_000 }.inputStream.use { it.readBytes().decodeToString() }
         val data = (app.kiln.core.parseJson(body) as JsonObject)["data"] as? kotlinx.serialization.json.JsonArray ?: return emptyMap()
         return data.mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
@@ -132,7 +147,11 @@ class Providers(dir: File, val secrets: Secrets) {
                 obj("type" to "image", "source" to obj("type" to "base64", "media_type" to "image/png", "data" to png)),
                 obj("type" to "text", "text" to "What colour is this pixel?"))))), emptyList(), maxTokens = 256)) {}
         }
-        caps = caps.copy(vision = vis.isSuccess); notes += "vision: ${vis.isSuccess}"
+        // Only a clear refusal means no vision: a rate limit or a dropped connection kept the earlier answer (it turned
+        // every screenshot off for that model).
+        val refused = vis.exceptionOrNull()?.let { e -> e is ProviderException && !e.retryable } ?: false
+        if (vis.isSuccess || refused) caps = caps.copy(vision = vis.isSuccess)
+        notes += "vision: " + (if (vis.isSuccess) "true" else if (refused) "false" else "not tested (${vis.exceptionOrNull()?.message?.take(60)})")
 
         if (p.protocol == Protocol.ANTHROPIC || caps.caching) {
             val big = "Kiln cache probe. " + "lorem ipsum dolor sit amet ".repeat(800)
@@ -182,10 +201,10 @@ class Providers(dir: File, val secrets: Secrets) {
                 caps = Caps(parallelTools = false, vision = true, contextWindow = 32_000, maxOutput = 8_000), price = Price(0.0, 0.0, 0.0, 0.0)),
             Profile("telecode", "Telecode proxy (PC)", Protocol.ANTHROPIC, "http://100.64.0.2:1235", AuthStyle.NONE,
                 caps = Caps(contextWindow = 64_000, maxOutput = 16_000), price = Price(0.0, 0.0, 0.0, 0.0)),
-            Profile("openai-compatible", "OpenAI-compatible", Protocol.OPENAI_CHAT, "http://127.0.0.1:8080/v1", AuthStyle.NONE,
-                price = Price(0.0, 0.0, 0.0, 0.0)),
-            Profile("anthropic-compatible", "Anthropic-compatible", Protocol.ANTHROPIC, "http://127.0.0.1:8080", AuthStyle.BEARER,
-                price = Price(0.0, 0.0, 0.0, 0.0)),
+            // No fixed price: a local address costs nothing, a cloud one (DeepSeek, Groq…) is counted at the estimate
+            // so the spending caps apply (a fixed 0 hid all its spend).
+            Profile("openai-compatible", "OpenAI-compatible", Protocol.OPENAI_CHAT, "http://127.0.0.1:8080/v1", AuthStyle.NONE),
+            Profile("anthropic-compatible", "Anthropic-compatible", Protocol.ANTHROPIC, "http://127.0.0.1:8080", AuthStyle.BEARER),
         )
     }
 }

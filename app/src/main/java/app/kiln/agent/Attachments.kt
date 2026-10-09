@@ -35,16 +35,17 @@ object Attachments {
         return project.rel(f)
     }
 
-    fun blocks(project: Project, list: List<Attachment>): List<JsonElement> = list.map { a ->
+    fun blocks(project: Project, list: List<Attachment>): List<JsonElement> = list.flatMap { a ->
         val path = save(project, a)
         val kb = (a.bytes.size + 1023) / 1024
         when {
+            // An image also says where it was saved ("use this as the icon" needs the file, not just the picture).
             a.mime in IMAGE_TYPES || a.mime.startsWith("image/") -> image(a)?.let { (mime, data) ->
-                obj("type" to "image", "source" to obj("type" to "base64", "media_type" to mime, "data" to data))
-            } ?: note(path, a, kb)
-            isText(a) -> obj("type" to "text", "text" to
-                "<attachment name=\"${a.name}\" path=\"$path\">\n${a.bytes.decodeToString()}\n</attachment>")
-            else -> note(path, a, kb)
+                listOf(note(path, a, kb), obj("type" to "image", "source" to obj("type" to "base64", "media_type" to mime, "data" to data)))
+            } ?: listOf(note(path, a, kb))
+            isText(a) -> listOf(obj("type" to "text", "text" to
+                "<attachment name=\"${a.name}\" path=\"$path\">\n${a.bytes.decodeToString()}\n</attachment>"))
+            else -> listOf(note(path, a, kb))
         }
     }
 

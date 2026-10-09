@@ -46,8 +46,9 @@ object Attention {
     private fun id(project: String) = 1000 + (project.hashCode() and 0xfff)
 
     // Opens that project (its own request code, so each notification keeps its project).
-    private fun open(ctx: Context, project: String) = PendingIntent.getActivity(ctx, id(project) * 4,
+    private fun open(ctx: Context, project: String) = PendingIntent.getActivity(ctx, 0,
         Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .setData(android.net.Uri.parse("kiln://open/" + android.net.Uri.encode(project)))   // distinct per project
             // An attempt's notification opens its parent (the copy isn't somewhere to keep working: it's deleted later).
             .putExtra(MainActivity.EXTRA_PROJECT, Attempts.ownerOf(app.kiln.build.Project(java.io.File(app.kiln.Graph.paths.projects, project))) ?: project),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -56,7 +57,10 @@ object Attention {
     // project A's Allow carry project B (FLAG_UPDATE_CURRENT replaced it) and approve the wrong request.
     // [key] names the request the buttons answer: a stale notification must not answer a later, different one.
     private fun action(ctx: Context, project: String, what: String, req: Int, key: String, mutable: Boolean = false) =
-        PendingIntent.getBroadcast(ctx, id(project) * 4 + req, Intent(ctx, AttentionReceiver::class.java).setAction(what)
+        // A data URI per project and action makes each PendingIntent distinct: hashed request codes could collide, and
+        // one project's Allow then carried another project's request.
+        PendingIntent.getBroadcast(ctx, req, Intent(ctx, AttentionReceiver::class.java).setAction(what)
+            .setData(android.net.Uri.parse("kiln://attention/" + android.net.Uri.encode(project) + "/" + what))
             .putExtra("project", project).putExtra("key", key),
             if (mutable) PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 

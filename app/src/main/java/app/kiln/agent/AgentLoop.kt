@@ -524,8 +524,9 @@ class AgentLoop(
         val req = ModelRequest(
             model = model, system = session.meta.systemPrompt,
             // A model that can't see images gets a note in their place: an image it can't take failed every later request.
-            messages = ContextFit.fit(session.messages, session.meta.systemPrompt, profile.caps.contextWindow)
-                .let { if (profile.caps.vision) it else it.map(::withoutImages) }, tools = specs,
+            // Images are removed first, so they aren't counted against the context they won't take.
+            messages = ContextFit.fit(session.messages.let { if (profile.caps.vision) it else it.map(::withoutImages) },
+                session.meta.systemPrompt, profile.caps.contextWindow), tools = specs,
             maxTokens = minOf(profile.caps.maxOutput, 64_000),
             effort = if (role == "agent") cfg.effort else cfg.subagentEffort,
             taskBudgetTokens = cfg.taskBudgetTokens,

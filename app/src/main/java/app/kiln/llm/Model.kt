@@ -146,6 +146,11 @@ fun Profile.priceFor(model: String): Price? = modelPrices[model] ?: price ?: if 
 
 /** A model on this phone, the PC over adb/loopback, or the tailnet costs nothing per token. */
 fun Profile.isLocal(): Boolean {
-    val host = runCatching { java.net.URI(baseUrl).host }.getOrNull() ?: return false
-    return host == "localhost" || host.startsWith("127.") || host.startsWith("100.") || host.endsWith(".ts.net")
+    val host = runCatching { java.net.URI(baseUrl).host }.getOrNull()?.trim('[', ']')?.lowercase() ?: return false
+    // Loopback, private networks (LAN, tailnet), and bare or .local names (a tailnet short name, a LAN host):
+    // a custom local model there was charged the estimate and hit the spending cap.
+    val o = host.split('.').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 4 }
+    return host == "localhost" || host == "::1" || host.endsWith(".ts.net") || host.endsWith(".local") || '.' !in host ||
+        (o != null && (o[0] == 127 || o[0] == 10 || (o[0] == 192 && o[1] == 168) || (o[0] == 172 && o[1] in 16..31) ||
+            (o[0] == 100 && o[1] in 64..127)))
 }

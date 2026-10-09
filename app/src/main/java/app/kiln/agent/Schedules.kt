@@ -99,6 +99,8 @@ class ScheduleReceiver : BroadcastReceiver() {
         // The toolchain may still be unpacking after an update. Waiting for it here could outlast the broadcast's time
         // limit (the process killed, the run lost, tomorrow's alarm never re-armed): skip tonight and say why.
         val toolsReady = Graph.toolchain.state.value is app.kiln.toolchain.Toolchain.State.Ready
+        // Tomorrow's alarm first: starting the run can take long (MCP connects), and a killed process never re-armed it.
+        Schedules.set(ctx, p, s.copy(lastRun = System.currentTimeMillis(), lastResult = "starting"))
         val result = when {
             !toolsReady -> "skipped — the build tools were updating"
             s.chargingOnly && !charging -> "skipped — the phone wasn't charging"
