@@ -144,6 +144,9 @@ class AgentLoop(
 
     // ------------------------------------------------------------ feed
 
+    /** Tool call id → the step shown while the model streamed it (picked up by runOne). */
+    private val streamedSteps = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     private fun add(a: Activity): Int { _feed.update { it + a }; return a.id }
     private fun next(kind: Activity.Kind, text: String = "", tool: String? = null, input: String? = null,
                      status: Activity.Status = Activity.Status.DONE) =
@@ -536,6 +539,22 @@ class AgentLoop(
             serverTools = listOf(obj("type" to "web_search_20260209", "name" to "web_search", "max_uses" to 5)),
         )
         var textId: Int? = null; var thinkId: Int? = null
+        // A tool call shows as a step while the model is still writing it (a large file took minutes behind "Thinking"):
+        // "Writing HomeScreen.kt… 4.2 KB", becoming the real step when it runs.
+        class Streaming(val aid: Int, val name: String, val args: StringBuilder = StringBuilder(), var path: String? = null, var shown: Long = 0)
+        val streaming = mutableListOf<Streaming>()
+        val byCallId = HashMap<String, Streaming>()
+        fun showProgress(s: Streaming, force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            if (!force && now - s.shown < 300) return
+            s.shown = now
+            if (s.path == null) PATH_ARG.find(s.args.take(600))?.let { m -> s.path = m.groupValues[1].replace("\\/", "/") }
+            val file = s.path?.substringAfterLast('/')
+            val verb = when (s.name) { "write_file" -> "Writing"; "edit_file", "multi_edit" -> "Editing"; else -> null }
+            val size = if (s.args.length >= 1024) "%.1f KB".format(s.args.length / 1024.0) else "${s.args.length} B"
+            val text = if (verb != null) "$verb ${file ?: "a file"}… $size" else "Preparing ${s.name}… $size"
+            update(s.aid) { it.copy(progress = text, input = s.path?.let { p -> obj("path" to p).compact() } ?: it.input) }
+        }
         val turn = adapter.stream(req) { ev ->
             when (ev) {
                 is ModelEvent.Text -> {
@@ -546,10 +565,26 @@ class AgentLoop(
                     val id = thinkId ?: next(Activity.Kind.THINKING, "", status = Activity.Status.RUNNING).also { thinkId = it }
                     update(id) { it.copy(text = it.text + ev.delta) }
                 }
-                is ModelEvent.ToolStart -> { textId = null }
+                is ModelEvent.ToolStart -> {
+                    textId = null
+                    val s = Streaming(next(Activity.Kind.TOOL, tool = ev.name, status = Activity.Status.RUNNING), ev.name)
+                    streaming += s; if (ev.id.isNotEmpty()) byCallId[ev.id] = s
+                    showProgress(s, force = true)
+                }
                 is ModelEvent.Status -> next(Activity.Kind.NOTICE, ev.message)
-                is ModelEvent.ToolArgs -> {}
+                is ModelEvent.ToolArgs -> {
+                    // Some providers send no id with the pieces: they belong to the call that started last.
+                    val s = byCallId[ev.id] ?: streaming.lastOrNull()
+                    if (s != null) { s.args.append(ev.partial); showProgress(s) }
+                }
             }
+        }
+        // Each streamed step is handed, in order, to the tool call it became; one that didn't (a dropped call) goes.
+        val calls = turn.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "tool_use" }?.str("id") }
+        streaming.forEachIndexed { i, s ->
+            val callId = calls.getOrNull(i)
+            if (callId != null) { update(s.aid) { it.copy(progress = "") }; streamedSteps[callId] = s.aid }
+            else _feed.update { l -> l.filter { it.id != s.aid } }
         }
         textId?.let { id -> update(id) { it.copy(status = Activity.Status.DONE) } }
         thinkId?.let { id -> update(id) { it.copy(status = Activity.Status.DONE) } }
@@ -630,7 +665,9 @@ class AgentLoop(
         val name = use.str("name") ?: ""
         // Strict schemas make optional fields nullable; null means "not given" for every tool (incl. MCP).
         val input = (use["input"] as? JsonObject)?.let { o -> JsonObject(o.filterValues { it !is kotlinx.serialization.json.JsonNull }) } ?: obj()
-        val aid = next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
+        // The step shown while the model wrote this call becomes its real step.
+        val aid = streamedSteps.remove(id)?.also { a -> update(a) { it.copy(tool = name, input = input.compact(), progress = "") } }
+            ?: next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
         val t0 = System.currentTimeMillis()
         fun result(r: ToolResult, status: Activity.Status): JsonObject {
             update(aid) { it.copy(status = status, summary = r.summary, images = r.images, video = r.video, detail = r.detail, preview = r.preview, ms = System.currentTimeMillis() - t0, progress = "") }
@@ -817,6 +854,8 @@ internal fun isNetworkFailure(e: Throwable): Boolean {
 private const val STEER_PREFIX = "[Message from the user while you were working] "
 
 /** A reply that ends by announcing a next step ("Let me fix the dialogs…") instead of taking it. */
+/** The "path" of a tool call still being streamed (its JSON isn't complete yet). */
+private val PATH_ARG = Regex(""""path"\s*:\s*"((?:[^"\\]|\\.)*)"""")
 private val ANNOUNCES = Regex("""(?i)(\blet me\b(?!\s+know)|\bi'll\b|\bi will\b|\bnow i\b|\bnext,? i\b|\bi'm going to\b)[^\n]{0,160}[.…:]?\s*$""")
 
 /** A closing courtesy ("Let me know if…", "I'll be here if…") ends a reply; it isn't an announced next step. */
