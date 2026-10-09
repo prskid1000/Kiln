@@ -141,7 +141,7 @@ private fun PlaySection(vm: KilnVM, ps: ProjectState, versionName: String, versi
                         step = null
                     }
                 }
-                KButton("Remove key") { vm.savePlayKey(null); email = null }
+                KButton("Remove key") { keyScope.launch { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.savePlayKey(null) }; email = null } }
             }
         }
         step?.let { Text(it, style = T.label.copy(color = N.accent2)) }
@@ -183,10 +183,12 @@ private fun GitHubSection(vm: KilnVM, ps: ProjectState) {
             Text("Signed in as @$l", style = T.label)
             // Saved once typing pauses, off the main thread (it wrote a file per keystroke).
             androidx.compose.runtime.LaunchedEffect(repo) { kotlinx.coroutines.delay(600); kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.setGithubRepo(name, repo) } }
+            androidx.compose.runtime.DisposableEffect(Unit) { onDispose { vm.setGithubRepo(name, repo) } }   // closed within the pause: still saved
             KField("Repository", repo, { repo = it.trim() }, hint = "$l/${name.replace('_', '-')}", mono = true)
             KField("", message, { message = it }, hint = "What changed (commit message)")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                KButton("Push", Tone.Accent) { busy("Pushing…") { vm.pushToGithub(name, message) { step = it } } }
+                // The repository as typed now (its save is debounced): push there, not to the last saved one.
+                KButton("Push", Tone.Accent) { busy("Pushing…") { vm.setGithubRepo(name, repo); vm.pushToGithub(name, message) { step = it } } }
                 if (repo.isBlank()) KButton("Create private repo") {
                     busy("Creating…") { vm.createGithubRepo(name).map { repo = it; "Created $it" } }
                 }

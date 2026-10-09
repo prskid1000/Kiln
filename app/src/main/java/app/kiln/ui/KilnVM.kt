@@ -62,7 +62,8 @@ class ProjectState(val project: Project) {
 
 class KilnVM(app: Application) : AndroidViewModel(app) {
     val toolchain: StateFlow<Toolchain.State> = Graph.toolchain.state
-    val projects = MutableStateFlow(listProjects())
+    // Filled by init's refresh(), off the main thread (listing walked every project at launch).
+    val projects = MutableStateFlow<List<ProjectInfo>>(emptyList())
     val installed = MutableStateFlow<Set<String>>(emptySet())
     val warden = MutableStateFlow(Warden.Status.NOT_RUNNING)
     val message = MutableStateFlow<String?>(null)
@@ -185,7 +186,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     /** New project; returns its name through [then] so the UI can navigate to it. */
     fun createProject(label: String, prompt: String?, then: (String) -> Unit) = viewModelScope.launch(Dispatchers.IO) {
         runCatching {
-            val taken = projects.value.map { it.project.name }.toSet()
+            // Names still being deleted are taken too: their folder and chats are going.
+            val taken = projects.value.map { it.project.name }.toSet() + deleting
             val base = slug(label)
             val name = generateSequence(1) { it + 1 }.map { if (it == 1) base else "${base}_$it" }.first { it !in taken }
             Project.create(Graph.paths.projects, name, label.trim(), File(Graph.toolchain.templates(), "compose"))
@@ -196,7 +198,11 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         }.onFailure { message.value = it.message }
     }
 
-    fun deleteProject(name: String) = viewModelScope.launch(Dispatchers.IO) {
+    // In the runs' scope, and `deleting` is always cleared: a finished activity cancelled it half-way and the
+    // project stayed hidden until restart.
+    fun deleteProject(name: String) = runScope.launch { try { deleteNow(name) } finally { deleting -= name; refresh() } }
+
+    private suspend fun deleteNow(name: String) {
         // Gone from the list at once; the uninstall and file removal below can take a few seconds.
         deleting += name
         projects.value = projects.value.filter { it.project.name != name }
@@ -214,13 +220,13 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             // Its attempts' runs stop first (they wrote into the deleted folders), and their state goes with them.
             synchronized(states) { states.remove(t.name) }?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
             runCatching { Graph.device.uninstall(t.meta().`package`) }; t.dir.deleteRecursively()
+            Session.list(Graph.paths.sessions, t.name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
         }
         forgetAttempts(name)
         File(Graph.paths.projects, name).deleteRecursively()
         Session.list(Graph.paths.sessions, name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
         // Opened again while it was going (the list showed it): drop that state too, then let the name be reused.
-        forgetState(name); deleting -= name
-        refresh()
+        forgetState(name)
     }
 
     fun newChat(name: String) = viewModelScope.launch(Dispatchers.IO) {
@@ -242,7 +248,12 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         // While it works, a message steers the run (delivered at its next step) instead of being refused.
         // Also while a run is starting: the message is delivered when it begins, not refused.
         val s0 = state(name)
-        s0.loop.value?.takeIf { it.running.value || s0.starting.get() }?.let { l ->
+        // A run that's starting may be on a new chat whose loop isn't here yet: don't steer the old one.
+        if (s0.starting.get() && s0.loop.value?.running?.value != true) {
+            message.value = "Kiln is starting a run — send that again in a moment"
+            viewModelScope.launch { restoreDraft(name, text, attachments) }; return
+        }
+        s0.loop.value?.takeIf { it.running.value }?.let { l ->
             if (attachments.isNotEmpty()) message.value = "Files can be attached once this run finishes"
             l.steer(text); return
         }

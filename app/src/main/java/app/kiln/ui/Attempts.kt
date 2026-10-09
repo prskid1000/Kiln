@@ -39,6 +39,8 @@ import app.kiln.ui.theme.T
 import app.kiln.ui.theme.vCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import app.kiln.agent.Session
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 // Best of N: one request, several independent attempts in hidden copies, keep the best.
@@ -55,10 +57,12 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
     val s = state(name)
     if (s.loop.value?.running?.value == true) { message.value = "Wait for the current run to finish"; restoreDraft(name, request, emptyList()); return@launch }
     discardAttempts(name).join()
+    // Deleted or stopped while that discard ran: don't start a round on it.
+    if (!isActive || name in KilnVM.deleting) return@launch
     // Registered after that discard (which cancels the previous round's loop), so Discard and Delete can stop this one.
     bestOfJobs[name] = coroutineContext[kotlinx.coroutines.Job]!!
     val tries = runCatching { Attempts.create(Graph.paths.projects, s.project, n, request) }
-        .getOrElse { message.value = "Couldn't start the attempts: ${it.message}"; return@launch }
+        .getOrElse { message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
     attempts(name).value = tries.map { it.name }
     // One after another: they share the hidden test screen.
     for ((i, t) in tries.withIndex()) {
@@ -73,6 +77,8 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
 
 fun KilnVM.keepAttempt(name: String, attempt: String) = viewModelScope.launch(Dispatchers.IO) {
     val s = state(name)
+    // Not while the project itself is working: adopting replaces its sources under the running agent.
+    if (s.loop.value?.running?.value == true || s.starting.get()) { message.value = "Wait for the current run to finish"; return@launch }
     val chosen = Attempts.list(Graph.paths.projects, name).firstOrNull { it.name == attempt } ?: return@launch
     // Its label is read before discarding: the discard deletes the chosen copy too.
     val label = runCatching { chosen.meta().label.substringAfterLast("· ") }.getOrDefault(attempt)
@@ -89,6 +95,8 @@ fun KilnVM.discardAttempts(name: String) = viewModelScope.launch(Dispatchers.IO)
         // Wait for its run to stop: it would keep writing into the folder being deleted. Its state goes too
         // (the next round reuses the names, and showed this round's screenshot as "Done").
         KilnVM.forgetState(t.name)?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
+        // Its chats too: the next round reuses the name and would reopen this round's session.
+        Session.list(Graph.paths.sessions, t.name).forEach { java.io.File(Graph.paths.sessions, it.id).deleteRecursively() }
         runCatching { Graph.device.uninstall(t.meta().`package`) }
     }
     Attempts.discard(Graph.paths.projects, name)
@@ -149,7 +157,7 @@ private fun AttemptsSheet(vm: KilnVM, ps: ProjectState, names: List<String>, onD
                     Text("Try ${i + 1}", style = T.subtitle)
                     Text(when { running -> "Working…"; loop == null || feed.isEmpty() -> "Waiting its turn"; else -> "Done" }, style = T.label)
                     shot?.let { png ->
-                        val bmp = remember(png) { BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap() }
+                        val bmp = rememberDecoded(png, 900)   // decoded off the main thread, downsampled
                         bmp?.let { Image(it, "Try ${i + 1}", Modifier.heightIn(max = 300.dp).clip(N.shapeMd)) }
                     }
                     summary?.let { Markdown(it, Modifier.fillMaxWidth()) }

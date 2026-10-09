@@ -257,18 +257,22 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
     val dirty = original != null && text != original
     fun save() = scope.launch {
         // Kotlin is formatted on save; the editor then shows the formatted text.
-        if (o is Open.Source && o.file.lastModified() != readAt) {
-            vm.message.value = "The file changed since you opened it (the agent wrote it) — close and reopen to see its version"
-            return@launch
-        }
-        val out = if (o is Open.Source) app.kiln.tools.formatted(o.file, text) else text
-        val ok = withContext(Dispatchers.IO) {
-            when (o) {
+        // The stale check, formatting (up to 1 MB) and the write all run off the main thread.
+        val snapshot = text
+        val (ok, out, stamp) = withContext(Dispatchers.IO) {
+            if (o is Open.Source && o.file.lastModified() != readAt) return@withContext Triple(null, snapshot, 0L)
+            val out = if (o is Open.Source) app.kiln.tools.formatted(o.file, snapshot) else snapshot
+            val ok = when (o) {
                 is Open.Source -> runCatching { o.file.writeText(out) }.isSuccess
                 is Open.Data -> Graph.device.writeData(ps.pkg, o.path, out.toByteArray()).ok
             }
+            Triple(ok, out, if (o is Open.Source) o.file.lastModified() else 0L)
         }
-        if (ok) { text = out; original = out; if (o is Open.Source) readAt = o.file.lastModified() }
+        if (ok == null) {
+            vm.message.value = "The file changed since you opened it (the agent wrote it) — close and reopen to see its version"
+            return@launch
+        }
+        if (ok) { text = out; original = out; if (o is Open.Source) readAt = stamp }
         vm.message.value = if (ok) (if (o is Open.Data) "Saved — restart the app to reload it" else "Saved") else "Save failed"
     }
     Column(Modifier.fillMaxSize()) {

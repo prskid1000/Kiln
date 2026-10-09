@@ -17,7 +17,7 @@ fun KilnVM.duplicateProject(name: String, then: (String) -> Unit) = viewModelSco
     runCatching {
         val from = state(name)
         val label = from.label + " copy"
-        val taken = projects.value.map { it.project.name }.toSet()
+        val taken = projects.value.map { it.project.name }.toSet() + KilnVM.deleting
         val base = KilnVM.slug(label).take(36)
         val newName = generateSequence(1) { it + 1 }.map { if (it == 1) base else "${base}_$it" }.first { it !in taken }
         Project.duplicate(Graph.paths.projects, from.project, newName, label)

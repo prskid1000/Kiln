@@ -82,7 +82,7 @@ fun ScheduleSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
                 }
                 KButton("Run now") {
                     val s = parsed() ?: return@KButton
-                    scope.launch { status = KilnVM.startRun(ctx, ps.project.name, s.prompt, freshChat = true) ?: "Started in a new chat" }
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) { status = KilnVM.startRun(ctx, ps.project.name, s.prompt, freshChat = true) ?: "Started in a new chat" }
                 }
                 if (saved != null) KButton("Remove") { Schedules.set(ctx, ps.project, null); onDismiss() }
             }

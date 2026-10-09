@@ -106,7 +106,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent { KilnTheme { App(vm) } }
         // Only a fresh start: a recreated activity (rotation, process restore) would re-add the crash draft.
-        if (savedInstanceState == null) handle(intent)
+        // Nor when reopened from Recents, which re-delivers the original (crash) intent.
+        if (savedInstanceState == null && intent.flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) handle(intent)
     }
 
     override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); handle(intent) }
