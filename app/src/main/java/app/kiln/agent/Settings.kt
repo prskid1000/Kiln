@@ -38,7 +38,9 @@ data class Settings(
             val o = (KJ.parseToJsonElement(f.readText()) as kotlinx.serialization.json.JsonObject)
                 .filterKeys { it in PROJECT_OVERRIDABLE }.let { kotlinx.serialization.json.JsonObject(it) }
             val base = KJ.encodeToJsonElement(serializer(), this) as kotlinx.serialization.json.JsonObject
-            KJ.decodeFromJsonElement(serializer(), kotlinx.serialization.json.JsonObject(base + o))
+            val merged = KJ.decodeFromJsonElement(serializer(), kotlinx.serialization.json.JsonObject(base + o))
+            // A project can only switch more tools off: its list adds to the global one, never re-enables a tool.
+            merged.copy(disabledTools = disabledTools + merged.disabledTools)
         }.getOrDefault(this)
     }
 }
@@ -60,7 +62,8 @@ class SettingsStore(private val dir: File) {
     fun spentToday(): Double = runCatching { KJ.decodeFromString(Spend.serializer(), spendFile.readText()) }
         .getOrNull()?.takeIf { it.day == LocalDate.now().toString() }?.usd ?: 0.0
 
-    fun addSpend(usd: Double) {
+    // Synchronized: runs on two projects at once would otherwise lose each other's spend (read-modify-write).
+    @Synchronized fun addSpend(usd: Double) {
         if (usd <= 0) return
         spendFile.writeText(KJ.encodeToString(Spend.serializer(), Spend(LocalDate.now().toString(), spentToday() + usd)))
     }

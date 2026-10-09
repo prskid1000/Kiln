@@ -132,7 +132,7 @@ class Kiln(
         })
         val deferred = tools.filter { it.deferred }
         // qa_check only with the QA agent on; both helpers obey disabledTools like every other tool.
-        tools = (tools + SubagentTool(this, project, registry, available, specs) + listOfNotNull(qa.takeIf { cfg.qaAgent }) +
+        tools = (tools + SubagentTool(this, project, registry, available, specs) + listOfNotNull(qa.takeIf { cfg.qaAgent && brokerReady }) +
             listOfNotNull(deferred.takeIf { it.isNotEmpty() }?.let { app.kiln.tools.ToolSearchTool(it) }))
             .filter { it.name !in cfg.disabledTools }.sortedBy { it.name }
         ToolRegistry.validateNames(tools)
@@ -141,7 +141,7 @@ class Kiln(
 
     fun systemPrompt(project: Project) =
         SystemPrompt.build(project, toolchain.kitApi(), warden.status() == Warden.Status.READY, skills.index(), toolchain.kitIndex(),
-            qaAgent = settings.value.merged(project.dir).qaAgent)
+            qaAgent = settings.value.merged(project.dir).qaAgent && warden.status() == Warden.Status.READY)
 
     suspend fun newSession(project: Project): AgentLoop {
         val s = Session.create(paths.sessions, project.name, systemPrompt(project))
@@ -163,7 +163,7 @@ class Kiln(
                          ctx: ToolContext?, onStep: ((String) -> Unit)? = null): Triple<String, app.kiln.llm.Usage, Double> {
         // Helpers can't ask the user (nobody answers a headless loop) or start other helpers.
         val tools = available.filter { t ->
-            t.name !in HELPER_TOOLS && t.name != "ask_user" &&
+            t.name !in HELPER_TOOLS && t.name != "ask_user" && t.name != "choose_look" &&
                 (spec.tools?.contains(t.name) ?: (Trait.READ_ONLY in t.traits))
         }
         val prompt = spec.prompt + if (spec.kitDocs) "\n\nKit reference:\n" + toolchain.kitApi() + "\n\nKit index:\n" + toolchain.kitIndex() else ""

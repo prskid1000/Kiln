@@ -126,6 +126,8 @@ class AgentLoop(
     /** The FAIL lines of the last qa_check, until one passes; null when QA hasn't failed. */
     private var lastQaFailures: String? = null
     private var qaGuards = 0
+    /** The checklist as this request began: open items left over from an earlier (stopped) request don't count. */
+    private var todosAtStart: List<SessionState.Todo> = emptyList()
     private val approvalLock = kotlinx.coroutines.sync.Mutex()
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
@@ -204,6 +206,7 @@ class AgentLoop(
         stopGuards = 0; unfinishedGuards = 0; goalChecks = 0; qaGuards = 0
         // A failed QA from an earlier request doesn't bind this one (the user may have moved on).
         lastQaFailures = null
+        todosAtStart = state.todos
         this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
         // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
         closeDanglingToolUses()
@@ -227,7 +230,10 @@ class AgentLoop(
             val extra = Attachments.blocks(project, attachments)
             update(id) { it.copy(files = attachments.filterNot { a -> a.mime.startsWith("image/") }.map { a -> a.name },
                 images = attachments.filter { a -> a.mime.startsWith("image/") }.map { a -> a.bytes }) }
-            val blocks = listOfNotNull(userText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra + listOfNotNull(look) +
+            // Messages queued while the last run was ending (step cap, error, Stop) were never delivered: they lead this one.
+            val earlier = generateSequence { steering.poll() }.toList()
+            val modelText = if (earlier.isEmpty()) userText else "[Sent while your last run was ending] " + earlier.joinToString("\n") + "\n\n" + userText
+            val blocks = listOfNotNull(modelText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra + listOfNotNull(look) +
                 listOfNotNull(if (mode == Mode.PLAN) obj("type" to "text", "text" to PLAN_REMINDER) else null) +
                 listOfNotNull(this.goal?.let { obj("type" to "text", "text" to "<system-reminder>This is a goal run. The turn ends only " +
                     "when these done criteria are verified on the device:\n$it</system-reminder>") })
@@ -271,13 +277,13 @@ class AgentLoop(
             val uses = turn.second.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "tool_use" } }
             if (uses.isEmpty()) {
                 if (turn.second.stop == Stop.MAX_TOKENS) {
-                    session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "Your reply was cut off at the output limit. Continue from where you stopped.")))))
+                    session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "<system-reminder>Your reply was cut off at the output limit. Continue from where you stopped.</system-reminder>")))))
                     continue
                 }
                 // Stop guard: ending the turn while the project doesn't build is almost always a
                 // mistake (a local model once "heard" a stop nobody sent). Push back, twice at most.
                 val lb = state.lastBuild
-                if (lb != null && !lb.ok && stopGuards < 2) {
+                if (mode == Mode.BUILD && lb != null && !lb.ok && stopGuards < 2) {
                     stopGuards++
                     next(Activity.Kind.NOTICE, "The build is still failing — asking the agent to keep going.")
                     session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
@@ -292,8 +298,9 @@ class AgentLoop(
                 // with todo items still open. Unless it's asking the user something, push it on (twice at most).
                 val said = turn.second.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }
                     .joinToString("\n").trim()
-                val open = state.todos.filter { it.status != "done" }
-                val announces = ANNOUNCES.containsMatchIn(said.takeLast(300))
+                val open = if (state.todos == todosAtStart) emptyList() else state.todos.filter { it.status != "done" }
+                val lastLine = said.trimEnd().lines().lastOrNull().orEmpty()
+                val announces = ANNOUNCES.containsMatchIn(said.takeLast(300)) && !CLOSING.containsMatchIn(lastLine)
                 // Failed QA guard: run 11 ended with its only qa_check failing (search), unfixed and unmentioned.
                 val qaFails = lastQaFailures
                 if (mode == Mode.BUILD && qaFails != null && qaGuards < 2 && tools.any { it.name == "qa_check" } && !said.trimEnd().endsWith("?")) {
@@ -328,7 +335,8 @@ class AgentLoop(
                             "verified on the device (run_app, test_flow, ui_tree).</system-reminder>")))))
                         continue
                     }
-                    next(Activity.Kind.NOTICE, "Goal met ✓")
+                    // A check that couldn't run (no model for it, or the call failed) isn't a pass: say so.
+                    next(Activity.Kind.NOTICE, if (why == GOAL_UNCHECKED) "Couldn't verify the goal (the check didn't run) — check the criteria yourself." else "Goal met ✓")
                 }
                 return
             }
@@ -412,8 +420,8 @@ class AgentLoop(
      * builder grading its own work in the same breath.
      */
     private suspend fun checkGoal(criteria: String): Pair<Boolean, String> {
-        val binding = providers.roles["subagent"] ?: providers.roles[role] ?: return true to ""
-        val (profile, model) = providers.resolve("${binding.profile}:${binding.model}") ?: return true to ""
+        val binding = providers.roles["subagent"] ?: providers.roles[role] ?: return true to GOAL_UNCHECKED
+        val (profile, model) = providers.resolve("${binding.profile}:${binding.model}") ?: return true to GOAL_UNCHECKED
         val evidence = session.messages.takeLast(8).joinToString("\n\n") { m ->
             m.content.joinToString("\n") { b ->
                 val o = b as? JsonObject
@@ -431,7 +439,7 @@ class AgentLoop(
                 "Be strict: unverified means not met. Answer with MET or NOT MET on the first line, then one short reason.",
             messages = listOf(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "Done criteria:\n$criteria\n\nEvidence:\n$evidence"))))),
             tools = emptyList(), maxTokens = 300, effort = "low")
-        val turn = runCatching { providers.adapter(profile).stream(req) {} }.getOrNull() ?: return true to "could not check"
+        val turn = runCatching { providers.adapter(profile).stream(req) {} }.getOrNull() ?: return true to GOAL_UNCHECKED
         val c = turn.usage.cost(profile.priceFor(model)); cost.value += c; settings.addSpend(c)
         val text = turn.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }.joinToString("\n").trim()
         val first = text.lineSequence().firstOrNull()?.uppercase() ?: ""
@@ -725,6 +733,9 @@ internal fun withNote(results: List<JsonObject>, note: String): List<JsonObject>
     return results.dropLast(1) + JsonObject(last + mapOf("content" to content))
 }
 
+/** What checkGoal says when it couldn't run (shown as "couldn't verify", never as "Goal met"). */
+private const val GOAL_UNCHECKED = "\u0000unchecked"
+
 /** Waits between retries after a dropped connection: about a minute and a half in all. */
 private val NET_RETRIES = listOf(2_000L, 5_000L, 10_000L, 20_000L, 30_000L, 30_000L)
 
@@ -743,4 +754,7 @@ internal fun isNetworkFailure(e: Throwable): Boolean {
 private const val STEER_PREFIX = "[Message from the user while you were working] "
 
 /** A reply that ends by announcing a next step ("Let me fix the dialogs…") instead of taking it. */
-private val ANNOUNCES = Regex("""(?i)(\blet me\b|\bi'll\b|\bi will\b|\bnow i\b|\bnext,? i\b|\bi'm going to\b|\bgoing to\b)[^\n]{0,160}[.…:]?\s*$""")
+private val ANNOUNCES = Regex("""(?i)(\blet me\b(?!\s+know)|\bi'll\b|\bi will\b|\bnow i\b|\bnext,? i\b|\bi'm going to\b)[^\n]{0,160}[.…:]?\s*$""")
+
+/** A closing courtesy ("Let me know if…", "I'll be here if…") ends a reply; it isn't an announced next step. */
+private val CLOSING = Regex("""(?i)let me know|if you('d| would)? (like|want|need)|feel free|anything else|happy to help|i'll be here""")
