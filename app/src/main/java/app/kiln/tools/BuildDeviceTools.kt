@@ -118,6 +118,8 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     // Lint errors fail the build like compile errors (warnings don't).
     fun linted(b: BuildResult) = app.kiln.build.Lint.run(ctx.project).let { l -> b.copy(ok = b.ok && l.none { it.severity == "error" }, diagnostics = b.diagnostics + l) }
     if (r.ok) return linted(r) to ""
+    // A read-only request (plan mode, its helpers) gets the errors as they are: the fixes below rewrite sources.
+    if (ctx.readOnly) return linted(r) to ""
     val unresolved = Regex("unresolved reference '([A-Za-z][A-Za-z0-9_]*)'")
     val wrongIcon = Regex("candidate 'val Icons\\.(?:(AutoMirrored)\\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\\.(\\w+): ImageVector' is inapplicable because of a receiver type mismatch")
     val fixes = linkedSetOf<String>()
@@ -284,15 +286,22 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
         return if (r - l < 8 || b - t < 8) null else (l + r) / 2 to (t + b) / 2
     }
 
+    /** "250,289" or "[250,289]" as a point — but not when an element is labelled that (an amount like "1,000"). */
+    internal fun pointIn(s: String, nodes: List<app.kiln.device.UiNode>): Pair<Int, Int>? =
+        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { device.find(nodes, s) == null }
+            ?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
+
     internal suspend fun offScreen(n: app.kiln.device.UiNode, label: String): String {
         val (w, h) = device.screenSize()
         // Which side it's off (a carousel item is off to the side, not "above the top").
         val (where, swipe) = when {
             n.right - n.left < 8 || n.bottom - n.top < 8 -> "too small to tap (it has no size on screen)" to null
-            n.top >= h -> "below the bottom of the screen (y=${n.top}, screen is $h px tall)" to "up"
-            n.bottom <= 0 -> "above the top of the screen" to "down"
-            n.left >= w -> "off the right edge of the screen" to "left"
-            else -> "off the left edge of the screen" to "right"
+            // By where it sticks out, so a row with 5 px showing at the bottom is "below", not "off the left edge".
+            n.bottom > h -> "below the bottom of the screen (y=${n.top}, screen is $h px tall)" to "up"
+            n.top < 0 -> "above the top of the screen" to "down"
+            n.right > w -> "off the right edge of the screen" to "left"
+            n.left < 0 -> "off the left edge of the screen" to "right"
+            else -> "covered (probably by the keyboard or a sheet)" to "up"
         }
         return "“$label” is $where, so a tap can't reach it. " + (if (swipe == null) "Check the layout gives it a size." else
             "If the keyboard is open, close it (press_key BACK); otherwise scroll it into view (swipe $swipe) and tap again. " +
@@ -329,7 +338,7 @@ class InstallTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         // A failed build may leave an APK behind (lint errors): never install what was reported as failing.
         if (ctx.state.lastBuild?.ok == false) return ToolResult.error("the last build or check failed — fix it and build again first")
-        val apk = ctx.state.lastApk?.let(::File)?.takeIf { it.isFile } ?: return ToolResult.error("no APK yet — run build first")
+        val apk = ctx.state.lastApk?.let(::File)?.takeIf { it.isFile } ?: return ToolResult.error("no fresh APK — run build (or run_app) first; a check doesn't make one")
         val r = device.install(apk)
         return if (r.out.contains("Success")) ToolResult.ok("installed ${pkg(ctx)}") else ToolResult.error("install failed: ${r.all.trim()}")
     }
@@ -481,15 +490,15 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
         int("y", "Screen-pixel Y when target is empty (0 otherwise).", required = false)
     }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        // "640, 1427" in target is a coordinate, not a label.
-        val coord = Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(input.str("target") ?: "")
-        val target = input.str("target")?.takeIf { it.isNotBlank() && coord == null }
+        // "640, 1427" in target is a coordinate, not a label — unless something on screen is labelled that ("1,000").
         val before = device.uiTree(pkg(ctx))
+        val coord = input.str("target")?.let { pointIn(it, before) }
+        val target = input.str("target")?.takeIf { it.isNotBlank() && coord == null }
         val (x, y) = if (target != null) {
             val n = device.find(before, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
                 treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
             reachable(n) ?: return ToolResult.error(offScreen(n, target))
-        } else if (coord != null) coord.groupValues[1].toInt() to coord.groupValues[2].toInt()
+        } else if (coord != null) coord
         else {
             // No target and no point: say so (it tapped the corner and reported success).
             val px = input.int("x"); val py = input.int("y")
@@ -528,7 +537,7 @@ class SwipeTool(w: Warden, d: Device) : DeviceTool(w, d) {
         val dir = input.req("direction")
         val target = input.str("target")?.takeIf { it.isNotBlank() }
         // "632,1676" / "[632,1676]" is a point, as for tap.
-        val point = target?.let { Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(it) }?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
+        val point = target?.let { pointIn(it, before) }
         val (x1, y1, x2, y2) = if (target != null) {
             val (cx, cy) = point ?: (device.find(before, target) ?: return ToolResult.error("no element matching \"$target\". On screen now:\n" +
                 treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))).let { it.cx to it.cy }
@@ -618,11 +627,12 @@ internal fun projectDeclarations(project: app.kiln.build.Project): Map<String, L
     for (f in project.files().filter { it.extension == "kt" && it.path.startsWith(src.path) }) {
         val text = f.readText()
         val pkg = Regex("(?m)^package\\s+([\\w.]+)").find(text)?.groupValues?.get(1) ?: ""
-        Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|internal|public|data|sealed|enum|abstract|open|inline|suspend|value)\s+)*(?:fun|class|object|interface|val|var|typealias)\s+(?:<[^>]*>\s*)?([A-Za-z_]\w*+)(?!\.|<[^>(]*>\.)""")
+        Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|internal|public|data|sealed|enum|abstract|open|inline|suspend|value)\s+)*(?:fun|class|object|interface|val|var|typealias)\s+(?:<[^>]*>\s*)?([A-Za-z_]\w*+)(?!\??\.|<[^>(]*>\??\.)""")
             // ↑ not an extension's receiver: `fun Modifier.card()` declares card, not a project Modifier (review).
             .findAll(text).forEach { m ->
                 val line = m.value
-                if (line.startsWith("private")) return@forEach
+                // private anywhere before the keyword (after @Composable too): not reachable from another file.
+                if (Regex("""\bprivate\b""").containsMatchIn(line)) return@forEach
                 out.getOrPut(m.groupValues[1]) { mutableListOf() } += if (pkg.isEmpty()) m.groupValues[1] else "$pkg.${m.groupValues[1]}"
             }
     }
@@ -722,8 +732,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         }
         s("tap")?.let { t ->
             // "250,289" is a point, not a label.
-            Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(t)?.let { c ->
-                val (x, y) = c.groupValues[1].toInt() to c.groupValues[2].toInt()
+            pointIn(t, before)?.let { (x, y) ->
                 device.tap(x, y); delay(600)
                 return true to "tap $x,$y → ${screenChange(ctx, before, x, y)}"
             }
@@ -785,7 +794,9 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         listOf("actions", "steps", "do", "then").firstOrNull { st[it] is JsonArray }?.let { key ->
             val group = (st[key] as JsonArray).mapNotNull { it as? JsonObject }.flatMap(::expand)
             val rest = st - key - setOf("desc", "description", "name", "title", "note", "comment", "id")
+            // Only real actions: {"step": 3, "actions": […]} or a stray "timeout_ms" beside the group isn't a step of its own.
             val own = if (rest.isEmpty()) emptyList() else expand(JsonObject(rest))
+                .filter { o -> o.keys.any { it in setOf("tap", "type", "swipe", "swipe_by", "key", "expect", "expect_gone", "wait_ms") } }
             return if (key == "then") own + group else group + own
         }
         val alias = mapOf("type_text" to "type", "input" to "type", "enter" to "type", "press_key" to "key", "press" to "key",

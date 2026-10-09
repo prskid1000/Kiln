@@ -79,8 +79,8 @@ class ReadFileTool : Tool {
         val f = ctx.project.resolve(input.req("path"))
         // The app's signing key and its password live in .kiln/: never into a model's context.
         if (f.parentFile?.name == ".kiln" && f.name.startsWith("signing")) return ToolResult.error("${input.req("path")} is the app's signing key — not readable")
-        // The generated secrets holder carries every app secret's value (base64): never into the model's context.
-        if (ctx.project.rel(f).startsWith("build/gen-secrets")) return ToolResult.error("${input.req("path")} holds the app's secret values — not readable")
+        // Build output holds the secret values (gen-secrets, and the compiled classes, dex and APK): none of it is read.
+        ctx.project.rel(f).let { r -> if (r == "build" || r.startsWith("build/")) return ToolResult.error("${input.req("path")} is build output, which holds the app's secret values — not readable; read the sources") }
         if (!f.isFile) return ToolResult.error("no such file: ${input.str("path")}")
         val lines = f.readLines()
         val from = ((input.int("offset") ?: 1) - 1).coerceIn(0, maxOf(0, lines.size))

@@ -45,6 +45,8 @@ class CoreTest {
         assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+        // Review: other keys beside a group aren't a failing step of their own.
+        assertEquals(listOf("""{"expect":"Saved"}"""), steps("""{"step":3,"timeout_ms":5000,"actions":[{"expect":"Saved"}]}"""))
         // Review: an action beside a group runs too ("then" after it).
         assertEquals(listOf("""{"tap":"Save"}""", """{"expect":"Saved"}"""), steps("""{"tap":"Save","then":[{"expect":"Saved"}]}"""))
         // Review: target beside a swipe is the row, not a second tap; a type object's label names the field.

@@ -337,7 +337,9 @@ $body</vector>
     private fun withAlpha(c: String, op: Float): String {
         if (op >= 1f) return c
         val rgb = c.takeLast(6)
-        return "#%02X".format((op * 255).toInt().coerceIn(0, 255)) + rgb
+        // The colour's own alpha (#AARRGGBB, rgba) times the opacity: #FF000080 at 0.5 is 25%, not 50%.
+        val own = if (c.length == 9) c.substring(1, 3).toInt(16) / 255f else 1f
+        return "#%02X".format((own * op * 255).toInt().coerceIn(0, 255)) + rgb
     }
 
     private fun num(s: String?): Float? = s?.trim()?.removeSuffix("px")?.removeSuffix("dp")?.toFloatOrNull()

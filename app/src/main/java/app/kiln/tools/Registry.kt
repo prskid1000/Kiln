@@ -9,6 +9,7 @@ import app.kiln.core.str
 import app.kiln.device.Warden
 import app.kiln.llm.ToolSpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -58,7 +59,7 @@ class CommandTool(private val def: CommandToolDef, private val warden: Warden, v
         // value in unquoted (review: shell injection through chained placeholders).
         val values = def.params.keys.associateWith { (input[it] as? JsonPrimitive)?.content ?: "" } +
             mapOf("app_package" to ctx.project.meta().`package`, "project_dir" to ctx.project.dir.path)
-        val cmd = Regex("""\{\{(\w+)}}""").replace(def.command) { m -> values[m.groupValues[1]]?.let(::q) ?: m.value }
+        val cmd = Regex("""\{\{([^{}]+)}}""").replace(def.command) { m -> values[m.groupValues[1]]?.let(::q) ?: m.value }
         val r = if (def.runAs == "broker") warden.exec(listOf("sh", "-c", cmd), timeoutMs = def.timeoutMs)
                 else Exec.run(listOf("/system/bin/sh", "-c", cmd), cwd = ctx.project.dir, timeoutMs = def.timeoutMs)
         return ToolResult(ctx.spill("exit ${r.code}\n${r.all}", def.maxOutputChars), isError = !r.ok)
@@ -101,9 +102,17 @@ class McpClient(private val cfg: McpServerConfig) {
         val req = Request.Builder().url(cfg.url).post(body.compact().toRequestBody("application/json".toMediaType()))
             .header("Accept", "application/json, text/event-stream")
             .apply { cfg.token?.let { header("Authorization", "Bearer $it") }; session?.let { header("Mcp-Session-Id", it) } }.build()
-        http.newCall(req).execute().use { r ->
+        // Stop cancels the HTTP call too (a slow MCP tool held the turn for up to 5 minutes).
+        val call = http.newCall(req)
+        val job = currentCoroutineContext()[kotlinx.coroutines.Job]
+        val onCancel = job?.invokeOnCompletion { if (job.isCancelled) call.cancel() }
+        try { rpcBody(call.execute(), method, notify) } finally { onCancel?.dispose() }
+    }
+
+    private fun rpcBody(response: okhttp3.Response, method: String, notify: Boolean): JsonObject? =
+        response.use { r ->
             r.header("Mcp-Session-Id")?.let { session = it }
-            if (notify) return@withContext null
+            if (notify) return@use null
             if (!r.isSuccessful) error("MCP ${cfg.name} $method: HTTP ${r.code}")
             val text = r.body.string()
             val json = if ((r.header("Content-Type") ?: "").contains("event-stream"))
@@ -113,7 +122,6 @@ class McpClient(private val cfg: McpServerConfig) {
             (o["error"] as? JsonObject)?.let { error("MCP ${cfg.name}: ${it.str("message")}") }
             o["result"] as? JsonObject
         }
-    }
 
     suspend fun connect(): List<Tool> {
         rpc("initialize", obj("protocolVersion" to "2025-06-18", "capabilities" to obj(),

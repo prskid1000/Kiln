@@ -53,8 +53,9 @@ class SessionState {
     val logMarkers = mutableMapOf<String, String>()
     var todos: List<Todo> = emptyList()
     var lastBuild: BuildResult? = null
-        set(v) { field = v; if (v?.ok == true && v.apk != null) lastApk = v.apk }
-    /** The APK of the last successful build: a later check (which builds no APK) doesn't hide it. */
+        // Only the latest result's own APK: after a check (no APK) the code may have changed, so install needs a new build.
+        set(v) { field = v; lastApk = v?.takeIf { it.ok }?.apk }
+    /** The APK of the latest build, if it succeeded. */
     var lastApk: String? = null
         private set
     var launchMarker: Pair<String, String>? = null

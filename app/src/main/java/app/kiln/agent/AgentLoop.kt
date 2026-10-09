@@ -132,6 +132,8 @@ class AgentLoop(
     private val approvalLock = kotlinx.coroutines.sync.Mutex()
     /** A helper's loop: nobody sees its approval prompts, so a tool that needs approval is refused, not waited on. */
     private var headless = false
+    /** A helper started by a read-only (plan) request: read-only too. */
+    private var inheritReadOnly = false
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
 
@@ -546,7 +548,7 @@ class AgentLoop(
     private fun ctx(activityId: Int) = object : ToolContext {
         override val project = this@AgentLoop.project
         override val sessionId = session.meta.id
-        override val readOnly get() = mode == Mode.PLAN
+        override val readOnly get() = mode == Mode.PLAN || inheritReadOnly
         override val state = this@AgentLoop.state
         override val spillDir = session.spillDir
         override fun progress(line: String) = update(activityId) { it.copy(progress = line) }
@@ -688,9 +690,10 @@ class AgentLoop(
             onStep: ((String) -> Unit)? = null,
             /** The helper's whole activity feed (tool calls, results, notes), as it changes: shown nested in the chat. */
             onFeed: ((List<Activity>) -> Unit)? = null,
+            readOnly: Boolean = false,
         ): Triple<String, Usage, Double> = kotlinx.coroutines.coroutineScope {
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
-            val loop = AgentLoop(project, s, providers, registry, tools, settings, role).also { it.headless = true }
+            val loop = AgentLoop(project, s, providers, registry, tools, settings, role).also { it.headless = true; it.inheritReadOnly = readOnly }
             fun answer() = s.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")
             val reported = mutableSetOf<Int>()
