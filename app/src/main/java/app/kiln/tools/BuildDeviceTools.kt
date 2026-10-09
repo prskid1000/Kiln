@@ -309,7 +309,9 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
 
     internal fun pointIn(s: String, nodes: List<app.kiln.device.UiNode>): Pair<Int, Int>? =
         // Exact labels only: the fuzzy finder matched "540,1200" to any "₹1200" on screen and tapped that instead.
-        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { nodes.none { n -> shows(listOf(n), s) } }   // "1,000" in "₹1,000" is a label; "540,960" in "₹1,540,960" isn't
+        // "1,200" (a thousands group: no space, no brackets) is an amount, never a point, even before it shows.
+        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { !Regex("""^\d{1,3},\d{3}$""").matches(s.trim()) }
+            ?.takeIf { nodes.none { n -> shows(listOf(n), s) } }   // "1,000" in "₹1,000" is a label; "540,960" in "₹1,540,960" isn't
             ?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
 
     internal suspend fun offScreen(n: app.kiln.device.UiNode, label: String): String {
@@ -814,10 +816,12 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         }
         s("expect_gone")?.let { t ->
             val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(300, 20_000)   // at least one look
+            var readable = false
             while (System.currentTimeMillis() < until) {
                 // Gone only from a screen we could read, showing this app: an unreadable screen (busy app) or another
                 // app in front isn't "gone".
                 val tree = device.uiTree(pkg)
+                if (tree.isNotEmpty()) readable = true
                 val front = device.foregroundPackage()
                 if (tree.isNotEmpty() && (front == null || front == pkg) && !shows(tree, t)) return true to "“$t” is gone"
                 // Gone because the app died isn't a pass.
@@ -825,6 +829,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
                 delay(300)
             }
             if (device.foregroundPackage().let { it != null && it != pkg }) return false to "the app isn't in front any more — can't tell whether “$t” is gone"
+            if (!readable) return false to "couldn't read the app's screen to check “$t” (busy or animating) — try again, or use ui_tree"
             return false to "expected “$t” to be gone — still on screen"
         }
         st.str("wait_ms")?.toLongOrNull()?.let { ms -> delay(ms.coerceIn(0, 10_000)); return true to "waited ${ms}ms" }

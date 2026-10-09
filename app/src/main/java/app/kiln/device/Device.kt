@@ -252,6 +252,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
             if (xml.startsWith("<") && "<node" in xml && (expect == null || "package=\"$expect\"" in xml)) break
             kotlinx.coroutines.delay(300)
         }
+        // Never another window's tree for an app we expected (Kiln's own chat after a BACK or crash): "nothing" instead.
+        if (expect != null && "package=\"$expect\"" !in xml) return emptyList()
         return parseTree(xml)
     }
 

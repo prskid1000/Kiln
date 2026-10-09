@@ -130,7 +130,8 @@ object SvgToVector {
     private const val ANDROID = "http://schemas.android.com/apk/res/android"
 
     /** Returns the XML and the SVG features that had to be left out. */
-    fun convert(svgText: String): Pair<String, List<String>> {
+    // One conversion at a time: the viewBox is kept in a field the gradient and shape code read (two agents at once mixed them).
+    @Synchronized fun convert(svgText: String): Pair<String, List<String>> {
         val doc = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = false }.newDocumentBuilder()
             .parse(svgText.byteInputStream())
         val root = doc.documentElement

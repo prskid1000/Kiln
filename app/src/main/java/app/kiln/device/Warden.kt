@@ -31,11 +31,9 @@ class Warden(private val context: Context) {
     private fun genuine(): Boolean = runCatching {
         val pm = context.packageManager
         if (pm.resolveContentProvider("app.warden.broker", 0)?.packageName != "app.warden") return false
-        val signers = pm.getPackageInfo("app.warden", android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
-            .signingInfo?.apkContentsSigners ?: return false
-        signers.any { s ->
-            java.security.MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) } == WARDEN_CERT_SHA256
-        }
+        // The platform's check follows the key's rotation history (a rotated Warden key still matches).
+        pm.hasSigningCertificate("app.warden", WARDEN_CERT_SHA256.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
+            android.content.pm.PackageManager.CERT_INPUT_SHA256)
     }.getOrDefault(false)
 
     private fun broker(): IWarden? = runCatching {
