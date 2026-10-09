@@ -112,6 +112,17 @@ class KotlinFormatTest {
         }
     }
 
+    @Test fun `an edit spanning imports and code matches the code and merges the imports`() {
+        // On disk: imports sorted (and one Kiln added); the model remembers its own order and makes a code change.
+        val file = "package a\n\nimport b.Added\nimport c.C\nimport d.D\n\nfun f() {\n    val x = 1\n}\n"
+        val old = "import d.D\nimport c.C\n\nfun f() {\n    val x = 1\n}"
+        val new = "import d.D\nimport e.E\n\nfun f() {\n    val x = 2\n}"
+        val out = app.kiln.tools.splitImportEdit(file, old, new)!!
+        assertTrue(out, "val x = 2" in out && "val x = 1" !in out)
+        assertEquals(listOf("import b.Added", "import d.D", "import e.E"), out.lines().filter { it.startsWith("import") }.sorted())
+        assertNull(app.kiln.tools.splitImportEdit(file, old.replace("val x = 1", "val y = 9"), new))   // code part not there
+    }
+
     @Test fun `a whole-file edit that misses says to use write_file and keep the Theme line`() {
         val file = "package a\n\nimport b.B\n\nclass MainActivity : KilnActivity() {\n    override fun Theme(content: @Composable () -> Unit) = KilnTheme(content = content)\n    @Composable\n    override fun Content() { }\n}\n"
         val remembered = "package a\n\nimport b.B\n\nclass MainActivity : KilnActivity() {\n    @Composable\n    override fun Content() { }\n}\n"

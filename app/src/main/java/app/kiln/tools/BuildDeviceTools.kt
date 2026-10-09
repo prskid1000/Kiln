@@ -762,7 +762,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         }
         val alias = mapOf("type_text" to "type", "input" to "type", "enter" to "type", "press_key" to "key", "press" to "key",
             "wait" to "wait_ms", "sleep" to "wait_ms", "wait_for" to "expect", "assert" to "expect", "see" to "expect",
-            "expect_text" to "expect", "assert_gone" to "expect_gone", "expect_not" to "expect_gone", "click" to "tap",
+            "expect_text" to "expect", "expect_text_contains" to "expect", "expect_contains" to "expect", "expect_visible" to "expect", "assert_text" to "expect", "assert_gone" to "expect_gone", "expect_not" to "expect_gone", "click" to "tap",
             "press_button" to "tap", "direction" to "swipe")
         val actions = listOf("tap", "type", "swipe", "key", "expect", "expect_gone", "wait_ms", "select")
         val typing = st.keys.any { (alias[it] ?: it) == "type" }

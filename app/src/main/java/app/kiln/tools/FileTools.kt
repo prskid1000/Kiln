@@ -132,7 +132,7 @@ class EditFileTool : Tool {
         val count = occurrences(text, old)
         val all = input["replace_all"]?.toString() == "true"
         // Files are formatted on save, so the agent's copy may be indented differently: match ignoring indentation.
-        val loose = if (count == 0) importEdit(text, old, new) ?: replaceIgnoringIndent(text, old, new) else null
+        val loose = if (count == 0) importEdit(text, old, new) ?: replaceIgnoringIndent(text, old, new) ?: splitImportEdit(text, old, new) else null
         when {
             count == 0 && loose == null -> return ToolResult.error("old_text not found in $rel." + wholeFileHint(text, old) + closestMatch(text, old))
             count > 1 && !all -> return ToolResult.error("old_text matches $count places in $rel — add surrounding lines to make it unique, or set replace_all")
@@ -166,7 +166,7 @@ class MultiEditTool : Tool {
             val old = o.req("old_text").replace("\r\n", "\n")
             val n = occurrences(text, old)
             val replacement = (o.str("new_text") ?: "").replace("\r\n", "\n")
-            val loose = if (n == 0) importEdit(text, old, replacement) ?: replaceIgnoringIndent(text, old, replacement) else null
+            val loose = if (n == 0) importEdit(text, old, replacement) ?: replaceIgnoringIndent(text, old, replacement) ?: splitImportEdit(text, old, replacement) else null
             if (n != 1 && loose == null) return ToolResult.error("edit #${i + 1}: old_text matches $n places (must be exactly 1); nothing written." +
                 (if (n == 0) closestMatch(text, old) else " Add surrounding lines to make it unique."))
             text = loose ?: text.replaceFirst(old, replacement)
@@ -317,6 +317,32 @@ internal fun replaceIgnoringIndent(text: String, old: String, new: String): Stri
  * removed, the new ones added, wherever they sit. Saving sorts imports, so the agent's remembered
  * order can't be relied on. Null when the edit isn't purely about imports.
  */
+/**
+ * An edit that spans import lines and code (run 16 missed three times: saving sorts imports and Kiln adds
+ * some, so the remembered import block never matches): the code part is matched on its own (exactly or
+ * ignoring indentation) and replaced, and the import part is applied as a set change. Null if the code
+ * part doesn't match either, or there are no import lines.
+ */
+internal fun splitImportEdit(text: String, old: String, new: String): String? {
+    fun split(s: String): Pair<List<String>, String> {
+        val lines = s.lines()
+        val imp = lines.filter { it.trim().startsWith("import ") || it.trim().startsWith("package ") }
+        val code = lines.filterNot { it.trim().startsWith("import ") || it.trim().startsWith("package ") }.joinToString("\n").trim('\n')
+        return imp.map { it.trim() } to code
+    }
+    val (oldImp, oldCode) = split(old); val (newImp, newCode) = split(new)
+    if (oldImp.isEmpty() && newImp.isEmpty() || oldCode.isBlank()) return null
+    val withCode = when {
+        text.contains(oldCode) -> text.replaceFirst(oldCode, newCode)
+        else -> replaceIgnoringIndent(text, oldCode, newCode) ?: return null
+    }
+    // Imports: drop those the edit removed, add those it introduced.
+    val gone = oldImp.filter { it.startsWith("import ") && it !in newImp }.toSet()
+    var out = withCode.lines().filterNot { it.trim() in gone }.joinToString("\n")
+    newImp.filter { it.startsWith("import ") && out.lines().none { l -> l.trim() == it } }.forEach { out = addImport(out, it.removePrefix("import ").trim()) }
+    return out
+}
+
 internal fun importEdit(text: String, old: String, new: String): String? {
     fun lines(s: String) = s.lines().map { it.trim() }.filter { it.isNotEmpty() }
     // The same `package` line on both sides is just context: drop it.
