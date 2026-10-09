@@ -46,9 +46,11 @@ abstract class OpenAIBase(protected val profile: Profile, private val apiKey: St
         throw ProviderException("HTTP ${r.code}: $text", retryable = r.code == 429 || r.code >= 500)
     }
 
-    /** Server-sent events: yields (event, data) pairs until [DONE] or EOF. */
-    /** Server-sent events. Stop cancels the HTTP call, which makes the read below throw. */
-    protected fun sse(r: Response, each: (String?, String) -> Unit) {
+    /**
+     * Server-sent events: yields (event, data) pairs until [DONE] or EOF; true if [DONE] came. Stop cancels the
+     * HTTP call, which makes the read below throw.
+     */
+    protected fun sse(r: Response, each: (String?, String) -> Unit): Boolean {
         val src = r.body.source()
         var event: String? = null
         val data = StringBuilder()
@@ -58,7 +60,7 @@ abstract class OpenAIBase(protected val profile: Profile, private val apiKey: St
                 line.isEmpty() -> {
                     if (data.isNotEmpty()) {
                         val d = data.toString(); data.clear()
-                        if (d == "[DONE]") return
+                        if (d == "[DONE]") return true
                         each(event, d)
                     }
                     event = null
@@ -68,7 +70,8 @@ abstract class OpenAIBase(protected val profile: Profile, private val apiKey: St
                 line.startsWith("data:") -> { if (data.isNotEmpty()) data.append('\n'); data.append(line.removePrefix("data:").trimStart()) }
             }
         }
-        if (data.isNotEmpty() && data.toString() != "[DONE]") each(event, data.toString())
+        if (data.isNotEmpty()) { if (data.toString() == "[DONE]") return true; each(event, data.toString()) }
+        return false
     }
 
     override suspend fun listModels(): List<String> = withContext(Dispatchers.IO) {
@@ -185,6 +188,7 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
         data class Call(var id: String = "", var name: String = "", val args: StringBuilder = StringBuilder())
         val calls = sortedMapOf<Int, Call>()
         var finish: String? = null
+        var done = false
         var usage = Usage()
         // Local reasoning models (Qwen, DeepSeek via llama.cpp-style proxies) put their
         // reasoning inline as <think>…</think>; route it to thinking, not the reply.
@@ -194,7 +198,7 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
         }
         http.newCall(request("/chat/completions", buildBody(req))).also { callRef.set(it) }.execute().use { r ->
             check(r)
-            sse(r) { _, data ->
+            done = sse(r) { _, data ->
                 val j = parseJson(data) as? JsonObject ?: return@sse
                 (j["error"] as? JsonObject)?.let { throw streamError(it, data) }
                 (j["usage"] as? JsonObject)?.let { u ->
@@ -231,6 +235,8 @@ class OpenAIChatAdapter(profile: Profile, apiKey: String?) : OpenAIBase(profile,
             val input = runCatching { parseJson(c.args.toString().ifBlank { "{}" }) }.getOrElse { obj("_invalid_json" to c.args.toString()) }
             blocks += obj("type" to "tool_use", "id" to c.id.ifBlank { "call_" + java.util.UUID.randomUUID().toString().take(12) }, "name" to c.name, "input" to input)
         }
+        // Neither a finish reason nor [DONE]: the connection closed mid-reply. Retry rather than keep half a sentence.
+        if (!done && finish == null && calls.isEmpty()) throw ProviderException("the stream ended before the reply finished", retryable = true)
         val stop = if (calls.isNotEmpty()) Stop.TOOL_USE else stopFrom(finish)
         ModelTurn(JsonArray(blocks), stop, usage)
     }

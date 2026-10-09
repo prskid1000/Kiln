@@ -289,7 +289,6 @@ class QaCheckTool(
             withContext(kotlinx.coroutines.NonCancellable) { runCatching { rec?.stop() } }
             throw e
         }
-        ctx.addCost(usd)
         val clip = runCatching { rec?.stop() }.getOrNull()
         val verdict = Regex("""VERDICT:\s*(PASS|FAIL)""", RegexOption.IGNORE_CASE).find(report)?.groupValues?.get(1)?.uppercase()
         // Carried criteria go back into the report and the memory as passes.

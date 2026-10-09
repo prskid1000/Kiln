@@ -34,8 +34,11 @@ class RunService : Service() {
             .setContentText("Building and testing your app")
             .setContentIntent(open).setOngoing(true).build()
         startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        if (wake == null) wake = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kiln:run").apply { setReferenceCounted(false); acquire(4 * 60 * 60_000L) }   // released in onDestroy; 4 h guard
+        // Re-armed on every run start (not reference-counted, so this resets the 4 h guard): back-to-back runs kept
+        // the service alive past 4 h and the lock expired mid-run. Released in onDestroy.
+        val w = wake ?: getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kiln:run")
+            .apply { setReferenceCounted(false) }.also { wake = it }
+        w.acquire(4 * 60 * 60_000L)
         return START_NOT_STICKY
     }
 

@@ -173,7 +173,8 @@ class Kiln(
         return AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings, prompt, task, role = "subagent",
             finished = spec.finished, unfinished = spec.unfinished, onStep = onStep,
             // Read-only helpers (explore, reviewer: no tool list of their own) never rewrite sources, even through check's fixes.
-            onFeed = ctx?.let { c -> { feed -> c.children(feed.map { it.copy(agent = spec.tag) }) } }, readOnly = ctx?.readOnly == true || spec.tools == null)
+            onFeed = ctx?.let { c -> { feed -> c.children(feed.map { it.copy(agent = spec.tag) }) } }, readOnly = ctx?.readOnly == true || spec.tools == null,
+            onCost = { usd -> ctx?.addCost(usd) })
     }
 }
 
@@ -196,7 +197,6 @@ class SubagentTool(private val kiln: Kiln, private val project: Project, private
             ?: return ToolResult.error("no helper type '${input.str("type")}' — use one of: ${specs.joinToString { it.name }}")
         ctx.progress("${spec.tag} agent working")
         val (answer, usage, usd) = kiln.runAgent(project, registry, available, spec, task, ctx)
-        ctx.addCost(usd)
         return ToolResult.ok(ctx.spill(answer), "${spec.tag}: ${usage.output} tokens out")
     }
 }

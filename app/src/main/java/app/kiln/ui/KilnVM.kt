@@ -16,8 +16,10 @@ import app.kiln.toolchain.Toolchain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.InputStream
 
@@ -48,10 +50,13 @@ class ProjectState(val project: Project) {
     // Rule proposals the user saved or dismissed (activity ids).
     /** Rule proposals already saved or dismissed, by their text (ids restart in every chat), kept in .kiln/. */
     val decidedRules = MutableStateFlow<Set<String>>(emptySet())
+    private val ruleWrites = kotlinx.coroutines.sync.Mutex()
     internal fun decideRule(rule: String) {
         decidedRules.value = decidedRules.value + rule
-        val v = decidedRules.value
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { File(project.kilnDir, "decided-rules.txt").writeText(v.joinToString("\n")) } }
+        // One writer at a time, always writing the current set: two quick decisions saved out of order lost one.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            ruleWrites.withLock { runCatching { File(project.kilnDir, "decided-rules.txt").writeText(decidedRules.value.joinToString("\n")) } }
+        }
     }
     // Text to put in the composer (an element picked in the preview).
     val draft = MutableStateFlow<String?>(null)
@@ -98,7 +103,9 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                 ProjectState(Project(File(Graph.paths.projects, name))).also { s ->
                     runScope.launch {
                         s.sessions.value = Session.list(Graph.paths.sessions, name)
-                    s.decidedRules.value = runCatching { File(s.project.kilnDir, "decided-rules.txt").readLines().filter { it.isNotBlank() }.toSet() }.getOrDefault(emptySet())
+                    // Added to (not replacing) any decision made before this load finished.
+                    val saved = runCatching { File(s.project.kilnDir, "decided-rules.txt").readLines().filter { it.isNotBlank() }.toSet() }.getOrDefault(emptySet())
+                    s.decidedRules.update { it + saved }
                         val last = (s.sessions.value.firstOrNull { it.title.isNotBlank() } ?: s.sessions.value.firstOrNull())
                             ?.let { runCatching { Graph.kiln.openSession(s.project, it.id) }.getOrNull() }
                         // A run may have started a new chat meanwhile: never replace it with the old one.

@@ -39,7 +39,14 @@ class Session private constructor(val dir: File, meta: SessionMeta, messages: Li
     @Synchronized fun append(m: Msg) {
         // Synced, so a crash right after can't leave the turn half-written. Written before it joins the history:
         // a failed write (full disk) must not leave it in memory only, where a retry appends it again.
-        java.io.FileOutputStream(log, true).use { o -> o.write((KJ.encodeToString(Msg.serializer(), m) + "\n").toByteArray()); o.fd.sync() }
+        // A failed write is cut back off: a partial line left mid-file would swallow the next message on reopen.
+        val before = if (log.exists()) log.length() else 0L
+        try {
+            java.io.FileOutputStream(log, true).use { o -> o.write((KJ.encodeToString(Msg.serializer(), m) + "\n").toByteArray()); o.fd.sync() }
+        } catch (e: Exception) {
+            runCatching { java.io.RandomAccessFile(log, "rw").use { it.setLength(before) } }
+            throw e
+        }
         _messages += m
     }
 

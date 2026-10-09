@@ -176,7 +176,17 @@ object McpServer {
     }
 
     /** No ask_user / subagent / approvals over MCP: the remote client is the agent and the user. */
-    private fun tools(): List<Tool> = runBlocking {
+    // Built once a minute (or when settings change), not per request: building connects to every configured MCP
+    // server, which cost round trips and left orphaned sessions on each call.
+    @Volatile private var cached: Triple<app.kiln.agent.Settings, Long, List<Tool>>? = null
+
+    private fun tools(): List<Tool> {
+        val s = Graph.kiln.settings.value; val now = System.currentTimeMillis()
+        cached?.let { (cs, at, t) -> if (cs == s && now - at < 60_000) return t }
+        return buildTools().also { cached = Triple(s, now, it) }
+    }
+
+    private fun buildTools(): List<Tool> = runBlocking {
         // The tool set doesn't depend on which project: list it even when there are none yet.
         val any = Graph.paths.projects.listFiles()?.firstOrNull { File(it, "kiln.json").isFile } ?: File(Graph.paths.projects, ".mcp")
         Graph.kiln.tools(Project(any)).second

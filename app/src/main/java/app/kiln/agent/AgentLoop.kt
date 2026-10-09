@@ -257,12 +257,12 @@ class AgentLoop(
                 (if (a.status == Activity.Status.RUNNING) a.copy(status = Activity.Status.STOPPED) else a).copy(children = kids)
             } }
             stoppedWith("Stopped.")
-            closeDanglingToolUses()
+            runCatching { closeDanglingToolUses() }   // a disk error here must not replace the cancellation
             throw e
         } catch (e: Throwable) {
             Log.e("Kiln", "agent loop", e)
             stoppedWith(e.message ?: e.toString(), error = true)
-            closeDanglingToolUses()
+            runCatching { closeDanglingToolUses() }   // nor escape send() (it crashed the app on a full disk)
         } finally {
             running.value = false
         }
@@ -485,6 +485,7 @@ class AgentLoop(
                 try {
                     return stream(adapter, profile, model, cfg)
                 } catch (e: CancellationException) { throw e
+                } catch (e: SaveFailed) { throw e.cause ?: e   // the run stops: retrying can't fix the disk
                 } catch (e: ProviderException) {
                     dropPartial()
                     lastError = e
@@ -541,13 +542,17 @@ class AgentLoop(
         }
         textId?.let { id -> update(id) { it.copy(status = Activity.Status.DONE) } }
         thinkId?.let { id -> update(id) { it.copy(status = Activity.Status.DONE) } }
-        session.append(Msg("assistant", turn.content, origin = origin, providerState = turn.providerState))
+        // The turn is paid for: count it first. Saving it can fail (a full disk); that is not a model failure, so it
+        // must not send the same turn to a retry or the fallback model (billed again, and the history duplicated).
         val c = turn.usage.cost(profile.priceFor(model))
         if (profile.priceFor(model) == null) costKnown.value = false
         usage.value = usage.value + turn.usage
         cost.value += c
-        settings.addSpend(c)
-        session.updateMeta { it.copy(usage = usage.value, costUsd = cost.value) }
+        try {
+            settings.addSpend(c)
+            session.append(Msg("assistant", turn.content, origin = origin, providerState = turn.providerState))
+            session.updateMeta { it.copy(usage = usage.value, costUsd = cost.value) }
+        } catch (e: Exception) { throw SaveFailed(e) }
         return origin to turn
     }
 
@@ -701,6 +706,8 @@ class AgentLoop(
             /** The helper's whole activity feed (tool calls, results, notes), as it changes: shown nested in the chat. */
             onFeed: ((List<Activity>) -> Unit)? = null,
             readOnly: Boolean = false,
+            /** Gets the helper's spend however it ends (a timeout or Stop counted nothing before). */
+            onCost: ((Double) -> Unit)? = null,
         ): Triple<String, Usage, Double> = kotlinx.coroutines.coroutineScope {
             // Scratch sessions left by a helper the process died during: cleared once they're a day old.
             File(sessionsRoot, ".sub").listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }?.forEach { it.deleteRecursively() }
@@ -734,7 +741,7 @@ class AgentLoop(
                 if (onStep != null) for (a in last) if (a.kind == Activity.Kind.TOOL && a.status != Activity.Status.RUNNING && reported.add(a.id))
                     onStep(stepLine(a))
                 Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
-            } finally { s.dir.deleteRecursively() }
+            } finally { onCost?.invoke(loop.cost.value); s.dir.deleteRecursively() }
         }
 
         /** Single tap / type_text / swipe / press_key calls as test_flow steps (JSON), for the batching reminder. */
@@ -796,3 +803,6 @@ private val ANNOUNCES = Regex("""(?i)(\blet me\b(?!\s+know)|\bi'll\b|\bi will\b|
 
 /** A closing courtesy ("Let me know if…", "I'll be here if…") ends a reply; it isn't an announced next step. */
 private val CLOSING = Regex("""(?i)let me know|if you('d| would)? (like|want|need)|feel free|anything else|happy to help|i'll be here""")
+
+/** A model turn arrived but couldn't be saved: stops the run instead of being retried like a model failure. */
+private class SaveFailed(cause: Throwable) : Exception(cause.message, cause)
