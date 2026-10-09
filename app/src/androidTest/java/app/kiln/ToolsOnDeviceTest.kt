@@ -243,7 +243,7 @@ class ToolsOnDeviceTest {
             // is pointed at its package.
             Case("write_file", """{"path":"$src/Own.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.ui.graphics.vector.ImageVector\n\nenum class WeightUnit { KG, LB }\nclass Expense(val amount: Double)\nval Icons.Filled.Logo: ImageVector get() = Icons.Filled.Home\n"}"""),
             Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.runtime.Composable\nimport app.kiln.kit.Expense\n\n@Composable\nfun Section(loader: @Composable () -> Unit) { KidsTheme { loader() } }\nval u = WeightUnit.KG\nval logo = Icons.Filled.Logo\nval e = Expense(1.0)\n"}""",
-                expect = "import app.kiln.kit.Expense → kiln.app.tooltest.Expense", absent = "KilnTheme"),
+                expect = "import app.kiln.kit.Expense → kiln.app.tooltest.Expense", absent = "KidsTheme → "),
             Case("grep", """{"pattern":"import app.kiln.kit.loader|KilnTheme","glob":"**/Bad2.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
             Case("delete", """{"path":"$src/Own.kt"}"""),
