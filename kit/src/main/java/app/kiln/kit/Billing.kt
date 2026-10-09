@@ -101,9 +101,12 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
     /** Re-read what the user owns, and finish new purchases (acknowledge, or consume consumables). */
     suspend fun refresh() {
         if (!connect()) return
-        val all = listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS).flatMap { type ->
-            client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(type).build()).purchasesList
-        } + pending
+        val results = listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS).map { type ->
+            client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(type).build())
+        }
+        // A failed query isn't "owns nothing": keep what the user owns rather than taking Pro away on a Play hiccup.
+        if (results.any { it.billingResult.responseCode != BillingClient.BillingResponseCode.OK }) return
+        val all = results.flatMap { it.purchasesList } + pending
         pending = emptyList()
         val owned = mutableSetOf<String>()
         for (p in all.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }.distinctBy { it.purchaseToken }) {

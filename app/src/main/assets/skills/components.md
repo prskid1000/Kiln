@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -138,8 +139,10 @@ fun ComponentGallery() {
                 }
 
                 KSection("Lists")
+                // A key per row: without it a row's swipe state belongs to its position, and the row moving up into
+                // a swiped slot was deleted too.
                 items.forEach { item ->
-                    KSwipeRow(onDelete = { items = items - item; true }) { KListRow(item, subtitle = "Swipe to delete", icon = Icons.Filled.Person) }
+                    key(item) { KSwipeRow(onDelete = { items = items - item; true }) { KListRow(item, subtitle = "Swipe to delete", icon = Icons.Filled.Person) } }
                 }
 
                 KSection("Charts")

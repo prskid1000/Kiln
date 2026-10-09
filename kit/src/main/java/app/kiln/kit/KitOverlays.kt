@@ -173,6 +173,8 @@ fun BoxScope.KToastHost(toast: KToast, modifier: Modifier = Modifier) =
 /**
  * A row you swipe to delete (right to left) or archive (left to right). The callback decides:
  * return true to let the row go (remove it from your list), false to snap it back.
+ * Give each row a stable key (`items(list, key = { it.id })`, or `key(item) { … }` in a loop): without one a row's
+ * swipe state belongs to its position, and the next row moving into a swiped slot is deleted too.
  */
 @Composable
 fun KSwipeRow(modifier: Modifier = Modifier, onDelete: (() -> Boolean)? = null, onArchive: (() -> Boolean)? = null,

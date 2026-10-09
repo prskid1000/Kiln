@@ -34,7 +34,7 @@ import java.io.IOException
  * The signed-in session is kept on the device and refreshed when it expires.
  */
 /** Inserts leave out nulls, so the server fills its own columns (`val id: Long? = null`, created_at) — real values, defaults included, are sent. */
-private val insertJson = kotlinx.serialization.json.Json(KJson) { explicitNulls = false }
+internal val insertJson = kotlinx.serialization.json.Json(KJson) { explicitNulls = false }
 
 /** A row for insert: placeholder server columns (id 0, created_at "") are left out so the server fills them. */
 private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row: T): String {
@@ -79,7 +79,8 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         }.onFailure { e ->
             // The session itself is over (revoked or expired refresh token): sign out, so the app shows sign-in again
             // instead of failing every call. A network error keeps the session.
-            if (Regex("""Supabase 4\d\d""").containsMatchIn(e.message.orEmpty())) signOut()
+            // Only a refused session (400/401/403): a rate limit (429) or timeout (408) must not sign a valid user out.
+            if (Regex("""Supabase 40[013]\b""").containsMatchIn(e.message.orEmpty())) signOut()
         }.isSuccess
     }
 
