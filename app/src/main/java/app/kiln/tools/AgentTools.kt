@@ -16,7 +16,7 @@ class TodoTool : Tool {
         "- 4–10 items, each a concrete outcome you can check off — say what will be true, not an activity: " +
         "\"Expenses screen: list grouped by date, search, swipe to delete\", not \"work on expenses\" or \"load skills\".\n" +
         "- In build order: data (models, stores) → one item per screen or feature → builds and runs → one item per user journey " +
-        "tested with test_flow → qa_check passes.\n" +
+        "tested with test_flow → qa_check passes (when you have qa_check).\n" +
         "- Exactly one item in_progress: the one you're on now.\n" +
         "- Mark an item done the moment it's finished and checked, in the same step as your next action — don't save ticks for later.\n" +
         "- Add an item when you discover work; if one becomes unnecessary, mark it done and say why in its text.\n" +
