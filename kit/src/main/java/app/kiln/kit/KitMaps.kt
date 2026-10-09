@@ -109,10 +109,13 @@ fun KMap(
         onDispose { map.onPause(); map.onDetach() }
     }
     var lastCenter by remember { mutableStateOf(center) }
+    var lastZoom by remember { mutableStateOf(zoom) }
     // OpenStreetMap's tile policy requires this credit on the map.
     androidx.compose.foundation.layout.Box(modifier.fillMaxWidth().then(if (height != null) Modifier.height(height) else Modifier).clip(RoundedCornerShape(corner))) {
     AndroidView({ map }, Modifier.matchParentSize()) { mv ->
         if (center != lastCenter) { mv.controller.animateTo(GeoPoint(center.lat, center.lng)); lastCenter = center }
+        // A changed zoom applies too (it was read only when the map was made).
+        if (zoom != lastZoom) { mv.controller.setZoom(zoom); lastZoom = zoom }
         // Each update rebuilds the overlays: switch off the old location overlay first, or every pan adds a GPS listener.
         mv.overlays.filterIsInstance<MyLocationNewOverlay>().forEach { it.disableMyLocation(); it.onDetach(mv) }
         mv.overlays.clear()
@@ -201,13 +204,13 @@ class KSpeechToText internal constructor(private val context: Context, private v
     @SuppressLint("MissingPermission")
     fun start() {
         if (!available) { error = "Speech recognition isn't available on this device"; return }
-        stop(); text = ""; error = null
+        release(); text = ""; error = null
         recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(p: Bundle?) { listening = true }
                 override fun onPartialResults(b: Bundle?) { b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { text = it } }
-                override fun onResults(b: Bundle?) { b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { text = it }; listening = false }
-                override fun onError(code: Int) { listening = false; if (code != SpeechRecognizer.ERROR_NO_MATCH) error = "Speech error $code" }
+                override fun onResults(b: Bundle?) { b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { text = it }; listening = false; release() }
+                override fun onError(code: Int) { listening = false; release(); if (code != SpeechRecognizer.ERROR_NO_MATCH) error = "Speech error $code" }
                 override fun onEndOfSpeech() {}
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(v: Float) {}
@@ -221,13 +224,16 @@ class KSpeechToText internal constructor(private val context: Context, private v
         }
     }
 
-    fun stop() { recognizer?.run { stopListening(); destroy() }; recognizer = null; listening = false }
+    /** Stop listening; the final words still arrive in [text] (destroying the recognizer here lost them). */
+    fun stop() { recognizer?.stopListening() }
+
+    internal fun release() { recognizer?.destroy(); recognizer = null; listening = false }
 }
 
 @Composable
 fun rememberSpeechToText(locale: Locale = Locale.getDefault()): KSpeechToText {
     val context = LocalContext.current
     val stt = remember { KSpeechToText(context, locale) }
-    DisposableEffect(stt) { onDispose { stt.stop() } }
+    DisposableEffect(stt) { onDispose { stt.release() } }
     return stt
 }

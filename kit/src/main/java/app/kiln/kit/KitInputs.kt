@@ -3,6 +3,7 @@
 package app.kiln.kit
 
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -357,7 +358,6 @@ fun KTextArea(value: String, onValueChange: (String) -> Unit, modifier: Modifier
     KTextField(value, onValueChange, modifier, label = label, placeholder = placeholder, singleLine = false,
         minLines = minLines, maxLines = maxLines, maxLength = maxLength, height = height, keyboard = keyboard, keyboardOptions = keyboardOptions, width = width, error = error, helper = helper, enabled = enabled)
 /** Search bar with a clear button. Parameter names follow Material: `KSearchBar(query, onQueryChange = { query = it }, placeholder = "Search notes")`. */
-/** Search bar with a clear button; [onSubmit] runs on the keyboard's search action. */
 @Composable
 fun KSearchBar(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "Search",
                trailing: (@Composable () -> Unit)? = null, height: Dp = ks(48), colors: KColors? = null) {
@@ -458,9 +458,11 @@ fun KCombobox(options: List<String>, selected: String?, onSelect: (String) -> Un
 @Composable
 fun KCheckbox(checked: Boolean, onCheckedChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier,
               subtitle: String? = null, enabled: Boolean = true) {
-    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).clickable(enabled = enabled) { onCheckedChange(!checked) }.padding(vertical = 4.dp),
+    // One node holds the label and the state (TalkBack, UI tests): the row toggles, the box only draws.
+    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8)))
+        .toggleable(checked, enabled = enabled, role = androidx.compose.ui.semantics.Role.Checkbox) { onCheckedChange(it) }.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked, onCheckedChange, enabled = enabled, colors = CheckboxDefaults.colors(checkedColor = Nocturne.accent, checkmarkColor = Nocturne.bg))
+        Checkbox(checked, null, enabled = enabled, colors = CheckboxDefaults.colors(checkedColor = Nocturne.accent, checkmarkColor = Nocturne.bg))
         Column {
             Text(label, style = MaterialTheme.typography.bodyLarge)
             if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Nocturne.textMuted)
@@ -533,7 +535,7 @@ fun KRangeSlider(value: ClosedFloatingPointRange<Float>, onValueChange: (ClosedF
     }
 }
 
-/** Star rating; [onChange] null makes it display-only. */
+/** Star rating; [onValueChange] null makes it display-only. */
 @Composable
 fun KRating(value: Int, onValueChange: ((Int) -> Unit)? = null, modifier: Modifier = Modifier, max: Int = 5, starSize: Dp = ks(28),
             tone: KTone = KTone.Warn) {

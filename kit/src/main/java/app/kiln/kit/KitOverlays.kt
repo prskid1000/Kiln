@@ -295,6 +295,8 @@ fun KDonutChart(slices: List<KSlice>, modifier: Modifier = Modifier, size: Dp = 
                 val s = stroke.toPx(); val d = this.size.minDimension - s
                 var start = -90f
                 slices.forEach { sl -> val sweep = 360f * sl.value / total
+                    // A zero or tiny slice draws nothing (a negative sweep drew a sliver backwards over the previous one).
+                    if (sweep <= 1.5f) { start += sweep; return@forEach }
                     drawArc(sl.tone.color(), start, sweep - 1.5f, false, Offset(s / 2, s / 2), Size(d, d), style = Stroke(s)); start += sweep }
             }
             if (center != null) Text(center, style = MaterialTheme.typography.titleMedium)

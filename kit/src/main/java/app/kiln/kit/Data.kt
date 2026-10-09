@@ -17,7 +17,18 @@ import kotlinx.serialization.serializer
 import java.io.File
 
 /** The JSON settings every Kiln app uses (lenient reads, defaults kept). */
-val KJson: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = false; isLenient = true }
+val KJson: Json = Json {
+    ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = false; isLenient = true
+    // An average over zero items is NaN: saving it must not crash the app.
+    allowSpecialFloatingPointValues = true
+    // Dates on their own (KStore("last", LocalDate.now()), KCollection<KDate>) — the typealias annotation only
+    // reaches properties inside a @Serializable class.
+    serializersModule = kotlinx.serialization.modules.SerializersModule {
+        contextual(java.time.LocalDate::class, KDateSerializer)
+        contextual(java.time.LocalTime::class, KTimeSerializer)
+        contextual(java.time.LocalDateTime::class, KDateTimeSerializer)
+    }
+}
 
 /**
  * A typed, persisted value: one JSON file in the app's files dir, exposed as a
@@ -30,7 +41,8 @@ val KJson: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true; pretty
  * todos.update { it + Todo(System.currentTimeMillis(), "Buy milk") }
  * ```
  */
-class KStore<T>(context: Context, name: String, private val default: T, private val serializer: KSerializer<T>) {
+// Constructed only through the shared registry (KStore(context, name, default)): two copies of one file overwrite each other.
+class KStore<T> @PublishedApi internal constructor(context: Context, name: String, private val default: T, private val serializer: KSerializer<T>) {
     private val file = File(context.applicationContext.filesDir, "kstore/$name.json")
     private val lock = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -58,12 +70,14 @@ class KStore<T>(context: Context, name: String, private val default: T, private 
 
     fun set(value: T) = update { value }
 
-    private fun write(value: T) {
+    // A save that fails (full disk, a value that can't be encoded) is logged; it ran in the background and
+    // would otherwise kill the app with no app frame in the trace. The value stays in memory.
+    private fun write(value: T) = runCatching {
         file.parentFile?.mkdirs()
         val tmp = File(file.path + ".tmp")
         tmp.writeText(KJson.encodeToString(serializer, value))
         tmp.renameTo(file)
-    }
+    }.onFailure { android.util.Log.w("KStore", "${file.name} couldn't be saved: ${it.message}") }
 
     companion object {
         /** One store per name: two screens reading "settings" must see the same value, not two copies. */
@@ -74,9 +88,9 @@ class KStore<T>(context: Context, name: String, private val default: T, private 
             open.getOrPut(name) { KStore(context, name, default, serializer) } as KStore<T>
 
         inline operator fun <reified T> invoke(context: Context, name: String, default: T): KStore<T> =
-            shared(context, name, default, serializer())
+            shared(context, name, default, KJson.serializersModule.serializer())
         /** No Context needed: `val settings = KStore("settings", Settings())` (uses [KApp.context]). */
         inline operator fun <reified T> invoke(name: String, default: T): KStore<T> =
-            shared(KApp.context, name, default, serializer())
+            shared(KApp.context, name, default, KJson.serializersModule.serializer())
     }
 }

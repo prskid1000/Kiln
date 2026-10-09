@@ -1,5 +1,6 @@
 package app.kiln.kit
 
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -87,8 +88,10 @@ fun KListRow(
 /** A setting with a switch. */
 @Composable
 fun KSwitchRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, subtitle: String? = null) =
-    KListRow(title = title, subtitle = subtitle, onClick = { onCheckedChange(!checked) }, trailingContent = {
-        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(
+    // One node holds the title and the state (TalkBack, UI tests): the row toggles, the switch only draws.
+    KListRow(title = title, subtitle = subtitle,
+        modifier = Modifier.toggleable(checked, role = androidx.compose.ui.semantics.Role.Switch) { onCheckedChange(it) }, trailingContent = {
+        Switch(checked = checked, onCheckedChange = null, colors = SwitchDefaults.colors(
             checkedTrackColor = Nocturne.accent, checkedThumbColor = Nocturne.bg,
             uncheckedTrackColor = Nocturne.surfaceHi, uncheckedBorderColor = Nocturne.divider))
     })

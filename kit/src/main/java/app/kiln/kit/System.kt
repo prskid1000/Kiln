@@ -71,5 +71,7 @@ fun rememberPermission(permission: String): KPermission {
     }
     val perm = remember(permission) { KPermission(initial) { launcher.launch(permission) } }
     holder = perm
+    // Granted elsewhere (app settings, another screen): re-checked whenever the app comes back.
+    KOnResume { perm.granted = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED }
     return perm
 }

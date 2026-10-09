@@ -92,7 +92,8 @@ data class KRow<T>(val id: Long, val value: T, val updatedAt: Long)
  * notes.query { it.title.contains("hi", ignoreCase = true) }
  * ```
  */
-class KCollection<T>(context: Context, private val name: String, private val serializer: KSerializer<T>,
+// Constructed only through the shared registry: an instance outside it never saw its own writes.
+class KCollection<T> @PublishedApi internal constructor(context: Context, private val name: String, private val serializer: KSerializer<T>,
                      private val newestFirst: Boolean = true) {
     private val db = KDb.get(context)
     private val table = "c_" + name.replace(Regex("[^A-Za-z0-9_]"), "_")
@@ -140,6 +141,12 @@ class KCollection<T>(context: Context, private val name: String, private val ser
 
     fun get(id: Long): T? = flow.value.firstOrNull { it.id == id }?.value
     fun delete(id: Long) { db.writableDatabase.delete(table, "id = ?", arrayOf(id.toString())); changed() }
+    /** Put a deleted [row] back as it was — same id and time (Undo): add() would give it a new id and move it to the top. */
+    fun restore(row: KRow<T>) {
+        db.writableDatabase.insertWithOnConflict(table, null, ContentValues().apply {
+            put("id", row.id); put("json", KJson.encodeToString(serializer, row.value)); put("updated", row.updatedAt)
+        }, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE); changed()
+    }
     fun clear() { db.writableDatabase.delete(table, null, null); changed() }
     /** Items matching [predicate], as rows. */
     fun query(predicate: (T) -> Boolean): List<KRow<T>> = flow.value.filter { predicate(it.value) }
@@ -154,10 +161,10 @@ class KCollection<T>(context: Context, private val name: String, private val ser
             open.getOrPut("$name/$newestFirst") { KCollection(context, name, serializer, newestFirst) } as KCollection<T>
 
         inline operator fun <reified T> invoke(context: Context, name: String, newestFirst: Boolean = true): KCollection<T> =
-            shared(context, name, serializer(), newestFirst)
+            shared(context, name, KJson.serializersModule.serializer(), newestFirst)
         /** No Context needed: `val notes = KCollection<Note>("notes")` (uses [KApp.context]). */
         inline operator fun <reified T> invoke(name: String, newestFirst: Boolean = true): KCollection<T> =
-            shared(KApp.context, name, serializer(), newestFirst)
+            shared(KApp.context, name, KJson.serializersModule.serializer(), newestFirst)
     }
 }
 
@@ -357,13 +364,13 @@ object KHttp {
     }
 
     suspend inline fun <reified T> get(url: String, headers: Map<String, String> = emptyMap()): T =
-        KJson.decodeFromString(serializer<T>(), request("GET", url, null, headers))
+        KJson.decodeFromString(KJson.serializersModule.serializer<T>(), request("GET", url, null, headers))
     suspend inline fun <reified B, reified T> post(url: String, body: B, headers: Map<String, String> = emptyMap()): T =
-        KJson.decodeFromString(serializer<T>(), request("POST", url, KJson.encodeToString(serializer<B>(), body), headers))
+        KJson.decodeFromString(KJson.serializersModule.serializer<T>(), request("POST", url, KJson.encodeToString(KJson.serializersModule.serializer<B>(), body), headers))
     suspend inline fun <reified B, reified T> put(url: String, body: B, headers: Map<String, String> = emptyMap()): T =
-        KJson.decodeFromString(serializer<T>(), request("PUT", url, KJson.encodeToString(serializer<B>(), body), headers))
+        KJson.decodeFromString(KJson.serializersModule.serializer<T>(), request("PUT", url, KJson.encodeToString(KJson.serializersModule.serializer<B>(), body), headers))
     suspend inline fun <reified B, reified T> patch(url: String, body: B, headers: Map<String, String> = emptyMap()): T =
-        KJson.decodeFromString(serializer<T>(), request("PATCH", url, KJson.encodeToString(serializer<B>(), body), headers))
+        KJson.decodeFromString(KJson.serializersModule.serializer<T>(), request("PATCH", url, KJson.encodeToString(KJson.serializersModule.serializer<B>(), body), headers))
     suspend fun delete(url: String, headers: Map<String, String> = emptyMap()) { request("DELETE", url, null, headers) }
 }
 
@@ -531,7 +538,7 @@ object KReminder {
     }
     /** At a clock time today (or tomorrow if it has passed). */
     fun scheduleAt(context: Context, id: String, hour: Int, minute: Int, title: String, text: String) {
-        val now = java.time.LocalDateTime.now()
+        val now = java.time.ZonedDateTime.now()   // zoned: a DST change between now and then shifted it by an hour
         var at = now.withHour(hour).withMinute(minute).withSecond(0)
         if (!at.isAfter(now)) at = at.plusDays(1)
         schedule(context, id, Duration.between(now, at), title, text)
@@ -597,9 +604,16 @@ object KFormat {
     fun number(value: Double, decimals: Int = 0): String = NumberFormat.getNumberInstance().apply {
         maximumFractionDigits = decimals; minimumFractionDigits = decimals }.format(value)
     /** 1.2K, 3.4M. */
-    fun compact(value: Long): String = when {
-        value >= 1_000_000_000 -> "%.1fB".format(value / 1e9); value >= 1_000_000 -> "%.1fM".format(value / 1e6)
-        value >= 1_000 -> "%.1fK".format(value / 1e3); else -> value.toString() }
+    fun compact(value: Long): String {
+        // Unit picked after rounding (999 950 is "1.0M", not "1000.0K"); negatives keep their sign.
+        val a = kotlin.math.abs(value.toDouble()); val sign = if (value < 0) "-" else ""
+        if (a < 1000) return value.toString()
+        val units = listOf(1e3 to "K", 1e6 to "M", 1e9 to "B")
+        var i = 0
+        var r = Math.round(a / units[0].first * 10) / 10.0
+        while (r >= 1000 && i < units.lastIndex) { i++; r = Math.round(a / units[i].first * 10) / 10.0 }
+        return sign + "%.1f".format(r) + units[i].second
+    }
     fun percent(fraction: Double, decimals: Int = 0): String = NumberFormat.getPercentInstance().apply { maximumFractionDigits = decimals }.format(fraction)
     fun date(date: LocalDate, pattern: String = "d MMM yyyy"): String = date.format(DateTimeFormatter.ofPattern(pattern))
     fun date(date: LocalDate, formatter: DateTimeFormatter): String = date.format(formatter)
@@ -611,6 +625,10 @@ object KFormat {
     /** "just now", "5 min ago", "yesterday", "3 days ago", or a date. */
     fun relative(millis: Long, now: Long = System.currentTimeMillis()): String {
         val s = (now - millis) / 1000
+        // The future (a due date, a reminder) was "just now".
+        if (s < -45) { val f = -s; return when {
+            f < 3600 -> "in ${f / 60} min"; f < 86_400 -> "in ${f / 3600} h"; f < 172_800 -> "tomorrow"
+            f < 604_800 -> "in ${f / 86_400} days"; else -> dateTime(millis, "d MMM yyyy") } }
         return when {
             s < 45 -> "just now"; s < 3600 -> "${s / 60} min ago"; s < 86_400 -> "${s / 3600} h ago"
             s < 172_800 -> "yesterday"; s < 604_800 -> "${s / 86_400} days ago"; else -> dateTime(millis, "d MMM yyyy") }

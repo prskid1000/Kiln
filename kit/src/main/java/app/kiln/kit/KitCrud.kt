@@ -107,9 +107,9 @@ fun <T> KCrudList(
                         if (heading.isNotEmpty()) item(key = "h:$heading") { KSection(heading) }
                         items(group, key = { it.id }) { row ->
                             KSwipeRow(onDelete = {
-                                val removed = row.value
+                                val removed = row
                                 items.delete(row.id)
-                                toast.show("$name deleted", action = "Undo") { items.add(removed) }
+                                toast.show("$name deleted", action = "Undo") { items.restore(removed) }
                                 true
                             }) {
                                 KListRow(
@@ -146,9 +146,9 @@ fun <T> KCrudList(
             error?.let { KAlert(it, tone = KTone.Danger) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (editing != null) KButton("Delete", variant = KVariant.Outline, tone = KTone.Danger) {
-                    val removed = editing.value
+                    val removed = editing
                     items.delete(editing.id); close()
-                    toast.show("$name deleted", action = "Undo") { items.add(removed) }
+                    toast.show("$name deleted", action = "Undo") { items.restore(removed) }
                 }
                 Spacer(Modifier.weight(1f))
                 KButton("Cancel", variant = KVariant.Ghost, tone = KTone.Neutral) { close() }

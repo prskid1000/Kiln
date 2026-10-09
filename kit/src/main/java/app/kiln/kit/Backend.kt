@@ -86,14 +86,14 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         /** Rows matching a PostgREST query, e.g. "select=*&done=eq.false&order=created_at.desc". */
         suspend fun <T> select(serializer: KSerializer<T>, query: String = "select=*"): List<T> =
             KJson.decodeFromString(ListSerializer(serializer), send(Request.Builder().url(at(query)).get()))
-        suspend inline fun <reified T> select(query: String = "select=*"): List<T> = select(serializer<T>(), query)
+        suspend inline fun <reified T> select(query: String = "select=*"): List<T> = select(KJson.serializersModule.serializer<T>(), query)
 
         /** Insert a row; returns the stored row (with server defaults such as id). */
         suspend fun <T> insert(serializer: KSerializer<T>, row: T): T =
             KJson.decodeFromString(ListSerializer(serializer), send(Request.Builder().url(at(""))
                 .header("Prefer", "return=representation")
                 .post(KJson.encodeToString(serializer, row).toRequestBody(json)))).first()
-        suspend inline fun <reified T> insert(row: T): T = insert(serializer<T>(), row)
+        suspend inline fun <reified T> insert(row: T): T = insert(KJson.serializersModule.serializer<T>(), row)
 
         /** Change the rows matching [filter] (e.g. "id=eq.42") to have these fields. */
         suspend fun update(filter: String, fields: JsonElement) {

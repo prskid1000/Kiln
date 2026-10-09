@@ -20,7 +20,9 @@ object KilnCrash {
     const val TAG = "KILN-CRASH"
     @Volatile private var installed = false
 
-    fun install(context: Context) {
+    fun install(context0: Context) {
+        // The handler lives for the whole process: hold the application, not the first Activity.
+        val context = context0.applicationContext
         if (installed) return
         installed = true
         val pkg = context.packageName
