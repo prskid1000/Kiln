@@ -247,8 +247,18 @@ class ToolsOnDeviceTest {
             Case("grep", """{"pattern":"import app.kiln.kit.loader|KilnTheme","glob":"**/Bad2.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
             Case("delete", """{"path":"$src/Own.kt"}"""),
-            // A member asked for by name gets the member's signature.
-            Case("sdk_lookup", """{"query":"KFormat.money"}""", expect = "fun money("),
+            // Round 2: a wildcard import doesn't hide an invented K-name; an enum entry doesn't make a fake icon pass.
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.runtime.Composable\n\nenum class Tab { Home, Stats }\n@Composable\nfun W() { Column { KSlide() } }\nval i = Icons.Filled.Stats\n"}""",
+                expect = "KSlide isn't in the kit"),
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\n\nenum class Tab { Home, Stats }\nval i = Icons.Filled.Stats\n"}""",
+                expect = "Icons.Filled.Stats isn't a Material icon"),
+            // The build fixer still imports an icon whose name a project class shares (Screen.Settings), Icons.Default too.
+            Case("delete", """{"path":"$src/Bad.kt"}"""),
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material3.Icon\nimport androidx.compose.runtime.Composable\n\nsealed class Screen { object Settings : Screen() }\n@Composable\nfun I() { Icon(Icons.Default.Settings, null) }\n"}"""),
+            Case("check", "{}", expect = "BUILD OK"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // A member asked for by name gets the member's (Kotlin) signature from the kit catalog.
+            Case("sdk_lookup", """{"query":"KFormat.money"}""", expect = "fun money(amount: Double"),
             // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).
             Case("sdk_lookup", """{"query":"DatePickerDialog"}""", expect = "androidx.compose.material3.DatePickerDialog — a top-level function"),
             // A name a letter off another component is suggested, never swapped in (KSlide meant KSwipeRow).

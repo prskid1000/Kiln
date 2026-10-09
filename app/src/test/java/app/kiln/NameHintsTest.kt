@@ -101,6 +101,12 @@ class NameHintsTest {
         assertTrue(s.any { it.name == "after" })   // a '(' char literal doesn't hide later properties
     }
 
+    @Test fun templateExpressionsAreCode() {
+        val c = NameCheck.codeOnly("val s = \"Total: \${KFormat.money(t)} and KSlide text\"")
+        assertTrue(c, "KFormat.money(t)" in c)
+        assertFalse(c, "KSlide" in c)
+    }
+
     @Test fun helpers() {
         assertEquals(1, NameCheck.distance("kolnscreen", "kilnscreen"))
         val code = NameCheck.codeOnly("val a = \"KSlide\" // KSlide\nKSlide()")

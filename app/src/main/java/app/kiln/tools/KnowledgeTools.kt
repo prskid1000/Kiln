@@ -233,7 +233,7 @@ class ClassIndex(private val toolchain: Toolchain) {
         // Icons.Filled.X / Icons.Outlined.X …: the icon's style package comes from the code line.
         Regex(ICON_STYLE.pattern + Regex.escape(name) + "\\b").find(line)?.let { m ->
             val pkg = "androidx.compose.material.icons." + (if (m.groupValues[1] == "AutoMirrored") "automirrored." else "") +
-                m.groupValues[2].lowercase() + "."
+                m.groupValues[2].lowercase().replace("default", "filled") + "."   // Icons.Default is Icons.Filled
             return all.firstOrNull { it == pkg + name }
         }
         for (g in groups) {
@@ -376,9 +376,11 @@ class SdkLookupTool(private val index: ClassIndex) : Tool {
         // Kit names aren't in the SDK index (run 14 asked sdk_lookup for KListRow, app.kiln.kit.KilnTheme, KStore…):
         // answer from the kit's own signatures.
         // A member asked for by name (KFormat.money) is answered with the member, not its owner.
-        val dotted = q0.removePrefix("app.kiln.kit.")
+        // (parseQuery splits "KFormat.money" into KFormat + money: the member is asked for as owner.member.)
+        val dotted = q0.removePrefix("app.kiln.kit.").let { o -> impliedMember?.let { "$o.$it" }?.takeIf { index.kitSignature(it) != null } ?: o }
         val kitName = if (index.kitSignature(dotted) != null) dotted else dotted.substringBefore('.')
-        val kitSig = if (exact == null) index.kitSignature(kitName) else null
+        // A kit member (KFormat.money) is answered from the catalog — its Kotlin signature — even though the class matched.
+        val kitSig = if (exact == null || '.' in kitName) index.kitSignature(kitName) else null
         // A top-level function (a composable such as DatePickerDialog, in DatePickerDialog.android.kt): its signatures from
         // the file it's compiled into. The old android.app class of the same name was answered instead, and the model
         // concluded the Compose one didn't exist.
@@ -596,7 +598,7 @@ internal val COMMON_FUNCTIONS = mapOf(
     "LaunchedEffect" to "androidx.compose.runtime.LaunchedEffect",
 )
 
-private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.""")
+private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.""")
 
 /**
  * Plain-language hints for compile errors that trap models in loops: one line per kind of mistake,
@@ -716,7 +718,7 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
         }
         // Icon names from other icon sets (runs 13, 15: Icons.Filled.Bell, .Trash): Material's names for them.
         Regex("unresolved reference '([A-Z]\\w*)'").find(m)?.groupValues?.get(1)?.let { n ->
-            if (Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.${Regex.escape(n)}\b""").containsMatchIn(src) || "icons.filled.$n" in src) {
+            if (Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.${Regex.escape(n)}\b""").containsMatchIn(src) || "icons.filled.$n" in src) {
                 MATERIAL_ICON_NAMES[n.lowercase()]?.let { out += "There's no icon $n in Material Icons — use Icons.Filled.$it." }
             }
         }
