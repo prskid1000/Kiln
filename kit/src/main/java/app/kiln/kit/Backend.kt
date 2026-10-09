@@ -33,6 +33,9 @@ import java.io.IOException
  * Only the anon (public) key belongs in an app; protect rows with Row Level Security in Supabase.
  * The signed-in session is kept on the device and refreshed when it expires.
  */
+/** Inserts leave out defaults and nulls, so the server fills its own (id, created_at) instead of storing null or 0. */
+private val insertJson = kotlinx.serialization.json.Json(KJson) { encodeDefaults = false; explicitNulls = false }
+
 class KSupabase(context: Context, private val url: String, private val anonKey: String) {
     private val prefs = context.getSharedPreferences("kiln_supabase", Context.MODE_PRIVATE)
     private val _user = MutableStateFlow(prefs.getString("user_id", null))
@@ -92,7 +95,7 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         suspend fun <T> insert(serializer: KSerializer<T>, row: T): T =
             KJson.decodeFromString(ListSerializer(serializer), send(Request.Builder().url(at(""))
                 .header("Prefer", "return=representation")
-                .post(KJson.encodeToString(serializer, row).toRequestBody(json)))).first()
+                .post(insertJson.encodeToString(serializer, row).toRequestBody(json)))).first()
         suspend inline fun <reified T> insert(row: T): T = insert(KJson.serializersModule.serializer<T>(), row)
 
         /** Change the rows matching [filter] (e.g. "id=eq.42") to have these fields. */

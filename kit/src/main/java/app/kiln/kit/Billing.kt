@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
  * is enough) by a tester account.
  *
  * ```
- * val billing = remember { KBilling(context) }
+ * val billing = rememberBilling()                       // disconnects when the screen goes away
  * val owned by billing.owned.collectAsState()          // product ids the user owns
  * LaunchedEffect(Unit) { billing.load(listOf("pro_upgrade")); billing.refresh() }
  * val pro = billing.product("pro_upgrade")             // ProductDetails?, for its price
@@ -61,13 +61,22 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
     /** Connect to Play; true when ready. */
     suspend fun connect(): Boolean {
         if (client.isReady) return true
-        val done = CompletableDeferred<Boolean>()
-        client.startConnection(object : BillingClientStateListener {
-            override fun onBillingSetupFinished(result: BillingResult) { done.complete(result.responseCode == BillingClient.BillingResponseCode.OK) }
-            override fun onBillingServiceDisconnected() { if (!done.isCompleted) done.complete(false) }
-        })
+        // One connection attempt at a time: a second startConnection while connecting fails (load + refresh together).
+        val done = synchronized(this) {
+            connecting?.takeIf { !it.isCompleted } ?: CompletableDeferred<Boolean>().also { d ->
+                connecting = d
+                client.startConnection(object : BillingClientStateListener {
+                    override fun onBillingSetupFinished(result: BillingResult) { d.complete(result.responseCode == BillingClient.BillingResponseCode.OK) }
+                    override fun onBillingServiceDisconnected() { if (!d.isCompleted) d.complete(false) }
+                })
+            }
+        }
         return done.await()
     }
+    private var connecting: CompletableDeferred<Boolean>? = null
+
+    /** Disconnect from Play (call when the screen holding it goes away; [rememberBilling] does). */
+    fun close() { runCatching { client.endConnection() }; scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
 
     /** Load product details (prices) for these ids. */
     suspend fun load(ids: List<String>, type: String = BillingClient.ProductType.INAPP) {
@@ -109,4 +118,13 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
         }
         _owned.value = owned
     }
+}
+
+/** A [KBilling] for this screen, disconnected from Play when it leaves composition. */
+@androidx.compose.runtime.Composable
+fun rememberBilling(consumable: Set<String> = emptySet()): KBilling {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val billing = androidx.compose.runtime.remember(consumable) { KBilling(context, consumable) }
+    androidx.compose.runtime.DisposableEffect(billing) { onDispose { billing.close() } }
+    return billing
 }

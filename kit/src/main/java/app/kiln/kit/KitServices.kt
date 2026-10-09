@@ -339,9 +339,12 @@ object KHttp {
 
     private val client get() = KNet.client.newBuilder().callTimeout(timeoutSeconds, TimeUnit.SECONDS).build()
 
-    /** Raw call: returns the body text. [retries] retries network failures and 5xx with backoff. */
+    /**
+     * Raw call: returns the body text. [retries] retries network failures and 5xx with backoff — by default only
+     * for requests that are safe to repeat (GET/HEAD/PUT/DELETE): a retried POST after a timeout created the order twice.
+     */
     suspend fun request(method: String, url: String, body: String? = null, headers: Map<String, String> = emptyMap(),
-                        retries: Int = 1): String = withContext(Dispatchers.IO) {
+                        retries: Int = if (method == "POST" || method == "PATCH") 0 else 1): String = withContext(Dispatchers.IO) {
         var attempt = 0
         while (true) {
             try {
@@ -626,11 +629,11 @@ object KFormat {
     fun relative(millis: Long, now: Long = System.currentTimeMillis()): String {
         val s = (now - millis) / 1000
         // The future (a due date, a reminder) was "just now".
-        if (s < -45) { val f = -s; return when {
+        if (s <= -60) { val f = -s; return when {
             f < 3600 -> "in ${f / 60} min"; f < 86_400 -> "in ${f / 3600} h"; f < 172_800 -> "tomorrow"
             f < 604_800 -> "in ${f / 86_400} days"; else -> dateTime(millis, "d MMM yyyy") } }
         return when {
-            s < 45 -> "just now"; s < 3600 -> "${s / 60} min ago"; s < 86_400 -> "${s / 3600} h ago"
+            s < 60 -> "just now"; s < 3600 -> "${s / 60} min ago"; s < 86_400 -> "${s / 3600} h ago"
             s < 172_800 -> "yesterday"; s < 604_800 -> "${s / 86_400} days ago"; else -> dateTime(millis, "d MMM yyyy") }
     }
     /** 1:05:09 or 05:09. */

@@ -233,7 +233,7 @@ class KSpeechToText internal constructor(private val context: Context, private v
 @Composable
 fun rememberSpeechToText(locale: Locale = Locale.getDefault()): KSpeechToText {
     val context = LocalContext.current
-    val stt = remember { KSpeechToText(context, locale) }
+    val stt = remember(locale) { KSpeechToText(context, locale) }   // a new language makes a new recogniser
     DisposableEffect(stt) { onDispose { stt.release() } }
     return stt
 }

@@ -292,6 +292,8 @@ fun KTextField(
     leadingIcon: ImageVector? = null,
     trailingIcon: ImageVector? = null,
     onTrailingClick: (() -> Unit)? = null,
+    /** What the trailing button does, for TalkBack and UI tests ("Show options", "Clear"). */
+    trailingDescription: String? = null,
     helper: String? = null,
     error: String? = null,
     singleLine: Boolean = true,
@@ -324,7 +326,7 @@ fun KTextField(
             trailingIcon = when {
                 password -> { { IconButton({ reveal = !reveal }) { Icon(if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
                     if (reveal) "Hide" else "Show") } } }
-                trailingIcon != null -> { { if (onTrailingClick != null) IconButton(onTrailingClick) { Icon(trailingIcon, null) } else Icon(trailingIcon, null) } }
+                trailingIcon != null -> { { if (onTrailingClick != null) IconButton(onTrailingClick) { Icon(trailingIcon, trailingDescription ?: "Action") } else Icon(trailingIcon, null) } }
                 else -> null
             },
             isError = error != null,
@@ -444,7 +446,7 @@ fun KCombobox(options: List<String>, selected: String?, onSelect: (String) -> Un
     var open by remember { mutableStateOf(false) }
     Box(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         KTextField(query, { query = it; open = true }, label = label, placeholder = placeholder, trailingIcon = Icons.Filled.KeyboardArrowDown,
-            onTrailingClick = { open = !open }, error = error, helper = helper, enabled = enabled)
+            onTrailingClick = { open = !open }, trailingDescription = if (open) "Hide options" else "Show options", error = error, helper = helper, enabled = enabled)
         // Not focusable: the combobox's text field keeps focus (and the keyboard) while suggestions show.
         DropdownMenu(open, { open = false }, containerColor = Nocturne.surfaceHi, properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
             options.filter { it.contains(query, ignoreCase = true) || query == selected }.take(maxShown).forEach { o ->
@@ -477,7 +479,7 @@ fun KRadioGroup(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, 
         options.forEachIndexed { i, o ->
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(kr(8))).selectable(i == selected, role = androidx.compose.ui.semantics.Role.RadioButton) { onSelect(i) }.padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(i == selected, { onSelect(i) }, colors = RadioButtonDefaults.colors(selectedColor = Nocturne.accent))
+                RadioButton(i == selected, null, colors = RadioButtonDefaults.colors(selectedColor = Nocturne.accent))
                 Text(o, style = MaterialTheme.typography.bodyLarge)
             }
         }
