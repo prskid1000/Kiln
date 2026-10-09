@@ -16,6 +16,46 @@ import java.util.zip.ZipFile
 
 private fun JsonObject.req(k: String) = str(k) ?: throw IllegalArgumentException("missing '$k'")
 
+/** Public static method names of a class file (a Kotlin file facade's top-level functions; getX → X). */
+internal fun classPublicStatics(b: ByteArray): List<String> {
+    val d = java.io.DataInputStream(b.inputStream())
+    if (d.readInt() != 0xCAFEBABE.toInt()) return emptyList()
+    d.readUnsignedShort(); d.readUnsignedShort()
+    val n = d.readUnsignedShort()
+    val utf = arrayOfNulls<String>(n)
+    var i = 1
+    while (i < n) {
+        when (d.readUnsignedByte()) {
+            1 -> utf[i] = d.readUTF()
+            3, 4 -> d.readInt()
+            5, 6 -> { d.readLong(); i++ }   // long/double take two slots
+            7, 8, 16, 19, 20 -> d.readUnsignedShort()
+            9, 10, 11, 12, 17, 18 -> d.readInt()
+            15 -> { d.readUnsignedByte(); d.readUnsignedShort() }
+            else -> return emptyList()
+        }
+        i++
+    }
+    d.readUnsignedShort(); d.readUnsignedShort(); d.readUnsignedShort()
+    repeat(d.readUnsignedShort()) { d.readUnsignedShort() }
+    fun skipMembers(keep: (Int, String) -> Unit) = repeat(d.readUnsignedShort()) {
+        val access = d.readUnsignedShort(); val name = utf[d.readUnsignedShort()].orEmpty(); d.readUnsignedShort()
+        repeat(d.readUnsignedShort()) { d.readUnsignedShort(); d.skipBytes(d.readInt()) }
+        keep(access, name)
+    }
+    skipMembers { _, _ -> }
+    val out = mutableListOf<String>()
+    // public (1) + static (8), not synthetic (0x1000); no generated/mangled names.
+    skipMembers { access, name ->
+        if (access and 0x9 == 0x9 && access and 0x1000 == 0 && name.none { it == '$' || it == '-' || it == '<' })
+            if (name.length > 3 && name.startsWith("get") && name[3].isUpperCase()) {
+                // A top-level val: `val Nocturne` and `val kilnColors` both compile to getX.
+                out += name.substring(3); out += name[3].lowercase() + name.substring(4)
+            } else out += name
+    }
+    return out.distinct()
+}
+
 /**
  * Index of every class on the compile classpath (android.jar + kit jars), read
  * straight from the class files — the ground truth the compiler will check
@@ -42,6 +82,14 @@ class ClassIndex(private val toolchain: Toolchain) {
                 // named after its main symbol (IconKt → Icon, filled/SettingsKt → Icons.Filled.Settings).
                 if (fq.endsWith("Kt") && '$' !in fq && (fq.startsWith("androidx.") || fq.startsWith("app.kiln.kit.")))
                     topLevel += fq.removeSuffix("Kt")
+                // The kit's files hold many functions each (Scaffolds.kt: KilnScreen, KilnTabs…): the file name named
+                // none of them, so the import fixer could never add KilnScreen or KToastHost. Its facades are read for
+                // their real public names (the kit is small; androidx keeps the cheap guess above).
+                if (fq.endsWith("Kt") && '$' !in fq && fq.startsWith("app.kiln.kit.")) {
+                    val pkg = fq.substringBeforeLast('.')
+                    runCatching { z.getInputStream(e).use { classPublicStatics(it.readBytes()) } }.getOrNull()
+                        ?.forEach { topLevel += "$pkg.$it" }
+                }
             }
         }
         built = dir.path

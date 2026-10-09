@@ -123,6 +123,9 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     val unresolved = Regex("unresolved reference '([A-Za-z][A-Za-z0-9_]*)'")
     val wrongIcon = Regex("candidate 'val Icons\\.(?:(AutoMirrored)\\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\\.(\\w+): ImageVector' is inapplicable because of a receiver type mismatch")
     val fixes = linkedSetOf<String>()
+    // Names already imported right that still don't resolve: an extension missing its receiver (KToastHost outside a Box).
+    // The compiler only says "unresolved", which sent the model looking for another name.
+    val receiverNotes = linkedSetOf<String>()
     // Kotlin reports Icons.Filled.Settings's 'Settings' only once 'Icons' resolves: up to three passes.
     for (pass in 1..3) {
     val before = fixes.size
@@ -181,7 +184,11 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val stale = Regex("(?m)^import\\s+([\\w.]+\\.$name)\\s*$")
         val staleLine = stale.findAll(text).firstOrNull { !index.exists(it.groupValues[1]) && decls[name]?.contains(it.groupValues[1]) != true }
         val fixed = when {
-            Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text) -> if (inline.isEmpty()) continue else text
+            Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text) -> if (inline.isEmpty()) {
+                receiverNotes += "$name is imported ($fq) but is an extension that needs its scope: call it where that scope is " +
+                    "(KToastHost inside a Box { }, a RowScope/ColumnScope function inside Row/Column) — sdk_lookup $name shows its receiver."
+                continue
+            } else text
             staleLine != null -> text.replaceRange(staleLine.range, "import $fq")
             else -> addImport(text, fq)
         }
@@ -226,9 +233,10 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     r = builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) }
     if (r.ok) break
     }
-    if (fixes.isEmpty()) return linted(r) to ""
+    val notes = if (receiverNotes.isEmpty() || r.ok) "" else receiverNotes.joinToString("\n", postfix = "\n") { "Note: $it" }
+    if (fixes.isEmpty()) return linted(r) to notes
     r = linted(r)
-    return r to "Kiln auto-fixed these (imports and small resource slips; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n"
+    return r to "Kiln auto-fixed these (imports and small resource slips; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n" + notes
 }
 
 class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) : Tool {
