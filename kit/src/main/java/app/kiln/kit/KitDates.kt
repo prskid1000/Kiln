@@ -31,6 +31,14 @@ typealias KTime = @Serializable(with = KTimeSerializer::class) LocalTime
 /** A date and time for stored data, stored as "2026-10-08T09:30". */
 typealias KDateTime = @Serializable(with = KDateTimeSerializer::class) LocalDateTime
 
+// Models write KDate(LocalDate.now()) as if KDate wrapped a date (run 15): it is the date, so these just return it.
+/** The date itself (`KDate` is a LocalDate); `val date: KDate = LocalDate.now()` needs no wrapping. */
+fun KDate(date: LocalDate): LocalDate = date
+/** The time itself (`KTime` is a LocalTime). */
+fun KTime(time: LocalTime): LocalTime = time
+/** The date-time itself (`KDateTime` is a LocalDateTime). */
+fun KDateTime(dateTime: LocalDateTime): LocalDateTime = dateTime
+
 object KDateSerializer : KSerializer<LocalDate> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("app.kiln.kit.KDate", PrimitiveKind.STRING)
     override fun serialize(encoder: Encoder, value: LocalDate) = encoder.encodeString(value.toString())

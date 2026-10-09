@@ -474,6 +474,20 @@ private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Outlined|R
  * Plain-language hints for compile errors that trap models in loops: one line per kind of mistake,
  * with what to do instead. Seen in benchmark runs; each cost a local model dozens of steps.
  */
+/** Icon names models borrow from other icon sets → Material Icons' names. */
+private val MATERIAL_ICON_NAMES = mapOf(
+    "bell" to "Notifications", "alarm" to "Alarm", "trash" to "Delete", "bin" to "Delete", "gear" to "Settings", "cog" to "Settings",
+    "pencil" to "Edit", "pen" to "Edit", "plus" to "Add", "cross" to "Close", "x" to "Close", "calendar" to "CalendarMonth",
+    "wallet" to "AccountBalanceWallet", "money" to "AttachMoney", "cash" to "Payments", "coins" to "Savings", "chart" to "PieChart",
+    "piechart" to "PieChart", "barchart" to "BarChart", "cart" to "ShoppingCart", "bag" to "ShoppingBag", "user" to "Person",
+    "profile" to "Person", "magnifier" to "Search", "magnifyingglass" to "Search", "house" to "Home", "heart" to "Favorite",
+    "trashcan" to "Delete", "clock" to "Schedule", "time" to "Schedule", "food" to "Restaurant", "car" to "DirectionsCar",
+    "bus" to "DirectionsBus", "receipt" to "Receipt", "bill" to "ReceiptLong", "gift" to "CardGiftcard", "tag" to "Sell",
+    "filter" to "FilterList", "sort" to "Sort", "logout" to "Logout", "mail" to "Email", "envelope" to "Email", "phone" to "Phone",
+    "camera" to "PhotoCamera", "image" to "Image", "photo" to "Image", "lock" to "Lock", "eye" to "Visibility", "check" to "Check",
+    "tick" to "Check", "warning" to "Warning", "info" to "Info", "error" to "Error", "star" to "Star", "share" to "Share",
+)
+
 /** The constructor properties of a class declared in the project (`data class AppSettings(val budget: …)`), or null if it isn't one. */
 internal fun projectFields(project: app.kiln.build.Project, type: String): List<String>? {
     val head = Regex("""\bclass\s+${Regex.escape(type)}\s*(?:<[^>]*>)?\s*\(""")
@@ -535,6 +549,12 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             if (Regex("""K(Collection|Store)\s*\(""").containsMatchIn(src) || "rows" in src)
                 out += "Give KCollection/KStore its item type: KCollection<Expense>(context, \"expenses\"), KStore(context, \"settings\", Settings()). Without it every later use fails to infer."
             else out += "Kotlin can't infer a type here: add the type explicitly (val x: List<Expense> = …, map<Expense, String> { … }) — usually one missing type causes the rest of these errors."
+        }
+        // Icon names from other icon sets (runs 13, 15: Icons.Filled.Bell, .Trash): Material's names for them.
+        Regex("unresolved reference '([A-Z]\\w*)'").find(m)?.groupValues?.get(1)?.let { n ->
+            if (Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.${Regex.escape(n)}\b""").containsMatchIn(src) || "icons.filled.$n" in src) {
+                MATERIAL_ICON_NAMES[n.lowercase()]?.let { out += "There's no icon $n in Material Icons — use Icons.Filled.$it." }
+            }
         }
         // Run 14: a bare LocalDate in a @Serializable class.
         if ("serializer was not found for type 'LocalDate" in m || "serializer was not found for type 'LocalTime" in m || "serializer was not found for type 'LocalDateTime" in m)

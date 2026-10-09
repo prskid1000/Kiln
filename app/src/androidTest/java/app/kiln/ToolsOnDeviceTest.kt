@@ -183,6 +183,9 @@ class ToolsOnDeviceTest {
             // A capitalised package segment (run 9: Kiln.app…) is named as the root cause.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nval broken: Kiln.app.tooltest.Nothing? = null\n"}"""),
             Case("check", "{}", expectError = true, expect = "Package names are lowercase"),
+            // Run 15: an icon name from another icon set.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.Bell\n\nval bell = Icons.Filled.Bell\n"}"""),
+            Case("check", "{}", expectError = true, expect = "use Icons.Filled.Notifications"),
             // Import mistakes from runs 2–9, all fixed by Kiln: a library class from the wrong package, a wrong
             // inline qualifier, and items(list) without its import (read as items(count: Int)).
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.Composable\nimport kotlinx.datetime.YearMonth\n\n@Composable\nfun Imports(names: List<String>) {\n    val month = YearMonth.now()\n    val kb = app.kiln.kit.KeyboardType.Number\n    LazyColumn { items(names) { Text(it.uppercase() + month + kb) } }\n}\n"}"""),
