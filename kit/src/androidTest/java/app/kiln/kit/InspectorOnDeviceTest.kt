@@ -70,6 +70,27 @@ class InspectorOnDeviceTest {
         assertTrue("Bills selected after the tap: $after", "Bills" in selected(after) && "Food" !in selected(after))
     }
 
+    /** A dropdown open inside a sheet: the tree is the sheet and the dropdown, not the screen under the sheet. */
+    @Test fun dropdownInsideSheetKeepsTheScreenBelowHidden() {
+        rule.runOnUiThread { KilnInspector.install(rule.activity) }
+        var cat by mutableStateOf<Int?>(1)
+        rule.setContent {
+            KilnTheme {
+                Column { Text("Home screen") }
+                KBottomSheet(true, { }, title = "Add expense") {
+                    KSelect(listOf("Food", "Other"), cat, { cat = it }, label = "Category")
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNode(androidx.compose.ui.test.hasText("Other")).performClick()
+        rule.waitForIdle()
+        val xml = tree()
+        assertTrue("the open dropdown is listed: $xml", "text=\"Food\"" in xml)
+        assertTrue("the sheet is listed: $xml", "Category" in xml)
+        assertTrue("the screen under the sheet isn't: $xml", "Home screen" !in xml)
+    }
+
     @Test fun dialogsAreVisibleAndTappable() {
         rule.runOnUiThread { KilnInspector.install(rule.activity) }
         var open by mutableStateOf(false); var saved = false

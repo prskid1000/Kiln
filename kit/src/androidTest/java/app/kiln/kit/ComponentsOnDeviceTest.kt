@@ -163,6 +163,27 @@ class ComponentsOnDeviceTest {
         shot("text_inputs")
     }
 
+    /** A run reported a KSelect in a KBottomSheet closing the sheet when tapped (after typing in a field above it). */
+    @Test fun selectInsideSheet() {
+        var open by mutableStateOf(true); var amount by mutableStateOf(""); var cat by mutableStateOf<Int?>(7)
+        val cats = listOf("Food", "Transport", "Shopping", "Entertainment", "Bills", "Health", "Education", "Other")
+        show {
+            KBottomSheet(open, { open = false }, title = "Add expense") {
+                KTextField(amount, { amount = it }, label = "Amount", keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal)
+                KSelect(cats, cat, { cat = it }, label = "Category")
+                KButton("Save") { open = false }
+            }
+        }
+        rule.onNode(hasSetTextAction() and hasText("Amount")).performTextInput("500")
+        rule.onNodeWithText("Other").performClick()
+        rule.waitForIdle()
+        assertTrue("sheet closed on tapping the select", open)
+        rule.onNodeWithText("Food").performClick()
+        assertEquals(0, cat); assertTrue(open)
+        rule.onNodeWithText("Food").assertIsDisplayed()
+        assertEquals("500", amount)
+    }
+
     @Test fun selection() {
         var qty by mutableIntStateOf(1); var city by mutableStateOf<Int?>(null); var fruit by mutableStateOf<String?>(null)
         var agree by mutableStateOf(false); var plan by mutableStateOf<Int?>(null); var on by mutableStateOf(false)

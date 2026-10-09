@@ -79,9 +79,12 @@ internal object KilnInspector {
         val a = resumed ?: return "<hierarchy rotation=\"0\"></hierarchy>"
         val out = StringBuilder("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation=\"0\">")
         val roots = liveRoots().ifEmpty { roots(a.window.decorView).filterIsInstance<ViewRootForTest>() }
-        // A modal dialog or sheet covers what's under it: list only what the user can reach.
-        val top = roots.lastOrNull()
-        val shown = if (top != null && roots.size > 1 && covers(top.view, a.window.decorView)) listOf(top) else roots
+        // A modal dialog or sheet covers what's under it: list only what the user can reach — the topmost modal window
+        // and anything above it. (Only the very top window was checked: a dropdown opened inside a sheet is a popup on
+        // top of the sheet, so everything was listed and the screen under the sheet "appeared" — a run concluded the
+        // sheet had closed and rewrote its form.)
+        val modal = roots.indexOfLast { it.view.rootView !== a.window.decorView.rootView && covers(it.view, a.window.decorView) }
+        val shown = if (modal > 0 || (modal == 0 && roots.size > 1)) roots.subList(modal, roots.size) else roots
         shown.forEach { r ->
             val at = IntArray(2).also { r.view.getLocationOnScreen(it) }
             node(r.semanticsOwner.rootSemanticsNode, a.packageName, at, out)
