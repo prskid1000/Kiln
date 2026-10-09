@@ -654,6 +654,7 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
     }
     // What the model itself declared, with signatures: errors about its own names say what exists.
     val symbols by lazy { ProjectSymbols.of(project) }
+    val rowFields = linkedMapOf<String, LinkedHashSet<String>>()   // KRow<T> type -> the `x.value.field` the model meant
     fun where(s: ProjectSymbols.Symbol) = "(${s.file}${s.owner?.let { ", in $it" } ?: ""})"
     for (e in build.errors) {
         val m = e.message; val src = e.source.orEmpty()
@@ -702,10 +703,11 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             }
         }
         // The item's own field read off a KCollection row (`it.amount` on KRow<Expense>): the item is row.value.
+        // Gathered into one hint per type below, with the model's own variable (`existing.amount` → `existing.value.amount`).
         Regex("unresolved reference '(\\w+)' on receiver of type 'KRow<(\\w+)>'").find(m)?.let { r ->
             val (field, type) = r.destructured
-            out += "These are rows (KRow<$type>: id + value), not $type items: write `it.value.$field` — or use `.items` " +
-                "(plain $type values) where you don't need ids, e.g. `Repo.x.items.sumOf { it.$field }`."
+            val recv = Regex("""\b(\w+)\.${Regex.escape(field)}\b""").find(src)?.groupValues?.get(1) ?: "it"
+            rowFields.getOrPut(type) { linkedSetOf() } += "$recv.value.$field"
         }
         // `it.id` on the app's own item type: the id lives on the KCollection row, not the item.
         Regex("unresolved reference '(id|value)' on receiver of type '(\\w+)'").find(m)?.let { r ->
@@ -828,6 +830,16 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             out += "A composable is called from a plain lambda (onClick, LaunchedEffect body, a callback): compute values in composition and pass them in, or move the call into the UI tree."
         if ("too many arguments for 'constructor(): Icon'" in m || "android.graphics.drawable.Icon" in m)
             out += "That Icon is android.graphics.drawable.Icon: import androidx.compose.material3.Icon instead."
+    }
+    // One hint per row type (it was one per field, each with a sumOf example that made no sense for text or dates).
+    for ((type, uses) in rowFields) {
+        out += "These are KCollection rows (KRow<$type>: id + value), not $type items — the item is `.value`: write " +
+            uses.take(4).joinToString { "`$it`" } + ". `.rows` and `query { … }` give rows; `.items` gives plain $type values; `Repo.x.get(id)` gives one $type."
+        // The app's own `id` field on the item: KCollection never fills it (every item keeps its default), so finding
+        // or deleting by it matches nothing — or everything.
+        if (projectFields(project, type)?.contains("id") == true)
+            out += "$type declares its own `id`, but KCollection doesn't set it (each stays at its default): use the row's id — " +
+                "`row.id` from `.rows`, `Repo.x.get(row.id)`, `Repo.x.update(row.id, …)`, `Repo.x.delete(row.id)` — and drop `id` from $type."
     }
     return if (out.isEmpty()) "" else "\nHints:\n" + out.joinToString("\n") { "  • $it" } + "\n"
 }
