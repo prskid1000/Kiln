@@ -1,5 +1,15 @@
 # lists-and-forms — add/edit/delete items with a form, swipe to delete, and an empty state
 
+- **Saved items (expenses, notes, tasks): `KCrudList`.** It already has the list, search, swipe-to-delete with Undo,
+  the empty state, the + button and the add/edit sheet with validation. Build it by hand only for what it can't do.
+- **An add/edit form opens as its own surface** — `KBottomSheet`, `KDialog`, or a pushed `KilnScreen` — never as a
+  `Box(Modifier.fillMaxSize())` over the current screen: that has no background, so the list shows through the form
+  and the text of both is drawn over each other.
+- **Show numbers the way people write them:** an amount in a field is `"750"`, not `750.0.toString()` ("750.0");
+  shown elsewhere it's `KFormat.money(amount, currency)`.
+- **A currency is chosen, not typed:** `KSelect(listOf("INR", "USD", "EUR", …))` — a free text field let "₹1000" in,
+  and every amount then read "₹1000750.00".
+
 - `LazyColumn` with stable `key`s; `KEmptyState` when the list is empty.
 - Swipe to delete: `SwipeToDismissBox` (Material 3). Always offer a visible delete too (accessibility).
 - Forms: validate on submit, disable Save until valid, `KeyboardOptions` from `androidx.compose.foundation.text`.

@@ -83,6 +83,14 @@ class CoreTest {
         // Whole words only: "Renew plan" contains "new" but isn't an add button (review).
         val renew = node("Renew plan", "", true)
         assertEquals(fab, app.kiln.device.findNode(listOf(renew, fab), "+"))
+        // ui_check: text drawn over other text (a form over a list) is flagged; a row and its own label inside it isn't.
+        fun box(text: String, l: Int, t: Int, r: Int, b: Int) = app.kiln.device.UiNode(text, "", "", "TextView", false, false, null, true, l, t, r, b)
+        val over = app.kiln.tools.checkUi(listOf(box("Edit Expense", 0, 100, 600, 200), box("Expenses", 20, 120, 500, 220)), 144, null)
+        assertTrue(over.toString(), over.any { "drawn over each other" in it })
+        val nested = app.kiln.tools.checkUi(listOf(box("Shopping ₹750.00", 0, 100, 1000, 300), box("Shopping", 20, 120, 400, 200)), 144, null)
+        assertTrue(nested.toString(), nested.none { "drawn over each other" in it })
+        val apart = app.kiln.tools.checkUi(listOf(box("Amount", 0, 100, 600, 200), box("750", 0, 220, 600, 320)), 144, null)
+        assertTrue(apart.toString(), apart.none { "drawn over each other" in it })
         // "<label> <kind>": the label first in the request wins over another one inside it (a run's tap on
         // "Transport category" hit the Category field, listed first, instead of the open dropdown's option).
         val category = node("Category", "", true); val transport = node("Transport", "", true)

@@ -219,6 +219,11 @@ private fun scheme(p: KPalette): ColorScheme = if (p.dark) darkColorScheme(
     surfaceVariant = p.surface, onSurfaceVariant = p.textLabel, surfaceContainerLowest = p.bg, surfaceContainerLow = p.surface,
     surfaceContainer = p.surface, surfaceContainerHigh = p.surfaceHi, surfaceContainerHighest = p.surfaceHi,
     outline = p.neutral700, outlineVariant = p.neutral800, error = p.danger, onError = p.bg,
+    // Every remaining role from the theme too: left out, Material's stock purples showed in snackbars (inverse*),
+    // error banners (errorContainer), tertiary chips and elevated surfaces, whatever the app's theme.
+    tertiaryContainer = p.surfaceHi, onTertiaryContainer = p.ok, errorContainer = p.surfaceHi, onErrorContainer = p.danger,
+    inverseSurface = p.text, inverseOnSurface = p.bg, inversePrimary = p.accent800,
+    surfaceBright = p.surfaceHi, surfaceDim = p.bg, scrim = Color.Black,
 ) else lightColorScheme(
     primary = p.accent, onPrimary = Color.White, primaryContainer = p.accent800, onPrimaryContainer = p.accent100,
     secondary = p.accent2, onSecondary = Color.White, secondaryContainer = p.accent900, onSecondaryContainer = p.accent300,
@@ -226,6 +231,9 @@ private fun scheme(p: KPalette): ColorScheme = if (p.dark) darkColorScheme(
     surfaceVariant = p.surfaceHi, onSurfaceVariant = p.textLabel, surfaceContainerLowest = Color.White, surfaceContainerLow = p.surface,
     surfaceContainer = p.surface, surfaceContainerHigh = p.surfaceHi, surfaceContainerHighest = p.surfaceHi,
     outline = p.neutral700, outlineVariant = p.neutral800, error = p.danger, onError = Color.White,
+    tertiaryContainer = p.surfaceHi, onTertiaryContainer = p.ok, errorContainer = p.surfaceHi, onErrorContainer = p.danger,
+    inverseSurface = p.text, inverseOnSurface = p.bg, inversePrimary = p.accent300,
+    surfaceBright = Color.White, surfaceDim = p.surface, scrim = Color.Black,
 )
 
 private fun typography(font: FontFamily, scale: Float): Typography {
@@ -306,7 +314,11 @@ fun KilnTheme(
     val scheme = remember(p) { scheme(p) }
     val type = remember(f, textScale) { typography(f, textScale) }
     val shapes = remember(c) { shapes() }
-    MaterialTheme(colorScheme = scheme, typography = type, shapes = shapes, content = content)
+    // Plain Text outside a kit surface took Compose's default content colour, black: "Edit Expense" was nearly invisible
+    // on the dark background. The theme's text colour is the default everywhere; K components still set their own.
+    MaterialTheme(colorScheme = scheme, typography = type, shapes = shapes) {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides p.text, content = content)
+    }
 }
 
 /** A text size scaled by the theme's `textScale`: `fontSize = kt(14)`. */

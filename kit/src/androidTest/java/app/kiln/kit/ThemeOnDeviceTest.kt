@@ -61,6 +61,27 @@ class ThemeOnDeviceTest {
         return listOf(16, 8, 0).all { sh -> abs(((e shr sh) and 0xFF) - ((actual shr sh) and 0xFF)) <= tol }
     }
 
+    /** Plain Text and Icon outside any kit surface get the theme's text colour, and no colour role is Material's stock. */
+    @Test fun plainTextAndEveryRoleFollowTheTheme() {
+        var content = Color.Unspecified
+        var scheme: androidx.compose.material3.ColorScheme? = null
+        rule.setContent {
+            KilnTheme {
+                content = androidx.compose.material3.LocalContentColor.current
+                scheme = androidx.compose.material3.MaterialTheme.colorScheme
+                Text("Edit Expense")
+            }
+        }
+        rule.waitForIdle()
+        assertEquals("plain Text colour", KPalette.Nocturne.text, content)
+        val s = scheme!!
+        val stock = androidx.compose.material3.darkColorScheme()
+        for ((role, ours, theirs) in listOf(
+            Triple("inverseSurface", s.inverseSurface, stock.inverseSurface), Triple("errorContainer", s.errorContainer, stock.errorContainer),
+            Triple("tertiaryContainer", s.tertiaryContainer, stock.tertiaryContainer), Triple("surfaceBright", s.surfaceBright, stock.surfaceBright)))
+            assertTrue("$role is Material's stock colour", ours != theirs)
+    }
+
     @Test fun everyPresetRendersWithItsColours() {
         var theme by mutableStateOf(KThemes.Nocturne)
         rule.setContent {

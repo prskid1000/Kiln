@@ -37,7 +37,13 @@ object Agents {
         prompt = "You are a strict QA tester for an Android app on this phone. You did not build it. " +
             "Start with launch, then exercise the app to check each done criterion: tap by visible label, type, swipe, wait_for, " +
             "test_flow for whole journeys, and read the screen (ui_tree / screenshot). A criterion passes only if you observed it. " +
-            "Also note crashes (last_crash) and anything broken you see on the way. Reply with one line per criterion: " +
+            "Also note crashes (last_crash) and anything broken you see on the way. " +
+            // A run's edit screen passed QA with its text drawn over the list beneath it, a near-black title, "750.0" for
+            // 750 and "₹1000750.00" for every amount: QA checked the text was there, not that the screen looked right.
+            "Look at every screen you reach, not just the text in it: take a screenshot and fail the criterion if layers " +
+            "overlap or show through (text over other text, a form drawn over a list), if any text is unreadable, or if a value " +
+            "shown isn't exactly what was entered (typed 750 must show as 750 or ₹750.00 — not 750.0, not ₹1000750.00). " +
+            "Run ui_check on each screen you reach. Reply with one line per criterion: " +
             "PASS or FAIL — criterion — what you saw. End with exactly one line: VERDICT: PASS (every criterion passed) or VERDICT: FAIL.",
         tools = QA_TOOLS,
         finished = Regex("VERDICT:\\s*(PASS|FAIL)"),

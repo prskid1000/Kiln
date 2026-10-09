@@ -153,6 +153,22 @@ fun checkUi(nodes: List<UiNode>, minPx: Int, shot: Bitmap?): List<String> {
             (b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom)
         if (ox > 8 && oy > 8 && !inside) out += "tap targets \"${a.label()}\" and \"${b.label()}\" overlap"
     }
+    // Text drawn over other text: two screens or layers on top of each other (an edit form shown as a Box with no
+    // background over the list — QA passed it, the title and the list rows were drawn through each other). A layout
+    // never overlaps two pieces of text; one inside the other is a row and its label, not an overlap.
+    val texts = nodes.filter { it.text.isNotBlank() && it.right > it.left && it.bottom > it.top }
+    var overlaps = 0
+    for (i in texts.indices) for (j in i + 1 until texts.size) {
+        val a = texts[i]; val b = texts[j]
+        val ox = min(a.right, b.right) - max(a.left, b.left); val oy = min(a.bottom, b.bottom) - max(a.top, b.top)
+        if (ox <= 0 || oy <= 0) continue
+        val inside = (a.left >= b.left && a.right <= b.right && a.top >= b.top && a.bottom <= b.bottom) ||
+            (b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom)
+        val smaller = minOf((a.right - a.left) * (a.bottom - a.top), (b.right - b.left) * (b.bottom - b.top)).coerceAtLeast(1)
+        if (!inside && ox * oy * 3 >= smaller && overlaps++ < 3)
+            out += "text \"${a.text.take(30)}\" and \"${b.text.take(30)}\" are drawn over each other at [${a.cx},${a.cy}] — two layers on top of " +
+                "each other (an overlay without a background?): show the form as a KilnScreen, KBottomSheet or KDialog, not a Box over the screen"
+    }
     if (shot != null) for (n in nodes.filter { it.text.isNotBlank() }) {
         val r = contrast(shot, n) ?: continue
         if (r < 4.5) out += "text \"${n.text.take(30)}\" has contrast ${"%.1f".format(r)}:1 — needs 4.5:1 (3:1 if large)"
