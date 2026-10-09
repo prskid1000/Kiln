@@ -219,6 +219,8 @@ private fun looksBinary(b: ByteArray) = b.take(4096).any { it == 0.toByte() }
 private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
     var original by remember(o) { mutableStateOf<String?>(null) }
     var binary by remember(o) { mutableStateOf(false) }
+    // When the source was read: the agent may write the file while it's open here, and a save must not undo that.
+    var readAt by remember(o) { mutableStateOf(0L) }
     var text by remember(o) { mutableStateOf("") }
     var confirmDiscard by remember { mutableStateOf(false) }
     // System Back closes the editor (not the whole project), and never drops unsaved edits silently.
@@ -232,7 +234,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
     val scope = rememberCoroutineScope()
     LaunchedEffect(o) {
         val bytes = withContext(Dispatchers.IO) {
-            when (o) { is Open.Source -> runCatching { o.file.readBytes() }.getOrNull(); is Open.Data -> Graph.device.readData(ps.pkg, o.path) }
+            when (o) { is Open.Source -> runCatching { readAt = o.file.lastModified(); o.file.readBytes() }.getOrNull(); is Open.Data -> Graph.device.readData(ps.pkg, o.path) }
         } ?: ByteArray(0)
         binary = looksBinary(bytes)
         val raw = if (binary) "" else bytes.decodeToString()
@@ -245,6 +247,10 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
     val dirty = original != null && text != original
     fun save() = scope.launch {
         // Kotlin is formatted on save; the editor then shows the formatted text.
+        if (o is Open.Source && o.file.lastModified() != readAt) {
+            vm.message.value = "The file changed since you opened it (the agent wrote it) — close and reopen to see its version"
+            return@launch
+        }
         val out = if (o is Open.Source) app.kiln.tools.formatted(o.file, text) else text
         val ok = withContext(Dispatchers.IO) {
             when (o) {
@@ -252,7 +258,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
                 is Open.Data -> Graph.device.writeData(ps.pkg, o.path, out.toByteArray()).ok
             }
         }
-        if (ok) { text = out; original = out }
+        if (ok) { text = out; original = out; if (o is Open.Source) readAt = o.file.lastModified() }
         vm.message.value = if (ok) (if (o is Open.Data) "Saved — restart the app to reload it" else "Saved") else "Save failed"
     }
     Column(Modifier.fillMaxSize()) {

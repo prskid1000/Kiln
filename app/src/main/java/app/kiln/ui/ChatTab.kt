@@ -226,7 +226,7 @@ private fun ChatEmpty(ps: ProjectState, onPick: (String) -> Unit) {
 @Composable
 private fun ChatList(vm: KilnVM, ps: ProjectState, loop: AgentLoop, feed: List<Activity>, running: Boolean) {
     var review by remember { mutableStateOf<Int?>(null) }
-    val snapshots = remember(feed.size, running) { app.kiln.agent.Turns.indexes(loop.session).toSet() }
+    val snapshots = remember(loop, feed.size, running) { app.kiln.agent.Turns.indexes(loop.session).toSet() }
     review?.let { ChangesSheet(vm, ps, it) { review = null } }
     // A helper agent's steps (qa_check) follow the call that started them, as ordinary steps with a tag.
     val rows = remember(feed) { group(withHelperSteps(feed)) }
@@ -680,7 +680,9 @@ private fun Composer(running: Boolean, stopping: Boolean, runStartedAt: Long, dr
             }
             // While it works, sending steers the run (it reads the message at its next step).
             else FilledIconBtn(Icons.Rounded.ArrowUpward, "Send", enabled = text.isNotBlank() || (files.isNotEmpty() && !running)) {
-                onSend(text.trim(), files.toList()); text = ""; files.clear()
+                onSend(text.trim(), files.toList()); text = ""
+                // A message sent mid-run can't carry files: keep them here for when the run finishes, don't drop them.
+                if (!running) files.clear()
             }
         }
     }

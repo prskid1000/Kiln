@@ -178,8 +178,10 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         // Gone from the list at once; the uninstall and file removal below can take a few seconds.
         projects.value = projects.value.filter { it.project.name != name }
         val s = synchronized(states) { states.remove(name) }
-        s?.job?.cancel()
-        val pkg = Project.packageFor(name)
+        // Let a cancelled run actually stop (a tool may be mid-write) before its files go.
+        s?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
+        // The package the project really uses (kiln.json; the agent may have changed it), not one derived from the name.
+        val pkg = runCatching { Project(File(Graph.paths.projects, name)).meta().`package` }.getOrNull() ?: Project.packageFor(name)
         if (pkg in installed.value) Graph.device.uninstall(pkg)
         // Its secrets go with it.
         runCatching { val p = Project(File(Graph.paths.projects, name)); app.kiln.build.AppSecrets.names(p).forEach { Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, it), null) } }

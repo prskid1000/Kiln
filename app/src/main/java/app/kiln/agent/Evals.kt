@@ -69,7 +69,11 @@ object Evals {
                 val u = loop.usage.value
                 Score(c.id, build.ok, running, crashed, loop.session.messages.count { it.role == "assistant" }, tools.size,
                     u.input + u.cacheRead + u.cacheWrite, u.output, loop.cost.value, (System.currentTimeMillis() - t0) / 1000)
-            }.getOrElse { Score(c.id, false, false, false, 0, 0, 0, 0, 0.0, (System.currentTimeMillis() - t0) / 1000, it.message) }
+            }.getOrElse {
+                // Leaving the screen cancels evals: stop, don't create the remaining projects as "failures".
+                if (it is kotlinx.coroutines.CancellationException) { state.value = state.value.copy(running = false); throw it }
+                Score(c.id, false, false, false, 0, 0, 0, 0, 0.0, (System.currentTimeMillis() - t0) / 1000, it.message)
+            }
             state.value = state.value.copy(done = i + 1, report = report(scores))
         }
         File(Graph.paths.evals, "$stamp.json").writeText(KJPretty.encodeToString(ListSerializer(Score.serializer()), scores))
