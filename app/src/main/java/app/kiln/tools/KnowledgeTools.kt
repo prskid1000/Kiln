@@ -556,6 +556,9 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 MATERIAL_ICON_NAMES[n.lowercase()]?.let { out += "There's no icon $n in Material Icons — use Icons.Filled.$it." }
             }
         }
+        // Run 16: KeyboardOptions passed to the kit's `keyboard` (a KeyboardType).
+        if ("actual type is 'KeyboardOptions', but 'KeyboardType" in m)
+            out += "`keyboard` takes a KeyboardType (`keyboard = KeyboardType.Decimal`); for full options use `keyboardOptions = KeyboardOptions(…)`."
         // Run 14: a bare LocalDate in a @Serializable class.
         if ("serializer was not found for type 'LocalDate" in m || "serializer was not found for type 'LocalTime" in m || "serializer was not found for type 'LocalDateTime" in m)
             out += "Dates in stored data need the kit's types: `val date: KDate = LocalDate.now()` (KTime for LocalTime, KDateTime for LocalDateTime) — they save as ISO text."

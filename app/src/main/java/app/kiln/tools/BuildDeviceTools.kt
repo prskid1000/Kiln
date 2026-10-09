@@ -187,6 +187,21 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         if (readCurrent) ctx.state.readStamps[rel] = f.lastModified()
         fixes += "$rel: import $fq" + if (inline.isNotEmpty()) " (and ${inline.joinToString { "$it → $name" }})" else ""
     }
+    // fillColor="none" / strokeColor="none" (SVG's way to say "no fill", run 16) fails aapt2 in a vector drawable:
+    // transparent means the same.
+    for (path in r.errors.filter { "'none' is incompatible with attribute" in it.message }.mapNotNull { it.file }.toSet()) {
+        val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
+        if (!f.isFile) continue
+        val text = f.readText()
+        val fixed = text.replace(Regex("""android:(fillColor|strokeColor)\s*=\s*"none""""), "android:$1=\"#00000000\"")
+        if (fixed != text) {
+            val rel = ctx.project.rel(f)
+            val readCurrent = ctx.state.readStamps[rel] == f.lastModified()
+            f.writeText(fixed)
+            if (readCurrent) ctx.state.readStamps[rel] = f.lastModified()
+            fixes += "$rel: \"none\" colours → #00000000 (transparent; vector drawables don't accept none)"
+        }
+    }
     // `items(list) { … }` without its import compiles as items(count: Int): every row is an Int, and
     // the errors say "… on receiver of type 'Int'" instead of naming the missing import.
     for (path in r.errors.filter { "on receiver of type 'Int'" in it.message }.mapNotNull { it.file }.toSet()) {
@@ -208,7 +223,7 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     }
     if (fixes.isEmpty()) return linted(r) to ""
     r = linted(r)
-    return r to "Kiln auto-fixed imports (only import lines changed; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n"
+    return r to "Kiln auto-fixed these (imports and small resource slips; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n"
 }
 
 class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) : Tool {

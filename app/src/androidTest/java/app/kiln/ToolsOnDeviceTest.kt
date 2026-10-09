@@ -153,14 +153,14 @@ class ToolsOnDeviceTest {
             // A stale import (old package) and a missing one are fixed by Kiln itself — the model once
             // gave up on KeyboardOptions as "not in the kit" after importing it from the wrong package.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.ui.text.input.KeyboardOptions\n\nval k = KeyboardOptions(keyboardType = KeyboardType.Number)\n"}"""),
-            Case("check", "{}", expect = "auto-fixed imports"),
+            Case("check", "{}", expect = "auto-fixed these"),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.foundation.text.KeyboardOptions"),
             // Ambiguous or unknown names are not guessed: the error stays, with hints.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nval z = NoSuchThingAnywhere()\n"}"""),
             Case("check", "{}", expectError = true, expect = "NoSuchThingAnywhere"),
             // Compose functions and icons are top-level symbols, not classes: Icon must not become android.graphics.drawable.Icon.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun Probe() {\n    Icon(Icons.Filled.Settings, \"Settings\")\n}\n"}"""),
-            Case("check", "{}", expect = "auto-fixed imports"),
+            Case("check", "{}", expect = "auto-fixed these"),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.material.icons.filled.Settings"),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.material3.Icon\n"),
             // Lower-case Compose functions are imported too; a wrong kit parameter shows the real signature.
@@ -183,6 +183,11 @@ class ToolsOnDeviceTest {
             // A capitalised package segment (run 9: Kiln.app…) is named as the root cause.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nval broken: Kiln.app.tooltest.Nothing? = null\n"}"""),
             Case("check", "{}", expectError = true, expect = "Package names are lowercase"),
+            // Run 16: a hand-written vector with fillColor="none" — Kiln makes it transparent and the build passes.
+            Case("delete", """{"path":"$src/Bad.kt"}"""),
+            Case("write_file", """{"path":"res/drawable/ic_none.xml","content":"<vector xmlns:android=\"http://schemas.android.com/apk/res/android\" android:width=\"24dp\" android:height=\"24dp\" android:viewportWidth=\"24\" android:viewportHeight=\"24\"><path android:fillColor=\"none\" android:strokeColor=\"#FFFFFF\" android:strokeWidth=\"2\" android:pathData=\"M4,12h16\"/></vector>"}"""),
+            Case("check", "{}", expect = "#00000000"),
+            Case("delete", """{"path":"res/drawable/ic_none.xml"}"""),
             // Run 15: an icon name from another icon set.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.Bell\n\nval bell = Icons.Filled.Bell\n"}"""),
             Case("check", "{}", expectError = true, expect = "use Icons.Filled.Notifications"),
