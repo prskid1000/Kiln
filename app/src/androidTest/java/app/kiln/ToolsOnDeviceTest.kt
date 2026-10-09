@@ -54,9 +54,11 @@ class ToolsOnDeviceTest {
             Attachment("font.ttf", "font/ttf", ByteArray(2048) { (it % 7).toByte() }),
         )).map { it as JsonObject }
         println("ATTACH ${blocks.map { it["type"] }}")
-        assertTrue(blocks[0]["type"].toString() == "\"image\"")
-        assertTrue(blocks[1].toString().contains("milk,2") && blocks[1].toString().contains("attachments/data.csv"))
-        assertTrue(blocks[2].toString().contains("binary file saved") && blocks[2].toString().contains("attachments/font.ttf"))
+        // An image comes with a note of where it was saved, then the picture.
+        assertTrue(blocks[0].toString().contains("attachments/mock.png"))
+        assertTrue(blocks[1]["type"].toString() == "\"image\"")
+        assertTrue(blocks[2].toString().contains("milk,2") && blocks[2].toString().contains("attachments/data.csv"))
+        assertTrue(blocks[3].toString().contains("binary file saved") && blocks[3].toString().contains("attachments/font.ttf"))
         assertTrue(File(p.dir, "attachments/mock.png").isFile && File(p.dir, "attachments/font.ttf").length() == 2048L)
         p.dir.deleteRecursively()
     }
