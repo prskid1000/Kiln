@@ -56,7 +56,8 @@ class CrashReceiver : BroadcastReceiver() {
             .setContentTitle("$label crashed").setContentText("$type: $message".take(140))
             .setStyle(NotificationCompat.BigTextStyle().bigText("$type: $message".take(600)))
             .setContentIntent(open).setAutoCancel(true).addAction(0, "Fix with Kiln", open).build()
-        runCatching { nm.notify(2000 + (name.hashCode() and 0xfff), n) }
+        // Its own id range: it overlapped the prompts' (1000+) and could replace one.
+        runCatching { nm.notify(10_000 + (name.hashCode() and 0xfff), n) }
     }
 
     companion object { const val CHANNEL = "kiln_crashes" }

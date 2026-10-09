@@ -164,6 +164,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             // ATOMIC: the body (and its finally, which releases the claim) runs even if cancelled before it starts.
             s.job = runScope.launch(start = kotlinx.coroutines.CoroutineStart.ATOMIC) {
                 // Kiln in the background: approvals and questions become actionable notifications.
+                // A leftover notification (the last run's "is ready") would make this run's prompts post silently over it.
+                app.kiln.agent.Attention.clear(ctx, name)
                 val watch = launch {
                     // Also on screen changes: a prompt raised while its chat was showing notifies once the user leaves
                     // it (it waited, unseen, with the run held).

@@ -189,7 +189,8 @@ object McpServer {
 
     private fun buildTools(): List<Tool> = runBlocking {
         // The tool set doesn't depend on which project: list it even when there are none yet.
-        val any = Graph.paths.projects.listFiles()?.firstOrNull { File(it, "kiln.json").isFile } ?: File(Graph.paths.projects, ".mcp")
+        // No project's own settings: one project's switched-off tools vanished for all (each call checks its project).
+        val any = File(Graph.paths.projects, ".mcp")
         Graph.kiln.tools(Project(any)).second
             // qa_check is bound to the project the list was built for: over MCP it would test that app, not the one asked.
             .filter { it.name !in setOf("ask_user", "subagent", "shell", "qa_check", "choose_look") }

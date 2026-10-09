@@ -67,8 +67,16 @@ object Attachments {
         while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
         val bmp = BitmapFactory.decodeByteArray(a.bytes, 0, a.bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
         val k = MAX_SIDE.toFloat() / maxOf(bmp.width, bmp.height)
-        val out = if (k < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt().coerceAtLeast(1), (bmp.height * k).toInt().coerceAtLeast(1), true) else bmp
-        val png = a.mime == "image/png" && k >= 1f && sample == 1 && a.bytes.size < 1_500_000
+        val scaled = if (k < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt().coerceAtLeast(1), (bmp.height * k).toInt().coerceAtLeast(1), true) else bmp
+        // Turned upright: cameras save portrait shots as landscape pixels plus a rotation tag, which re-encoding drops.
+        val degrees = runCatching {
+            when (android.media.ExifInterface(java.io.ByteArrayInputStream(a.bytes)).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)) {
+                android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f; android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f; else -> 0f }
+        }.getOrDefault(0f)
+        val out = if (degrees == 0f) scaled else
+            Bitmap.createBitmap(scaled, 0, 0, scaled.width, scaled.height, android.graphics.Matrix().apply { postRotate(degrees) }, true)
+        val png = a.mime == "image/png" && k >= 1f && sample == 1 && degrees == 0f && a.bytes.size < 1_500_000
         if (png) return "image/png" to Base64.getEncoder().encodeToString(a.bytes)
         val buf = ByteArrayOutputStream().also { out.compress(Bitmap.CompressFormat.JPEG, 88, it) }
         return "image/jpeg" to Base64.getEncoder().encodeToString(buf.toByteArray())
