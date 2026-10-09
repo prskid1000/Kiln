@@ -61,6 +61,35 @@ class CoreTest {
         assertEquals(hint, app.kiln.device.findNode(listOf(hint), "+"))            // no such button: fall back to text
     }
 
+    @Test fun `a KilnScreen that ignores its padding fails the lint`() {
+        fun errors(code: String): List<String> {
+            val dir = kotlin.io.path.createTempDirectory("lintpad").toFile()
+            File(dir, "src/a").mkdirs(); File(dir, "src/a/S.kt").writeText(code)
+            return app.kiln.build.Lint.run(app.kiln.build.Project(dir)).filter { it.severity == "error" }.map { it.message }
+        }
+        // Run 11: padding named and never used → the list sits under the title bar.
+        assertEquals(1, errors("fun E() {\n    KilnScreen(title = \"Expenses\") { padding ->\n        KCrudList(items = Repo.x, newItem = { X() }, title = { it.n }) { d, s -> }\n    }\n}\n").size)
+        assertEquals(1, errors("fun E() { KilnScreen(\"T\") { _ -> Text(\"x\") } }").size)
+        // Used by name, by `it`, or through content = { … }: fine.
+        assertEquals(0, errors("fun E() { KilnScreen(title = \"T\", actions = { Icon() }) { pad -> Column(Modifier.screenPadding(pad)) { Text(\"x\") } } }").size)
+        assertEquals(0, errors("fun E() { KilnScreen(\"T\") { LazyColumn(contentPadding = it) { } } }").size)
+        assertEquals(0, errors("fun E() { KilnScreen(\"T\", content = { p -> Box(Modifier.padding(p)) }) }").size)
+    }
+
+    @Test fun `no skill example ignores KilnScreen's padding`() {
+        val dir = kotlin.io.path.createTempDirectory("lintskills").toFile()
+        File("src/main/assets/skills").listFiles { f -> f.extension == "md" }!!.forEach { skill ->
+            Regex("(?s)```kotlin\\n(.*?)```").findAll(skill.readText()).forEachIndexed { i, b ->
+                File(dir, "src/${skill.nameWithoutExtension}").mkdirs()
+                File(dir, "src/${skill.nameWithoutExtension}/B$i.kt").writeText(b.groupValues[1])
+            }
+        }
+        File(dir, "src/template").mkdirs()
+        File(dir, "src/template/MainActivity.kt").writeText(File("../toolchain/templates/compose/src/MainActivity.kt").readText())
+        val bad = app.kiln.build.Lint.run(app.kiln.build.Project(dir)).filter { it.severity == "error" }
+        assertTrue(bad.joinToString("\n") { "${it.file}:${it.line} ${it.message.take(60)}" }, bad.isEmpty())
+    }
+
     @Test fun `single taps become the test_flow call the reminder shows`() {
         fun use(name: String, input: String) = app.kiln.core.obj("type" to "tool_use", "name" to name, "input" to app.kiln.core.parseJson(input))
         val steps = app.kiln.agent.AgentLoop.asFlowSteps(listOf(

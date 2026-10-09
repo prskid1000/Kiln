@@ -115,7 +115,8 @@ internal fun addImport(text: String, fq: String): String {
 
 suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: ToolContext, checkOnly: Boolean): Pair<BuildResult, String> {
     var r = builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) }
-    fun linted(b: BuildResult) = b.copy(diagnostics = b.diagnostics + app.kiln.build.Lint.run(ctx.project))
+    // Lint errors fail the build like compile errors (warnings don't).
+    fun linted(b: BuildResult) = app.kiln.build.Lint.run(ctx.project).let { l -> b.copy(ok = b.ok && l.none { it.severity == "error" }, diagnostics = b.diagnostics + l) }
     if (r.ok) return linted(r) to ""
     val unresolved = Regex("unresolved reference '([A-Za-z][A-Za-z0-9_]*)'")
     val wrongIcon = Regex("candidate 'val Icons\\.(?:(AutoMirrored)\\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\\.(\\w+): ImageVector' is inapplicable because of a receiver type mismatch")
@@ -615,9 +616,15 @@ internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.
     if (appeared.isEmpty() && gone.isEmpty() && toggled.isNotEmpty()) return toggled.take(6).joinToString(", ") + "."
     if (appeared.isEmpty() && gone.isEmpty()) {
         // Focusing a field changes nothing in the tree: say so, or the tap looks like it failed.
-        if (x != null && y != null) before.filter { "EditText" in it.cls && x in it.left..it.right && y in it.top..it.bottom }
-            .minByOrNull { (it.right - it.left) * (it.bottom - it.top) }
-            ?.let { f -> return "The text field “${f.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)." }
+        val hit = if (x != null && y != null) before.filter { "EditText" in it.cls && x in it.left..it.right && y in it.top..it.bottom }
+            .minByOrNull { (it.right - it.left) * (it.bottom - it.top) } else null
+        val focusKnown = after.any { it.focused != null }
+        val focusedNow = after.firstOrNull { it.focused == true && "EditText" in it.cls }
+        if (focusedNow != null) return "The text field “${focusedNow.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
+        if (hit != null) return if (!focusKnown) "The text field “${hit.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
+            // Run 11: the tap landed on a search bar drawn under the top bar; the bar took it.
+            else "Tapped where the text field “${hit.label().take(40).ifBlank { "field" }}” is, but it didn't take focus — something is drawn over it " +
+                "(often the top bar: is KilnScreen's padding applied to the content?). Take a screenshot to see."
         val moved = before.map { it.label() to it.top } != after.map { it.label() to it.top }
         return if (moved) "The screen scrolled or moved; same items." else "No change on screen."
     }

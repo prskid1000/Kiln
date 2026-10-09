@@ -123,6 +123,9 @@ class AgentLoop(
     /** How often this request pushed back on ending with a broken build (see the stop guard in [loop]). */
     private var stopGuards = 0
     private var unfinishedGuards = 0
+    /** The FAIL lines of the last qa_check, until one passes; null when QA hasn't failed. */
+    private var lastQaFailures: String? = null
+    private var qaGuards = 0
     private val approvalLock = kotlinx.coroutines.sync.Mutex()
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
@@ -198,7 +201,7 @@ class AgentLoop(
         if (!running.compareAndSet(expect = false, update = true)) return
         if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }
         startedAt = System.currentTimeMillis()
-        stopGuards = 0; unfinishedGuards = 0; goalChecks = 0
+        stopGuards = 0; unfinishedGuards = 0; goalChecks = 0; qaGuards = 0
         this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
         // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
         closeDanglingToolUses()
@@ -289,6 +292,17 @@ class AgentLoop(
                     .joinToString("\n").trim()
                 val open = state.todos.filter { it.status != "done" }
                 val announces = ANNOUNCES.containsMatchIn(said.takeLast(300))
+                // Failed QA guard: run 11 ended with its only qa_check failing (search), unfixed and unmentioned.
+                val qaFails = lastQaFailures
+                if (mode == Mode.BUILD && qaFails != null && qaGuards < 2 && !said.trimEnd().endsWith("?")) {
+                    qaGuards++
+                    next(Activity.Kind.NOTICE, "The last QA check failed — asking the agent to fix it or say what still doesn't work.")
+                    session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
+                        "<system-reminder>Your last qa_check did not pass:\n$qaFails\nFix these and run qa_check again (it re-tests only " +
+                        "what failed or changed). If one truly can't be fixed, tell the user plainly which criterion still fails and why. " +
+                        "Don't call the work done while QA fails.</system-reminder>")))))
+                    continue
+                }
                 if (mode == Mode.BUILD && unfinishedGuards < 2 && !said.trimEnd().endsWith("?") && (open.isNotEmpty() || announces)) {
                     unfinishedGuards++
                     next(Activity.Kind.NOTICE, if (open.isNotEmpty()) "${open.size} to-do item(s) still open — asking the agent to keep going."
@@ -329,6 +343,13 @@ class AgentLoop(
             // A passing qa_check is the finish line: run 8 kept re-testing for minutes after one.
             val qaIds = uses.filter { it.str("name") == "qa_check" }.mapNotNull { it.str("id") }.toSet()
             val qaPassed = results.any { r -> r.str("tool_use_id") in qaIds && r["is_error"] == null }
+            // Remember a failing QA verdict (its FAIL lines) until a later qa_check passes.
+            results.filter { r -> r.str("tool_use_id") in qaIds }.forEach { r ->
+                lastQaFailures = if (r["is_error"] == null) null else {
+                    val text = (r["content"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.str("text") }?.joinToString("\n").orEmpty()
+                    app.kiln.tools.qaResultLines(text).filter { "FAIL" in it.take(12) }.joinToString("\n").ifBlank { text.take(600) }
+                }
+            }
             val finish = if (!qaPassed) null else obj("type" to "text", "text" to "<system-reminder>qa_check passed every criterion. " +
                 "Stop testing now: tick off the remaining todos, and finish with a short summary of what was built and how to use it. " +
                 "Don't re-run qa_check or re-test what it verified; change code only if the user asks.</system-reminder>")

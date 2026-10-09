@@ -205,6 +205,7 @@ internal object KilnInspector {
             // Chips, segments and tabs are "selected" rather than toggled: report both as checked.
             .append("\" checkable=\"").append(toggle != null || selected != null)
             .append("\" checked=\"").append(toggle == ToggleableState.On || selected == true)
+            .append("\" focused=\"").append(c.getOrNull(SemanticsProperties.Focused) == true)
             .append("\" clickable=\"").append(SemanticsActions.OnClick in c)
             .append("\" enabled=\"").append(SemanticsProperties.Disabled !in c)
             .append("\" scrollable=\"").append(SemanticsActions.ScrollBy in c)

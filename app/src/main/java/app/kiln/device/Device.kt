@@ -13,6 +13,8 @@ data class UiNode(
     val text: String, val desc: String, val id: String, val cls: String,
     val clickable: Boolean, val scrollable: Boolean, val checked: Boolean?, val enabled: Boolean,
     val left: Int, val top: Int, val right: Int, val bottom: Int,
+    /** Has input focus (a text field being typed into); null when the screen data doesn't say (apps on an older kit). */
+    val focused: Boolean? = null,
 ) {
     val cx get() = (left + right) / 2
     val cy get() = (top + bottom) / 2
@@ -265,9 +267,9 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
                 clickable = e.getAttribute("clickable") == "true", scrollable = e.getAttribute("scrollable") == "true",
                 checked = if (e.getAttribute("checkable") == "true") e.getAttribute("checked") == "true" else null,
                 enabled = e.getAttribute("enabled") == "true",
-                left = l.toInt(), top = t.toInt(), right = rr.toInt(), bottom = b.toInt(),
+                left = l.toInt(), top = t.toInt(), right = rr.toInt(), bottom = b.toInt(), focused = e.getAttribute("focused").takeIf { it.isNotEmpty() }?.let { it == "true" },
             )
-            if (n.text.isNotBlank() || n.desc.isNotBlank() || n.clickable || n.scrollable || n.checked != null) out += n
+            if (n.text.isNotBlank() || n.desc.isNotBlank() || n.clickable || n.scrollable || n.checked != null || n.focused == true || "EditText" in n.cls) out += n
         }
         return out
     }
