@@ -189,13 +189,13 @@ fun ChatTab(vm: KilnVM, ps: ProjectState) {
             KChip("Try 3 ways", tryThree) { tryThree = !tryThree; if (tryThree) planFirst = false }
         }
         val stopping by ps.stopping.collectAsStateWithLifecycle()
-        Composer(running, stopping, l?.startedAt ?: 0L, ps.draft, hint = when {
+        Composer(running, stopping, l?.startedAt ?: 0L, ps.draft, ps.attachments, hint = when {
                 running -> "Add to what it's doing…"
                 planFirst -> "Describe the app — you'll get a plan first"
                 feed.isEmpty() -> "Describe what to build…"
                 else -> "Ask for a change…" },
             onSend = { t, files ->
-                if (tryThree && !running && t.isNotBlank()) { vm.bestOf(ps.project.name, t, 3); tryThree = false; return@Composer }
+                if (tryThree && !running && t.isNotBlank() && files.isEmpty()) { vm.bestOf(ps.project.name, t, 3); tryThree = false; return@Composer }
                 vm.send(ps.project.name, t, files,
                     mode = if (planFirst) app.kiln.agent.AgentLoop.Mode.PLAN else app.kiln.agent.AgentLoop.Mode.BUILD,
                     goal = if (untilVerified) "The request below works on the device, verified with run_app / ui_tree / tap:\n$t" else null)
@@ -625,9 +625,10 @@ private fun Prompts(loop: AgentLoop) {
 }
 
 @Composable
-private fun Composer(running: Boolean, stopping: Boolean, runStartedAt: Long, draft: kotlinx.coroutines.flow.MutableStateFlow<String?>, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
-    var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }   // survives rotation and tab switches
-    val files = remember { androidx.compose.runtime.mutableStateListOf<app.kiln.agent.Attachment>() }
+private fun Composer(running: Boolean, stopping: Boolean, runStartedAt: Long, draft: kotlinx.coroutines.flow.MutableStateFlow<String?>,
+                     files: MutableList<app.kiln.agent.Attachment>, hint: String, onSend: (String, List<app.kiln.agent.Attachment>) -> Unit, onStop: () -> Unit) {
+    // Survives rotation, and tab switches through the tab's saveable state; picked files live in the project's state.
+    var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     val pick = rememberAttachmentPicker { files += it }
     val pending by draft.collectAsStateWithLifecycle()
     LaunchedEffect(pending) { pending?.let { text = it + text; draft.value = null } }

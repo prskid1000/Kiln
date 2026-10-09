@@ -39,6 +39,12 @@ class ProjectState(val project: Project) {
     /** Stop was tapped and the run is winding down. */
     val stopping = MutableStateFlow(false)
     internal var job: Job? = null
+    /** The file open in the Files tab with its unsaved edits (outlives tab switches and rotation). */
+    internal val editor = androidx.compose.runtime.mutableStateOf<EditorBuffer?>(null)
+    /** Files picked in the composer, not sent yet. */
+    val attachments = androidx.compose.runtime.mutableStateListOf<app.kiln.agent.Attachment>()
+    /** Claimed between "start a run" and the run's end: two quick sends can't both start one. */
+    internal val starting = java.util.concurrent.atomic.AtomicBoolean(false)
     // Rule proposals the user saved or dismissed (activity ids).
     val decidedRules = MutableStateFlow<Set<Int>>(emptySet())
     // Text to put in the composer (an element picked in the preview).
@@ -69,7 +75,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
      */
     companion object Runs {
         private val states = HashMap<String, ProjectState>()
-        private val runScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+        internal val runScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
         /** Agent runs in flight across all projects; the foreground service lives while > 0. */
         private val active = java.util.concurrent.atomic.AtomicInteger()
 
@@ -94,17 +100,19 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
          * Start an agent run on a project — from the chat, or from a schedule with no screen at all.
          * Returns why it couldn't start, or null. [freshChat] starts a new chat for it.
          */
-        suspend fun startRun(ctx: android.content.Context, name: String, text: String,
+        suspend fun startRun(ctx0: android.content.Context, name: String, text: String,
                              attachments: List<app.kiln.agent.Attachment> = emptyList(),
                              mode: app.kiln.agent.AgentLoop.Mode = app.kiln.agent.AgentLoop.Mode.BUILD, goal: String? = null,
                              freshChat: Boolean = false, onFinish: () -> Unit = {}): String? {
             if (Graph.toolchain.state.value !is Toolchain.State.Ready) return "The build tools are still setting up — try again in a moment"
+            // The run outlives any screen: hold the application, never an Activity.
+            val ctx = ctx0.applicationContext
             val s = projectState(name)
-            val l = s.loop.value?.takeIf { !freshChat } ?: runCatching { Graph.kiln.newSession(s.project) }.getOrElse { return it.message }
-                .also { s.loop.value = it }
-            // One run per project: a second send while it works would be dropped by the loop
-            // and (before) stopped the foreground service under the live run.
-            if (l.running.value) return "Kiln is still working on this app — wait, or tap Stop"
+            // One run per project, claimed atomically: two quick sends both passed a running check (the loop sets
+            // `running` only once it starts), and Stop then cancelled the loser's finished job.
+            if (!s.starting.compareAndSet(false, true)) return "Kiln is still working on this app — wait, or tap Stop"
+            val l = s.loop.value?.takeIf { !freshChat } ?: runCatching { Graph.kiln.newSession(s.project) }
+                .getOrElse { s.starting.set(false); return it.message }.also { s.loop.value = it }
             active.incrementAndGet()
             ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java))
             s.job = runScope.launch {
@@ -119,6 +127,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                     app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
                     s.stopping.value = false
+                    s.starting.set(false)
                     if (active.decrementAndGet() == 0) {
                         ctx.stopService(Intent(ctx, RunService::class.java))
                         // The last run is over: the user's crash dialogs come back.
@@ -185,7 +194,12 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         if (pkg in installed.value) Graph.device.uninstall(pkg)
         // Its secrets go with it.
         runCatching { val p = Project(File(Graph.paths.projects, name)); app.kiln.build.AppSecrets.names(p).forEach { Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, it), null) } }
-        app.kiln.agent.Attempts.list(Graph.paths.projects, name).forEach { runCatching { Graph.device.uninstall(it.meta().`package`) }; it.dir.deleteRecursively() }
+        app.kiln.agent.Attempts.list(Graph.paths.projects, name).forEach { t ->
+            // Its attempts' runs stop first (they wrote into the deleted folders), and their state goes with them.
+            synchronized(states) { states.remove(t.name) }?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
+            runCatching { Graph.device.uninstall(t.meta().`package`) }; t.dir.deleteRecursively()
+        }
+        forgetAttempts(name)
         File(Graph.paths.projects, name).deleteRecursively()
         Session.list(Graph.paths.sessions, name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
         refresh()

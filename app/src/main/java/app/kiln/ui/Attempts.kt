@@ -50,7 +50,8 @@ fun KilnVM.attempts(name: String): MutableStateFlow<List<String>> = attemptLists
     MutableStateFlow(Attempts.list(Graph.paths.projects, name).map { it.name })
 }
 
-fun KilnVM.bestOf(name: String, request: String, n: Int) = viewModelScope.launch(Dispatchers.IO) {
+// In the runs' scope: Back on Android 11 finishes the activity and clears the ViewModel, which stopped attempts 2..n.
+fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launch {
     val s = state(name)
     if (s.loop.value?.running?.value == true) { message.value = "Wait for the current run to finish"; return@launch }
     discardAttempts(name).join()
@@ -70,20 +71,26 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = viewModelScope.launch
 fun KilnVM.keepAttempt(name: String, attempt: String) = viewModelScope.launch(Dispatchers.IO) {
     val s = state(name)
     val chosen = Attempts.list(Graph.paths.projects, name).firstOrNull { it.name == attempt } ?: return@launch
+    // Its label is read before discarding: the discard deletes the chosen copy too.
+    val label = runCatching { chosen.meta().label.substringAfterLast("· ") }.getOrDefault(attempt)
     runCatching { Attempts.adopt(s.project, chosen) }
         .onSuccess { cp -> discardAttempts(name).join(); IconCache.version.value++
-            message.value = "Kept ${chosen.meta().label.substringAfterLast("· ")}. Run it to install; checkpoint \"$cp\" has the old version." }
+            message.value = "Kept $label. Run it to install; checkpoint \"$cp\" has the old version." }
         .onFailure { message.value = "Couldn't keep it: ${it.message}" }
 }
 
 fun KilnVM.discardAttempts(name: String) = viewModelScope.launch(Dispatchers.IO) {
     for (t in Attempts.list(Graph.paths.projects, name)) {
-        state(t.name).job?.cancel()
+        // Wait for its run to stop: it would keep writing into the folder being deleted.
+        state(t.name).job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
         runCatching { Graph.device.uninstall(t.meta().`package`) }
     }
     Attempts.discard(Graph.paths.projects, name)
     attempts(name).value = emptyList()
 }
+
+/** Forget a deleted project's attempts: a new project with the same name must not show them. */
+internal fun forgetAttempts(name: String) { attemptLists.remove(name) }
 
 /** "3 attempts" above the composer while there are attempts to compare. */
 @Composable

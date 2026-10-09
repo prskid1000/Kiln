@@ -40,7 +40,8 @@ suspend fun KilnVM.previewPick(name: String, x: Int, y: Int): Picked? {
         .flatMap { listOf(it.text, it.desc) }.filter { it.isNotBlank() }.distinct()
     val own = listOf(node.text, node.desc).filter { it.isNotBlank() }
     val label = own.firstOrNull() ?: inside.take(4).joinToString(" · ").ifBlank { node.cls.substringAfterLast('.') }
-    return Picked(node, findSource(name, own.ifEmpty { inside.take(4) }), label)
+    // Reads every source file: off the main thread (the pick runs in a UI scope).
+    return Picked(node, kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { findSource(name, own.ifEmpty { inside.take(4) }) }, label)
 }
 
 private fun KilnVM.findSource(name: String, texts: List<String>): List<SourceHit> {
@@ -59,7 +60,10 @@ private fun KilnVM.findSource(name: String, texts: List<String>): List<SourceHit
  * Change a piece of UI text directly in the source — no model, no credits — then rebuild,
  * reinstall and reopen the app on the hidden display. Returns an error, or null.
  */
-suspend fun KilnVM.quickEditText(name: String, hit: SourceHit, old: String, new: String): String? {
+suspend fun KilnVM.quickEditText(name: String, hit: SourceHit, old: String, new: String): String? =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { quickEdit(name, hit, old, new) }   // file IO and the build: never on Main
+
+private suspend fun KilnVM.quickEdit(name: String, hit: SourceHit, old: String, new: String): String? {
     val s = state(name)
     if (s.loop.value?.running?.value == true) return "Kiln is working on this app — wait for it to finish"
     val f = runCatching { s.project.resolveWritable(hit.path) }.getOrNull() ?: return "File not found"

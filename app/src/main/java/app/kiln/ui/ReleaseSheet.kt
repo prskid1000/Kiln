@@ -107,7 +107,7 @@ private fun PlaySection(vm: KilnVM, ps: ProjectState, versionName: String, versi
     androidx.compose.runtime.LaunchedEffect(Unit) { email = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.playAccount() } }
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val json = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { String(it.readNBytes(65_536)) } }.getOrNull()
+        val json = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { String(it.readBytes().take(65_536).toByteArray()) } }.getOrNull()
         vm.savePlayKey(json ?: "").onSuccess { email = it; error = null }.onFailure { error = it.message }
     }
     Column(Modifier.fillMaxWidth().vCard(N.shapeLg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

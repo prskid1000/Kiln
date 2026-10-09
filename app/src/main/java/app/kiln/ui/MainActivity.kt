@@ -146,7 +146,8 @@ private fun App(vm: KilnVM) {
                 ask.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
     }
-    LaunchedEffect(message) { message?.let { vm.message.value = null; snack.showSnackbar(it) } }
+    // Collected, not keyed: clearing the message changed the key and cancelled the snackbar a frame after it showed.
+    LaunchedEffect(Unit) { vm.message.collect { m -> if (m != null) { vm.message.value = null; snack.showSnackbar(m) } } }
     val openRequest by vm.openRequest.collectAsStateWithLifecycle()
     LaunchedEffect(openRequest) {
         val p = openRequest ?: return@LaunchedEffect
@@ -410,13 +411,17 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                 }
             }
         }
+        val tabStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
         PillTabs(listOf(Icons.Rounded.ChatBubbleOutline to "Chat", Icons.Rounded.Folder to "Files", Icons.AutoMirrored.Rounded.ReceiptLong to "Logs"),
             tab, Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { tab = it }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (tab) {
-                0 -> ChatTab(vm, ps)
-                1 -> FilesTab(vm, ps)
-                else -> LogsTab(vm, ps) { fix -> tab = 0; vm.send(name, fix) }
+            // Each tab keeps its saveable state (the composer's draft, list scroll) while another is shown.
+            tabStates.SaveableStateProvider(tab) {
+                when (tab) {
+                    0 -> ChatTab(vm, ps)
+                    1 -> FilesTab(vm, ps)
+                    else -> LogsTab(vm, ps) { fix -> tab = 0; vm.send(name, fix) }
+                }
             }
         }
     }

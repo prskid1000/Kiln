@@ -63,7 +63,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** What the editor has open: a source file in the project, or a file in the app's private storage. */
-private sealed interface Open {
+internal sealed interface Open {
     val path: String
     data class Source(val file: File, override val path: String) : Open
     data class Data(override val path: String) : Open
@@ -77,9 +77,10 @@ private sealed interface Open {
 @Composable
 fun FilesTab(vm: KilnVM, ps: ProjectState) {
     var root by remember { mutableIntStateOf(0) }
-    var open by remember { mutableStateOf<Open?>(null) }
-    val o = open
-    if (o != null) { Editor(vm, ps, o) { open = null }; return }
+    // The open file and its unsaved text live in the project's state: a tab switch or rotation keeps the edits.
+    val buffer by ps.editor
+    val b = buffer
+    if (b != null) { Editor(vm, ps, b) { ps.editor.value = null }; return }
     var uploads by remember { mutableIntStateOf(0) }
     var dest by remember { mutableStateOf("assets") }
     var menu by remember { mutableStateOf(false) }
@@ -108,7 +109,7 @@ fun FilesTab(vm: KilnVM, ps: ProjectState) {
                 }
             }
         }
-        if (root == 0) SourceList(ps, uploads) { open = it } else DataList(vm, ps, uploads) { open = it }
+        if (root == 0) SourceList(ps, uploads) { ps.editor.value = EditorBuffer(it) } else DataList(vm, ps, uploads) { ps.editor.value = EditorBuffer(it) }
     }
 }
 
@@ -216,12 +217,13 @@ private fun looksBinary(b: ByteArray) = b.take(4096).any { it == 0.toByte() }
 
 /** Code editor: line-number gutter, no wrapping, save when dirty. */
 @Composable
-private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
-    var original by remember(o) { mutableStateOf<String?>(null) }
-    var binary by remember(o) { mutableStateOf(false) }
-    // When the source was read: the agent may write the file while it's open here, and a save must not undo that.
-    var readAt by remember(o) { mutableStateOf(0L) }
-    var text by remember(o) { mutableStateOf("") }
+private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> Unit) {
+    val o = b.open
+    var original by b.original
+    var binary by b.binary
+    var readAt by b.readAt
+    var text by b.text
+    var tooBig by b.tooBig
     var confirmDiscard by remember { mutableStateOf(false) }
     // System Back closes the editor (not the whole project), and never drops unsaved edits silently.
     val onClose = { if (original != null && text != original) confirmDiscard = true else close() }
@@ -233,10 +235,15 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
         dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing", color = N.textLabel) } })
     val scope = rememberCoroutineScope()
     LaunchedEffect(o) {
+        if (original != null) return@LaunchedEffect   // reopened after a tab switch: keep the edits
         val bytes = withContext(Dispatchers.IO) {
-            when (o) { is Open.Source -> runCatching { readAt = o.file.lastModified(); o.file.readBytes() }.getOrNull(); is Open.Data -> Graph.device.readData(ps.pkg, o.path) }
+            when (o) {
+                is Open.Source -> runCatching { readAt = o.file.lastModified(); if (o.file.length() > MAX_EDIT) ByteArray(0).also { tooBig = true } else o.file.readBytes() }.getOrNull()
+                is Open.Data -> Graph.device.readData(ps.pkg, o.path)?.also { if (it.size > MAX_EDIT) tooBig = true }
+            }
         } ?: ByteArray(0)
-        binary = looksBinary(bytes)
+        // A multi-MB file in a text field freezes the UI: show it as not editable here.
+        binary = tooBig || looksBinary(bytes)
         val raw = if (binary) "" else bytes.decodeToString()
         // One-line JSON (KStore, prefs exports) is unreadable on a phone: open it pretty-printed.
         text = if (o.path.endsWith(".json") && '\n' !in raw.trim())
@@ -269,6 +276,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, o: Open, close: () -> Unit) {
             original == null -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(22.dp), color = N.accent, strokeWidth = 2.dp)
             }
+            binary && tooBig -> EmptyState(iconFor(o.path), "Too large", "This file is over 1 MB, too big to edit here.")
             binary -> EmptyState(iconFor(o.path), "Binary file", "This file isn't text, so it can't be edited here.")
             else -> {
                 val lines = text.count { it == '\n' } + 1
@@ -304,10 +312,23 @@ private suspend fun upload(ps: ProjectState, dest: String, files: List<app.kiln.
         if (dest == "data:files") {
             if (Graph.device.writeData(ps.pkg, "files/$name", f.bytes).ok) n++ else notes += "${f.name}: write failed"
         } else {
-            val out = ps.project.resolve("$dest/$name")
-            out.parentFile?.mkdirs(); out.writeBytes(f.bytes); n++
+            // One bad file (a name that's a folder, a full disk) is a note, not a crash.
+            runCatching { val out = ps.project.resolve("$dest/$name"); out.parentFile?.mkdirs(); out.writeBytes(f.bytes) }
+                .onSuccess { n++ }.onFailure { notes += "${f.name}: ${it.message}" }
         }
     }
     val where = if (dest == "data:files") "the app's files/" else "$dest/"
     return "Uploaded $n file${if (n == 1) "" else "s"} to $where" + (if (notes.isEmpty()) "" else " — " + notes.joinToString())
+}
+
+/** Files over this size open as "too large" instead of into the editor. */
+private const val MAX_EDIT = 1_000_000L
+
+/** A file open in the editor and its unsaved state, kept in [ProjectState] so it outlives the tab. */
+internal class EditorBuffer(val open: Open) {
+    val text = androidx.compose.runtime.mutableStateOf("")
+    val original = androidx.compose.runtime.mutableStateOf<String?>(null)
+    val binary = androidx.compose.runtime.mutableStateOf(false)
+    val tooBig = androidx.compose.runtime.mutableStateOf(false)
+    val readAt = androidx.compose.runtime.mutableStateOf(0L)
 }

@@ -55,7 +55,13 @@ fun ChangesSheet(vm: KilnVM, ps: ProjectState, index: Int, onDismiss: () -> Unit
                             Text(ch.path, style = T.mono.copy(color = N.text), modifier = Modifier.weight(1f))
                             KButton("Revert") { vm.revertFile(ps.project.name, index, ch.path); tick++ }
                         }
-                        if (open == ch.path) DiffView(vm.turnDiff(ps.project.name, index, ch.path))
+                        if (open == ch.path) {
+                            // Reads both versions and runs an LCS: computed off the main thread, once per open/revert.
+                            val diff by androidx.compose.runtime.produceState<List<Pair<Char, String>>?>(null, ch.path, tick) {
+                                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { vm.turnDiff(ps.project.name, index, ch.path) }
+                            }
+                            diff?.let { DiffView(it) }
+                        }
                     }
                 }
             }
