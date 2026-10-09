@@ -43,7 +43,9 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
     val owned: StateFlow<Set<String>> = _owned
     private val details = HashMap<String, ProductDetails>()
     /** Called once per completed consumable purchase (grant the coins, credits, …). */
-    var onConsumed: (productId: String) -> Unit = {}
+    // Null until the app sets it: a consumable is only consumed once something will grant it (consumed with nobody
+    // listening, the coins were lost for good — Play no longer lists a consumed purchase).
+    var onConsumed: ((productId: String) -> Unit)? = null
 
     private val client: BillingClient = BillingClient.newBuilder(context.applicationContext)
         .setListener { result, purchases -> if (result.responseCode == BillingClient.BillingResponseCode.OK) purchases?.let { handlePending(it) } }
@@ -116,8 +118,9 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
         for (p in all.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }.distinctBy { it.purchaseToken }) {
             val ids = p.products
             if (ids.any { it in consumable }) {
+                val grant = onConsumed ?: continue   // left for a later refresh, once the app is listening
                 val r = client.consumePurchase(ConsumeParams.newBuilder().setPurchaseToken(p.purchaseToken).build())
-                if (r.billingResult.responseCode == BillingClient.BillingResponseCode.OK) ids.forEach(onConsumed)
+                if (r.billingResult.responseCode == BillingClient.BillingResponseCode.OK) ids.forEach(grant)
             } else {
                 if (!p.isAcknowledged) client.acknowledgePurchase(AcknowledgePurchaseParams.newBuilder().setPurchaseToken(p.purchaseToken).build())
                 owned += ids
@@ -129,9 +132,10 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
 
 /** A [KBilling] for this screen, disconnected from Play when it leaves composition. */
 @androidx.compose.runtime.Composable
-fun rememberBilling(consumable: Set<String> = emptySet()): KBilling {
+fun rememberBilling(consumable: Set<String> = emptySet(), onConsumed: ((productId: String) -> Unit)? = null): KBilling {
     val context = androidx.compose.ui.platform.LocalContext.current
     val billing = androidx.compose.runtime.remember(consumable) { KBilling(context, consumable) }
+    billing.onConsumed = onConsumed ?: billing.onConsumed
     androidx.compose.runtime.DisposableEffect(billing) { onDispose { billing.close() } }
     return billing
 }

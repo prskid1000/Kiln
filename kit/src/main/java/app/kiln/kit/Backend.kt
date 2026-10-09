@@ -45,7 +45,7 @@ private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row
     // row's id, owner or creation time (or fail on NOT NULL). Other fields' nulls go through, so clearing works.
     val serverFilled = setOf("id", "created_at", "updated_at", "user_id")
     fun placeholder(k: String, v: kotlinx.serialization.json.JsonElement) =
-        (k in serverFilled && v is kotlinx.serialization.json.JsonNull) ||
+        (k in serverFilled && (v is kotlinx.serialization.json.JsonNull || (v as? kotlinx.serialization.json.JsonPrimitive)?.content == "")) ||
         (v as? kotlinx.serialization.json.JsonPrimitive)?.content.let { c ->
             (k == "id" && (c == "0" || c == "")) || (k in setOf("created_at", "updated_at") && c == "") }
     return JsonObject(o.filterNot { (k, v) -> placeholder(k, v) }).toString()

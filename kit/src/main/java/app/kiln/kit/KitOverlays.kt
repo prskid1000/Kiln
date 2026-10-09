@@ -249,7 +249,7 @@ fun KGrid(modifier: Modifier = Modifier, columns: Int? = 2, minCellWidth: Dp = 1
 
 // ---------------------------------------------------------------- charts
 
-/** Bar chart: one bar per value, labels under them. */
+/** Bar chart: one bar per value, labels under them. Values are 0 or more (show losses with KLineChart, or as a separate series). */
 @Composable
 fun KBarChart(values: List<Float>, labels: List<String> = emptyList(), modifier: Modifier = Modifier, height: Dp = ks(160),
               tone: KTone = KTone.Accent, highlight: Int? = null, valueFormat: ((Float) -> String)? = null, color: Color? = null) {

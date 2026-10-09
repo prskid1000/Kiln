@@ -205,7 +205,7 @@ class KStoredState<T>(private val store: KStore<T>, private val current: State<T
 /**
  * Small typed settings (key → value) in SharedPreferences, as Compose state.
  * `var dark by rememberPref("dark", true)`; `var name by rememberPref("name", "")`.
- * Supports String, Int, Long, Float and Boolean.
+ * Supports String, Int, Long, Float, Double and Boolean.
  */
 @Composable
 fun <T> rememberPref(key: String, default: T): MutableState<T> {
@@ -226,6 +226,8 @@ private class KPref<T>(private val prefs: SharedPreferences, private val key: St
         is Long -> prefs.getLong(key, default) as T
         is Float -> prefs.getFloat(key, default) as T
         is Boolean -> prefs.getBoolean(key, default) as T
+        // `2.0` is a Double in Kotlin (it crashed the screen): stored as its raw bits.
+        is Double -> java.lang.Double.longBitsToDouble(prefs.getLong(key, java.lang.Double.doubleToRawLongBits(default))) as T
         else -> error("rememberPref supports String, Int, Long, Float, Boolean — use rememberStored for other types")
     }
     private val inner = mutableStateOf(read())
@@ -234,7 +236,8 @@ private class KPref<T>(private val prefs: SharedPreferences, private val key: St
         set(v) {
             inner.value = v
             prefs.edit().apply { when (v) { is String -> putString(key, v); is Int -> putInt(key, v); is Long -> putLong(key, v)
-                is Float -> putFloat(key, v); is Boolean -> putBoolean(key, v) } }.apply()
+                is Float -> putFloat(key, v); is Boolean -> putBoolean(key, v)
+                is Double -> putLong(key, java.lang.Double.doubleToRawLongBits(v)) } }.apply()
         }
     override fun component1(): T = value
     override fun component2(): (T) -> Unit = { value = it }
@@ -292,7 +295,9 @@ fun rememberFileSaver(mime: String, onCreated: (Uri) -> Unit): (String) -> Unit 
 @Composable
 fun rememberImagePicker(max: Int = 1, onPicked: (List<Uri>) -> Unit): () -> Unit {
     val one = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { it?.let { u -> onPicked(listOf(u)) } }
-    val many = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(maxOf(2, max))) { if (it.isNotEmpty()) onPicked(it) }
+    // Clamped to what the system picker allows (a larger max, meant as "any number", crashed on pick).
+    val limit = if (android.os.Build.VERSION.SDK_INT >= 33) android.provider.MediaStore.getPickImagesMaxLimit() else 100
+    val many = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(maxOf(2, minOf(max, limit)))) { if (it.isNotEmpty()) onPicked(it) }
     val request = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
     return { if (max <= 1) one.launch(request) else many.launch(request) }
 }
@@ -552,7 +557,8 @@ object KLocation {
 object KReminder {
     fun schedule(context: Context, id: String, after: Duration, title: String, text: String) {
         val work = OneTimeWorkRequestBuilder<KReminderWorker>().setInitialDelay(after.toMillis(), TimeUnit.MILLISECONDS)
-            .setInputData(workDataOf("title" to title, "text" to text)).build()
+            // Its own notification id per reminder: by title, reminders sharing one ("Task due") replaced each other.
+            .setInputData(workDataOf("title" to title, "text" to text, "nid" to id.hashCode())).build()
         WorkManager.getInstance(context).enqueueUniqueWork("kreminder-$id", androidx.work.ExistingWorkPolicy.REPLACE, work)
     }
     /** At a clock time today (or tomorrow if it has passed). */
@@ -568,7 +574,8 @@ object KReminder {
 /** Posts a [KReminder] (internal; WorkManager creates it by name). */
 class KReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        KNotify.post(applicationContext, inputData.getString("title") ?: "Reminder", inputData.getString("text") ?: "")
+        val title = inputData.getString("title") ?: "Reminder"
+        KNotify.post(applicationContext, title, inputData.getString("text") ?: "", id = inputData.getInt("nid", title.hashCode()))
         return Result.success()
     }
 }
@@ -638,7 +645,9 @@ object KFormat {
     fun date(date: LocalDate, formatter: DateTimeFormatter): String = date.format(formatter)
     /** An ISO date string ("2026-10-08", or the date part of "2026-10-08T09:30"); shown as-is if it isn't one. */
     fun date(iso: String, pattern: String = "d MMM yyyy"): String =
-        runCatching { date(LocalDate.parse(iso.take(10)), pattern) }.getOrDefault(iso)
+        // A timestamp with an offset is shown as its local date ("…T21:30+00:00" is the next day in India).
+        runCatching { date(java.time.OffsetDateTime.parse(iso).atZoneSameInstant(ZoneId.systemDefault()).toLocalDate(), pattern) }
+            .recoverCatching { date(LocalDate.parse(iso.take(10)), pattern) }.getOrDefault(iso)
     fun dateTime(millis: Long, pattern: String = "d MMM, HH:mm"): String =
         Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern(pattern))
     /** "just now", "5 min ago", "yesterday", "3 days ago", or a date. */
