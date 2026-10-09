@@ -251,7 +251,11 @@ class AgentLoop(
             if (mode == Mode.PLAN) plan.value = session.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")?.trim()
         } catch (e: CancellationException) {
-            _feed.value = _feed.value.map { if (it.status == Activity.Status.RUNNING) it.copy(status = Activity.Status.STOPPED) else it }
+            _feed.update { l -> l.map { a ->
+                // Helpers' nested steps stop too (their own loop was cancelled before it could say so).
+                val kids = a.children.map { c -> if (c.status == Activity.Status.RUNNING) c.copy(status = Activity.Status.STOPPED) else c }
+                (if (a.status == Activity.Status.RUNNING) a.copy(status = Activity.Status.STOPPED) else a).copy(children = kids)
+            } }
             stoppedWith("Stopped.")
             closeDanglingToolUses()
             throw e
@@ -475,7 +479,8 @@ class AgentLoop(
                 val mark = _feed.value.size
                 // Only the model's own output (text, thinking): a message the user sent meanwhile stays in the chat.
                 fun dropPartial() {
-                    if (_feed.value.size > mark) _feed.value = _feed.value.take(mark) + _feed.value.drop(mark).filter { it.kind == Activity.Kind.USER }
+                    // Atomic: a message steer() adds at this moment must not be overwritten.
+                    _feed.update { l -> if (l.size > mark) l.take(mark) + l.drop(mark).filter { it.kind == Activity.Kind.USER } else l }
                 }
                 try {
                     return stream(adapter, profile, model, cfg)
@@ -646,6 +651,8 @@ class AgentLoop(
         // Hooks: "postTool:<name>" → run those tools and append their output (SPEC §3).
         if (!r.isError) for (h in cfg.hooks["postTool:$name"].orEmpty()) {
             val ht = byName[h] ?: continue
+            // A plan-mode request changes nothing, hooks included.
+            if (mode == Mode.PLAN && Trait.READ_ONLY !in ht.traits) continue
             // Hooks are calls too: they get no more rights than the model would.
             if (registry.policy(ht, cfg.approval) != Policy.ALLOW && h !in sessionAllowed) {
                 r = r.copy(text = r.text + "\n\n[hook $h skipped: it needs approval]"); continue
@@ -695,6 +702,8 @@ class AgentLoop(
             onFeed: ((List<Activity>) -> Unit)? = null,
             readOnly: Boolean = false,
         ): Triple<String, Usage, Double> = kotlinx.coroutines.coroutineScope {
+            // Scratch sessions left by a helper the process died during: cleared once they're a day old.
+            File(sessionsRoot, ".sub").listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }?.forEach { it.deleteRecursively() }
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
             val loop = AgentLoop(project, s, providers, registry, tools, settings, role).also { it.headless = true; it.inheritReadOnly = readOnly }
             fun answer() = s.messages.lastOrNull { it.role == "assistant" }?.content
@@ -772,6 +781,8 @@ internal fun isNetworkFailure(e: Throwable): Boolean {
     // Permanent: a wrong host name, a TLS problem, a malformed URL — retrying won't help, the fallback model might.
     if (chain.any { it is java.net.UnknownHostException || it is javax.net.ssl.SSLException || it is java.net.MalformedURLException })
         return false
+    // A full disk while saving the turn isn't the network: re-streaming would bill again and duplicate the turn.
+    if (chain.any { Regex("(?i)no space left|ENOSPC|read-only file system").containsMatchIn(it.message.orEmpty()) }) return false
     return chain.any { c ->
         c is java.io.IOException || Regex("(?i)stream (failed|was reset|closed)|connection (refused|reset|closed)|timeout|unexpected end").containsMatchIn(c.message.orEmpty())
     }

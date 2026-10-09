@@ -37,14 +37,18 @@ class Session private constructor(val dir: File, meta: SessionMeta, messages: Li
         private set
 
     @Synchronized fun append(m: Msg) {
-        _messages += m
-        // Synced, so a crash right after can't leave the turn half-written.
+        // Synced, so a crash right after can't leave the turn half-written. Written before it joins the history:
+        // a failed write (full disk) must not leave it in memory only, where a retry appends it again.
         java.io.FileOutputStream(log, true).use { o -> o.write((KJ.encodeToString(Msg.serializer(), m) + "\n").toByteArray()); o.fd.sync() }
+        _messages += m
     }
 
     @Synchronized fun updateMeta(f: (SessionMeta) -> SessionMeta) {
         meta = f(meta)
-        metaFile.writeText(KJ.encodeToString(SessionMeta.serializer(), meta))
+        // Written aside and renamed over: a crash mid-write left meta.json empty and the chat gone from history.
+        val tmp = File(dir, "meta.json.tmp")
+        java.io.FileOutputStream(tmp).use { o -> o.write(KJ.encodeToString(SessionMeta.serializer(), meta).toByteArray()); o.fd.sync() }
+        if (!tmp.renameTo(metaFile)) { metaFile.writeText(tmp.readText()); tmp.delete() }
     }
 
     val spillDir: File get() = File(dir, "spill").apply { mkdirs() }

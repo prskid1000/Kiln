@@ -54,7 +54,14 @@ class SettingsStore(private val dir: File) {
 
     fun update(f: (Settings) -> Settings) {
         value = f(value)
-        file.writeText(KJ.encodeToString(Settings.serializer(), value))
+        writeAtomic(file, KJ.encodeToString(Settings.serializer(), value))
+    }
+
+    /** Written aside and renamed over: a crash mid-write must not leave the settings (or spend) empty. */
+    private fun writeAtomic(f: File, text: String) {
+        val tmp = File(f.path + ".tmp")
+        java.io.FileOutputStream(tmp).use { o -> o.write(text.toByteArray()); o.fd.sync() }
+        if (!tmp.renameTo(f)) { f.writeText(text); tmp.delete() }
     }
 
     @Serializable private data class Spend(val day: String, val usd: Double)
@@ -65,7 +72,7 @@ class SettingsStore(private val dir: File) {
     // Synchronized: runs on two projects at once would otherwise lose each other's spend (read-modify-write).
     @Synchronized fun addSpend(usd: Double) {
         if (usd <= 0) return
-        spendFile.writeText(KJ.encodeToString(Spend.serializer(), Spend(LocalDate.now().toString(), spentToday() + usd)))
+        writeAtomic(spendFile, KJ.encodeToString(Spend.serializer(), Spend(LocalDate.now().toString(), spentToday() + usd)))
     }
 }
 
