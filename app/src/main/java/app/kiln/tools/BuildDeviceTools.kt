@@ -768,9 +768,9 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
             val values: List<String> = when (v) {
                 is JsonObject -> {
                     opt(v)
-                    val c = v["contains"] ?: v["texts"]
+                    val c = listOf("contains", "texts", "containsText", "contains_text", "text_contains", "has_text").firstNotNullOfOrNull { v[it] }
                     if (c is JsonArray) c.mapNotNull { (it as? JsonPrimitive)?.content }
-                    else listOfNotNull(listOf("contains", "text", "target", "label", "value", "name", "direction", "key", "ms")
+                    else listOfNotNull(listOf("contains", "containsText", "contains_text", "text_contains", "has_text", "text", "target", "label", "value", "name", "direction", "key", "ms")
                         .firstNotNullOfOrNull { v.str(it) })
                 }
                 is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.content }
