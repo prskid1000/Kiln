@@ -32,11 +32,23 @@ class MakeGraphicTool : Tool {
     override val traits = emptySet<Trait>()
 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val svgText = input.req("svg")
+        // Models also write Android vector XML here, often with xmlns="android=…" (run 12): repair, accept, preview.
+        val svgText = repairNamespaces(input.req("svg"))
         val rel = input.req("path")
         val size = (input.int("size") ?: 512).coerceIn(16, 4096)
-        val svg = runCatching { SVG.getFromString(svgText) }.getOrElse { return ToolResult.error("invalid SVG: ${it.message}") }
+        xmlProblem(svgText)?.let { return ToolResult.error("the XML doesn't parse — $it") }
         val f = ctx.project.resolveWritable(rel)
+        if (isVectorDrawable(svgText)) {
+            if (f.extension.lowercase() != "xml" || !rel.replace('\\', '/').startsWith("res/drawable"))
+                return ToolResult.error("that's an Android vector drawable; it can only be saved as res/drawable/<name>.xml. For a PNG or an .svg file, send SVG.")
+            f.parentFile?.mkdirs(); f.writeText(svgText)
+            ctx.state.readStamps[ctx.project.rel(f)] = f.lastModified()
+            val preview = runCatching { render(SVG.getFromString(vectorToSvg(svgText)), 384) }.getOrNull()
+            return ToolResult("wrote ${ctx.project.rel(f)} (${f.length()} B): vector drawable as given — use painterResource(R.drawable.${f.nameWithoutExtension}). " +
+                (if (preview != null) "The image is a rendered preview." else "(No preview: only its paths are drawn for previews.)"),
+                listOfNotNull(preview), summary = "Drew ${f.name}")
+        }
+        val svg = runCatching { SVG.getFromString(svgText) }.getOrElse { return ToolResult.error("invalid SVG: ${it.message}") }
         f.parentFile?.mkdirs()
         val note: String
         when (f.extension.lowercase()) {
@@ -65,6 +77,52 @@ class MakeGraphicTool : Tool {
         svg.renderToCanvas(Canvas(bmp))
         return ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
     }
+}
+
+/** `xmlns="android=…"` / `xmlns=android=…` written for `xmlns:android="…"` (a common slip) → the real thing. */
+internal fun repairNamespaces(xml: String): String =
+    xml.replace(Regex("""xmlns\s*=\s*"?android\s*=\s*"""), "xmlns:android=")
+
+internal fun isVectorDrawable(xml: String): Boolean = Regex("""^\s*(<\?xml[^>]*>\s*)?(<!--.*?-->\s*)*<vector\b""", RegexOption.DOT_MATCHES_ALL).containsMatchIn(xml)
+
+/** Where and why [xml] doesn't parse ("line 1, column 31: …"), or null when it does. */
+internal fun xmlProblem(xml: String): String? = try {
+    DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }.newDocumentBuilder().apply { setErrorHandler(null) }
+        .parse(org.xml.sax.InputSource(java.io.StringReader(xml))); null
+} catch (e: org.xml.sax.SAXParseException) {
+    val line = xml.lines().getOrNull(e.lineNumber - 1)?.trim()?.take(120)
+    "line ${e.lineNumber}, column ${e.columnNumber}: ${e.message}" + (line?.let { "\n  > $it" } ?: "")
+} catch (e: Exception) { e.message ?: "unreadable XML" }
+
+/** A rough SVG of a vector drawable's paths (fill, stroke, alpha), only to render a preview of it. */
+internal fun vectorToSvg(vector: String): String {
+    val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(org.xml.sax.InputSource(java.io.StringReader(vector)))
+    val root = doc.documentElement
+    fun a(e: Element, n: String) = e.getAttribute("android:$n").ifEmpty { e.getAttribute(n) }
+    // #AARRGGBB → (#RRGGBB, alpha); #RGB / #RRGGBB as they are.
+    fun color(c: String): Pair<String, Double>? = when {
+        c.isEmpty() -> null
+        c.length == 9 && c.startsWith("#") -> "#" + c.substring(3) to c.substring(1, 3).toInt(16) / 255.0
+        c.startsWith("#") -> c to 1.0
+        else -> null
+    }
+    val vw = a(root, "viewportWidth").ifEmpty { "24" }; val vh = a(root, "viewportHeight").ifEmpty { "24" }
+    val paths = root.getElementsByTagName("path")
+    val body = (0 until paths.length).joinToString("\n") { i ->
+        val p = paths.item(i) as Element
+        val fill = color(a(p, "fillColor")); val stroke = color(a(p, "strokeColor"))
+        buildString {
+            append("<path d=\"").append(a(p, "pathData")).append('"')
+            append(" fill=\"").append(fill?.first ?: "none").append('"')
+            if (fill != null && fill.second < 1) append(" fill-opacity=\"").append(fill.second).append('"')
+            if (stroke != null) {
+                append(" stroke=\"").append(stroke.first).append("\" stroke-width=\"").append(a(p, "strokeWidth").ifEmpty { "1" }).append('"')
+                a(p, "strokeLineCap").takeIf { it.isNotEmpty() }?.let { append(" stroke-linecap=\"").append(it).append('"') }
+            }
+            append("/>")
+        }
+    }
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 $vw $vh\">\n$body\n</svg>"
 }
 
 /** SVG → Android VectorDrawable XML, for the subset vector drawables can express. */

@@ -138,6 +138,9 @@ class ToolsOnDeviceTest {
             Case("kit_search", """{"query":"osmdroid version"}""", expect = "osmdroid-android:6.1.20"),
             Case("make_graphic", """{"svg":"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20' rx='4' fill='#8B7CF6'/><circle cx='12' cy='12' r='5' fill='white' opacity='0.8'/></svg>","path":"res/drawable/ic_test.xml"}""", expect = "vector drawable"),
             Case("make_graphic", """{"svg":"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><circle cx='5' cy='5' r='4' fill='red'/></svg>","path":"assets/dot.png","size":64}""", expect = "PNG 64px"),
+            // Run 12: an Android vector (not SVG) with xmlns="android=…" — repaired, written as given, previewed.
+            Case("make_graphic", """{"svg":"<vector xmlns=\"android=\"http://schemas.android.com/apk/res/android\" android:width='108dp' android:height='108dp' android:viewportWidth='108' android:viewportHeight='108'><path android:fillColor='#161826' android:pathData='M0,0h108v108h-108z'/><path android:fillColor='#9184D9' android:pathData='M30,40h48v30h-48z'/></vector>","path":"res/drawable/ic_v.xml"}""", expect = "vector drawable as given", images = true),
+            Case("make_graphic", """{"svg":"<svg viewBox='0 0 10 10'><circle cx='5' r='4'></svg>","path":"assets/bad.svg"}""", expectError = true, expect = "line 1, column"),
             Case("web_fetch", """{"url":"https://example.com","max_chars":2000}""", expect = "Example Domain"),
             Case("web_fetch", """{"url":"http://example.com"}""", expectError = true),
             Case("check", "{}", expect = "BUILD OK"),
