@@ -64,6 +64,9 @@ class Warden(private val context: Context) {
         val p = try { svc.newProcess(argv.toTypedArray(), emptyArray(), "/") } catch (e: SecurityException) {
             lastError = "Warden denied Kiln — grant it in the Warden app"; return@withContext null
         } catch (e: Exception) { lastError = "Warden: ${e.message ?: e}"; return@withContext null }
+        // Closed on Stop or an error too: otherwise reads a background child keeps blocked leak their threads.
+        val streams = java.util.Collections.synchronizedList(mutableListOf<java.io.Closeable>())
+        fun closeAll() = streams.forEach { runCatching { it.close() } }
         try {
             coroutineScope {
                 // Readers outside this scope: a background child (`logcat &`) keeps the pipes open after sh exits,
@@ -73,6 +76,7 @@ class Warden(private val context: Context) {
                 // the streams ends the blocked reads (their threads were leaked before).
                 val outStream = ParcelFileDescriptor.AutoCloseInputStream(p.inputStream)
                 val errStream = ParcelFileDescriptor.AutoCloseInputStream(p.errorStream)
+                streams += outStream; streams += errStream
                 val outBuf = java.io.ByteArrayOutputStream(); val errBuf = java.io.ByteArrayOutputStream()
                 fun pump(i: java.io.InputStream, b: java.io.ByteArrayOutputStream) = runCatching {
                     i.use { val chunk = ByteArray(65_536); while (true) { val n = it.read(chunk); if (n < 0) break; synchronized(b) { b.write(chunk, 0, n) } } }
@@ -99,7 +103,7 @@ class Warden(private val context: Context) {
                 val e = synchronized(errBuf) { errBuf.toByteArray() }
                 Raw(code ?: -1, o, e, System.currentTimeMillis() - t0, timedOut = code == null)
             }
-        } catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; throw e
-        } catch (e: Exception) { runCatching { p.destroy() }; lastError = "Warden: ${e.message ?: e}"; null }
+        } catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; closeAll(); throw e
+        } catch (e: Exception) { runCatching { p.destroy() }; closeAll(); lastError = "Warden: ${e.message ?: e}"; null }
     }
 }

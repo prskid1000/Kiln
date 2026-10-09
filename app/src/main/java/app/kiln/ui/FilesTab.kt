@@ -255,7 +255,8 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
         original = text
     }
     val dirty = original != null && text != original
-    fun save() = scope.launch {
+    // Not cancelled by leaving the tab: the write would finish but the buffer stay "unsaved", and the next Save be refused.
+    fun save() = scope.launch(kotlinx.coroutines.NonCancellable) {
         // Kotlin is formatted on save; the editor then shows the formatted text.
         // The stale check, formatting (up to 1 MB) and the write all run off the main thread.
         val snapshot = text

@@ -22,10 +22,16 @@ object Attention {
 
     /** Set by the UI: the loop for a project name, so a notification action can answer it. */
     var loops: (String) -> AgentLoop? = { null }
+    /** What's on screen: whether Kiln is visible, and whose chat. Prompt watchers follow it (see [screen]). */
+    val screen = kotlinx.coroutines.flow.MutableStateFlow<Pair<Boolean, String?>>(false to null)
     /** Set by MainActivity: when Kiln is on screen, the in-app cards are enough. */
-    @Volatile var visible = false
+    var visible: Boolean
+        get() = screen.value.first
+        set(v) { screen.value = v to screen.value.second }
     /** The project whose chat is on screen: only its prompts can be answered in the app, so only its are skipped. */
-    @Volatile var onScreen: String? = null
+    var onScreen: String?
+        get() = screen.value.second
+        set(v) { screen.value = screen.value.first to v }
 
     private fun nm(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).also {
         if (it.getNotificationChannel(CHANNEL) == null)

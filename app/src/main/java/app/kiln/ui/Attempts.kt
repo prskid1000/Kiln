@@ -64,14 +64,17 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
     val tries = runCatching { Attempts.create(Graph.paths.projects, s.project, n, request) }
         .getOrElse { message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
     attempts(name).value = tries.map { it.name }
-    // One after another: they share the hidden test screen.
-    for ((i, t) in tries.withIndex()) {
+    // One after another: they share the hidden test screen. The run service is held for the whole round: between
+    // attempts the count fell to 0 and the service stopped, and Android 12+ won't start it again from the background.
+    val app = getApplication<android.app.Application>()
+    if (!KilnVM.holdService(app)) { message.value = "Couldn't start the attempts in the background — open Kiln and try again"; restoreDraft(name, request, emptyList()); return@launch }
+    try { for ((i, t) in tries.withIndex()) {
         val prompt = request + "\n\n(This is attempt ${i + 1} of $n: separate copies of the app are each trying this " +
             "on their own and the user will keep the best one. Make your own best version, and verify it on the device.)"
         KilnVM.startRun(getApplication(), t.name, prompt, freshChat = true)?.let {
             message.value = it; if (i == 0) restoreDraft(name, request, emptyList()); return@launch }
         state(t.name).job?.join()
-    }
+    } } finally { KilnVM.releaseService(app) }
     message.value = "$n attempts are ready — compare them and keep one"
 }
 
@@ -92,6 +95,8 @@ fun KilnVM.keepAttempt(name: String, attempt: String) = KilnVM.runScope.launch {
 fun KilnVM.discardAttempts(name: String) = KilnVM.runScope.launch {
     // The round's loop first: it would start the next attempt on a deleted folder.
     cancelBestOf(name)
+    // Off the screen first: the bar and sheet looked their states up every second and brought them back mid-discard.
+    attempts(name).value = emptyList()
     for (t in Attempts.list(Graph.paths.projects, name)) {
         // Wait for its run to stop: it would keep writing into the folder being deleted. Its state goes too
         // (the next round reuses the names, and showed this round's screenshot as "Done").
@@ -123,12 +128,12 @@ fun AttemptsBar(vm: KilnVM, ps: ProjectState) {
     var open by remember { mutableStateOf(false) }
     // Runs start one after another (each attempt's loop appears when its turn comes): re-check each second.
     val working by androidx.compose.runtime.produceState(0, names) {
-        while (true) { value = names.count { vm.state(it).loop.value?.running?.value == true }; kotlinx.coroutines.delay(1000) }
+        while (true) { value = names.count { KilnVM.existingState(it)?.loop?.value?.running?.value == true }; kotlinx.coroutines.delay(1000) }
     }
     // The attempt that's running now: its approvals and questions show here (no other screen shows its loop, and
     // a prompt nobody sees stalled the whole round).
     val active by androidx.compose.runtime.produceState<app.kiln.agent.AgentLoop?>(null, names) {
-        while (true) { value = names.firstNotNullOfOrNull { vm.state(it).loop.value?.takeIf { l -> l.running.value } }; kotlinx.coroutines.delay(1000) }
+        while (true) { value = names.firstNotNullOfOrNull { KilnVM.existingState(it)?.loop?.value?.takeIf { l -> l.running.value } }; kotlinx.coroutines.delay(1000) }
     }
     Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().vCard(N.shapeLg, N.accent.copy(alpha = 0.5f))
         .clickable { open = true }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -152,7 +157,7 @@ private fun AttemptsSheet(vm: KilnVM, ps: ProjectState, names: List<String>, onD
             Text("Compare attempts", style = T.cardTitle)
             Text("Each copy did the same request on its own. Try them in Preview, then keep one — your current version " +
                 "is saved as a checkpoint first.", style = T.bodySmall)
-            val anyRunning = names.any { vm.state(it).loop.value?.running?.value == true }
+            val anyRunning = names.any { KilnVM.existingState(it)?.loop?.value?.running?.value == true }
             names.forEachIndexed { i, n ->
                 val st = vm.state(n)
                 val loop by st.loop.collectAsState()

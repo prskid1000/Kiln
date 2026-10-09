@@ -70,18 +70,29 @@ private suspend fun KilnVM.quickEdit(name: String, hit: SourceHit, old: String, 
     val lines = f.readLines().toMutableList()
     val i = hit.line - 1
     if (i !in lines.indices) return "The file changed — pick the element again"
-    val (from, to) = if ("\"$old\"" in lines[i]) "\"$old\"" to "\"${escapeKotlin(new)}\"" else ">$old<" to ">$new<"
+    // A resource string is escaped for Android XML ("Don't", "Tom & Jerry" broke aapt2).
+    val (from, to) = if ("\"$old\"" in lines[i]) "\"$old\"" to "\"${escapeKotlin(new)}\"" else ">$old<" to ">${escapeAndroidXml(new)}<"
     if (from !in lines[i]) return "The file changed — pick the element again"
+    val before = f.readText()
     lines[i] = lines[i].replaceFirst(from, to)
     f.writeText(lines.joinToString(System.lineSeparator(), postfix = System.lineSeparator()))
     val r = Graph.builds.build(s.project)
-    if (!r.ok) return "Build failed: " + r.diagnostics.firstOrNull { it.severity == "error" }?.let { "${it.file?.let(::File)?.name}:${it.line} ${it.message}" }.orEmpty()
+    if (!r.ok) {
+        // Put the file back: a failed quick edit must not leave the next build broken too.
+        runCatching { f.writeText(before) }
+        return "Build failed (the edit was undone): " + r.diagnostics.firstOrNull { it.severity == "error" }?.let { "${it.file?.let(::File)?.name}:${it.line} ${it.message}" }.orEmpty()
+    }
     val inst = Graph.testDevice.install(File(r.apk!!))
     if (!inst.ok) return "Install failed: " + inst.all.take(200)
     Graph.testDevice.launch(s.pkg)
     IconCache.version.value++
     return null
 }
+
+/** Text for an Android string resource: XML entities, escaped quotes, and a leading @ or ? that isn't a reference. */
+private fun escapeAndroidXml(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    .replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"")
+    .let { if (it.startsWith("@") || it.startsWith("?")) "\\$it" else it }
 
 private fun escapeKotlin(s: String) = buildString {
     for (c in s) when (c) {

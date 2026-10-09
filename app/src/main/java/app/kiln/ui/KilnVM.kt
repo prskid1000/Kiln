@@ -77,7 +77,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     val projects = MutableStateFlow<List<ProjectInfo>>(emptyList())
     val installed = MutableStateFlow<Set<String>>(emptySet())
     val warden = MutableStateFlow(Warden.Status.NOT_RUNNING)
-    val message = MutableStateFlow<String?>(null)
+    // Process-wide: background work (best-of, keep, run) outlives this screen model, and its message must reach the next one.
+    val message: MutableStateFlow<String?> get() = messages
     /** A project to open (from a notification). */
     val openRequest = MutableStateFlow<String?>(null)
     /**
@@ -89,12 +90,26 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         private val states = HashMap<String, ProjectState>()
         /** Forget a project's state (a deleted project, a discarded attempt): a later one of that name starts fresh. */
         internal fun forgetState(name: String): ProjectState? = synchronized(states) { states.remove(name) }
+        /** A project's state if it exists (polling must not create one). */
+        internal fun existingState(name: String): ProjectState? = synchronized(states) { states[name] }
         /** Projects being deleted: hidden from the list while their files go. */
         internal val deleting: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
         internal val runScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
         /** Agent runs in flight across all projects; the foreground service lives while > 0. */
         private val active = java.util.concurrent.atomic.AtomicInteger()
         private val serviceLock = Any()
+        private val messages = MutableStateFlow<String?>(null)
+
+        /** Keep the run service up across several runs (a best-of round); false if it couldn't start. */
+        internal fun holdService(ctx: android.content.Context): Boolean = synchronized(serviceLock) {
+            active.incrementAndGet()
+            runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java)) }
+                .onFailure { active.decrementAndGet() }.isSuccess
+        }
+
+        internal fun releaseService(ctx: android.content.Context) = synchronized(serviceLock) {
+            if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
+        }
 
         init { app.kiln.agent.Attention.loops = { name -> synchronized(states) { states[name] }?.loop?.value } }
 
@@ -146,8 +161,15 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             s.job = runScope.launch(start = kotlinx.coroutines.CoroutineStart.ATOMIC) {
                 // Kiln in the background: approvals and questions become actionable notifications.
                 val watch = launch {
-                    launch { l.approval.collect { a -> if (a != null) app.kiln.agent.Attention.approval(ctx, name, s.label, a.tool, a.input) else app.kiln.agent.Attention.clear(ctx, name) } }
-                    launch { l.question.collect { q -> if (q != null) app.kiln.agent.Attention.question(ctx, name, s.label, q.text, answerable = q.kind == "text") else app.kiln.agent.Attention.clear(ctx, name) } }
+                    // Also on screen changes: a prompt raised while its chat was showing notifies once the user leaves
+                    // it (it waited, unseen, with the run held).
+                    val screen = app.kiln.agent.Attention.screen
+                    launch { var had = false; kotlinx.coroutines.flow.combine(l.approval, screen) { a, _ -> a }.collect { a ->
+                        if (a != null) { had = true; app.kiln.agent.Attention.approval(ctx, name, s.label, a.tool, a.input) }
+                        else if (had) { had = false; app.kiln.agent.Attention.clear(ctx, name) } } }   // cleared once, when answered
+                    launch { var had = false; kotlinx.coroutines.flow.combine(l.question, screen) { q, _ -> q }.collect { q ->
+                        if (q != null) { had = true; app.kiln.agent.Attention.question(ctx, name, s.label, q.text, answerable = q.kind == "text") }
+                        else if (had) { had = false; app.kiln.agent.Attention.clear(ctx, name) } } }
                 }
                 try { l.send(text, attachments, mode, goal) } finally {
                     // Released first: a follow-up sent as the run ends is a new run, not "still working".
