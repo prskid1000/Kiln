@@ -80,6 +80,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.text.font.FontWeight
@@ -424,7 +425,7 @@ fun KSelect(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modi
             Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), colors?.container ?: Nocturne.surface, colors?.border ?: if (open) Nocturne.accent else Nocturne.neutral700)
                 .clickable(enabled = enabled) { open = true }
                 // The tappable box carries the field's name: tapping "Category" by label must open it.
-                .semantics { label?.let { contentDescription = "$it: " + (selected?.let { i -> options.getOrNull(i) } ?: placeholder) } }
+                .semantics { label?.let { contentDescription = it; stateDescription = selected?.let { i -> options.getOrNull(i) } ?: placeholder } }
                 .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(selected?.let { options.getOrNull(it) } ?: placeholder, color = if (selected == null) Nocturne.textMuted else Nocturne.text,
                     fontSize = kt(15), modifier = Modifier.weight(1f), maxLines = 1)
@@ -592,7 +593,7 @@ private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Mo
         Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), Nocturne.surface, if (error != null) Nocturne.danger else Nocturne.neutral700)
             .clickable(enabled = enabled, onClick = onClick)
             // The tappable box carries the field's name ("Due date: Pick a date"), not just its value.
-            .semantics { contentDescription = "$label: $text" }
+            .semantics { contentDescription = label; stateDescription = text }
             .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = if (empty) Nocturne.textMuted else Nocturne.text, fontSize = kt(15), modifier = Modifier.weight(1f))

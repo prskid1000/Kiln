@@ -34,8 +34,9 @@ fun SkillEditableList(items: List<Pair<Long, String>>, onAdd: (String) -> Unit, 
         if (items.isEmpty()) KEmptyState(title = "Nothing yet", body = "Add your first item above.")
         else LazyColumn {
             items(items, key = { it.first }) { (id, text) ->
-                val state = rememberSwipeToDismissBoxState()
-                if (state.currentValue == SwipeToDismissBoxValue.EndToStart) onDelete(id)
+                // Deleted once, when the swipe is confirmed (not on every recomposition while it animates away).
+                val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
+                    if (v == SwipeToDismissBoxValue.EndToStart) onDelete(id); true })
                 SwipeToDismissBox(state, backgroundContent = {}) { KListRow(title = text) }
             }
         }

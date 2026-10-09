@@ -148,8 +148,13 @@ internal object KilnInspector {
                     .firstOrNull { it.config.getOrNull(SemanticsProperties.Focused) == true && SemanticsActions.SetText in it.config }
                     ?: return "error: no text field has focus — tap one first"
                 val now = field.config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
-                val result = if (i.getBooleanExtra("replace", false)) text else now + text
-                field.config[SemanticsActions.SetText].action?.invoke(androidx.compose.ui.text.AnnotatedString(result))
+                val replace = i.getBooleanExtra("replace", false)
+                // A password field exposes only its bullets: appending by rewriting the whole text put them in.
+                val masked = field.config.contains(SemanticsProperties.Password)
+                val result = if (replace) text else if (masked) "•".repeat(now.length) + text else now + text
+                if (!replace && masked && SemanticsActions.InsertTextAtCursor in field.config)
+                    field.config[SemanticsActions.InsertTextAtCursor].action?.invoke(androidx.compose.ui.text.AnnotatedString(text))
+                else field.config[SemanticsActions.SetText].action?.invoke(androidx.compose.ui.text.AnnotatedString(if (replace) text else now + text))
                 // Say what the field holds now: typing twice appends, and the agent should see that.
                 val name = (field.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()
                     ?: field.config.getOrNull(SemanticsProperties.Text)?.firstOrNull()?.text).orEmpty()

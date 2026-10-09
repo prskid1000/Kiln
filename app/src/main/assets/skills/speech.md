@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,8 @@ fun VoiceNote() {
     val speak = rememberSpeaker()
     var note by remember { mutableStateOf("") }
     val dictate = rememberDictation { note = it }
+    // Keep the words when listening ends: by itself after a pause, or after Stop (the final result comes then).
+    LaunchedEffect(mic.listening) { if (!mic.listening && mic.text.isNotEmpty()) note = mic.text }
 
     KilnScreen("Voice note") { padding ->
         Column(Modifier.screenPadding(padding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -45,7 +48,7 @@ fun VoiceNote() {
             KButton(if (mic.listening) "Stop" else "Speak", icon = if (mic.listening) Icons.Filled.Stop else Icons.Filled.Mic, fullWidth = true) {
                 when {
                     !audio.granted -> audio.request()
-                    mic.listening -> { mic.stop(); note = mic.text }
+                    mic.listening -> mic.stop()
                     else -> mic.start()
                 }
             }

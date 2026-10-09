@@ -36,6 +36,14 @@ import java.io.IOException
 /** Inserts leave out nulls, so the server fills its own columns (`val id: Long? = null`, created_at) — real values, defaults included, are sent. */
 private val insertJson = kotlinx.serialization.json.Json(KJson) { explicitNulls = false }
 
+/** A row for insert: placeholder server columns (id 0, created_at "") are left out so the server fills them. */
+private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row: T): String {
+    val o = insertJson.encodeToJsonElement(serializer, row) as? JsonObject ?: return insertJson.encodeToString(serializer, row)
+    fun placeholder(k: String, v: kotlinx.serialization.json.JsonElement) = (v as? kotlinx.serialization.json.JsonPrimitive)?.content.let { c ->
+        (k == "id" && (c == "0" || c == "")) || (k in setOf("created_at", "updated_at") && c == "") }
+    return JsonObject(o.filterNot { (k, v) -> placeholder(k, v) }).toString()
+}
+
 class KSupabase(context: Context, private val url: String, private val anonKey: String) {
     private val prefs = context.getSharedPreferences("kiln_supabase", Context.MODE_PRIVATE)
     private val _user = MutableStateFlow(prefs.getString("user_id", null))
@@ -68,6 +76,10 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         return runCatching {
             save(KJson.parseToJsonElement(send(Request.Builder().url("$base/auth/v1/token?grant_type=refresh_token")
                 .post(body.toRequestBody(json)), authed = false, retry = false)).jsonObject)
+        }.onFailure { e ->
+            // The session itself is over (revoked or expired refresh token): sign out, so the app shows sign-in again
+            // instead of failing every call. A network error keeps the session.
+            if (Regex("""Supabase 4\d\d""").containsMatchIn(e.message.orEmpty())) signOut()
         }.isSuccess
     }
 
@@ -95,7 +107,7 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         suspend fun <T> insert(serializer: KSerializer<T>, row: T): T =
             KJson.decodeFromString(ListSerializer(serializer), send(Request.Builder().url(at(""))
                 .header("Prefer", "return=representation")
-                .post(insertJson.encodeToString(serializer, row).toRequestBody(json)))).first()
+                .post(insertBody(serializer, row).toRequestBody(json)))).first()
         suspend inline fun <reified T> insert(row: T): T = insert(KJson.serializersModule.serializer<T>(), row)
 
         /** Change the rows matching [filter] (e.g. "id=eq.42") to have these fields. */
