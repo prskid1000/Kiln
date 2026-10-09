@@ -9,7 +9,7 @@ import app.kiln.core.str
 import app.kiln.device.Warden
 import app.kiln.llm.ToolSpec
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -109,11 +109,16 @@ class McpClient(private val cfg: McpServerConfig) {
         val response = kotlinx.coroutines.suspendCancellableCoroutine<okhttp3.Response> { c ->
             c.invokeOnCancellation { call.cancel() }
             call.enqueue(object : okhttp3.Callback {
-                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) { c.resumeWith(Result.success(response)) }
+                // A reply that lands after cancellation is closed, not leaked.
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) { c.resume(response) { _, r, _ -> r.close() } }
                 override fun onFailure(call: okhttp3.Call, e: java.io.IOException) { c.resumeWith(Result.failure(e)) }
             })
         }
-        rpcBody(response, method, notify)
+        // An event-stream body keeps arriving after the headers: cancelling the call ends that read too.
+        kotlinx.coroutines.coroutineScope {
+            val watch = launch { try { kotlinx.coroutines.awaitCancellation() } finally { call.cancel() } }
+            try { rpcBody(response, method, notify) } finally { watch.cancel() }
+        }
     }
 
     private fun rpcBody(response: okhttp3.Response, method: String, notify: Boolean): JsonObject? =

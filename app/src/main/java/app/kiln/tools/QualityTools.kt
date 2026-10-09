@@ -375,7 +375,8 @@ class SaveScreenshotTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val path = input.str("path")?.trim()?.trimStart('/') ?: return ToolResult.error("missing path")
         if (!path.startsWith("store/") || !path.endsWith(".png")) return ToolResult.error("save under store/ as a .png, e.g. store/screenshots/1-home.png")
-        if (device.foregroundPackage() != pkg(ctx)) return ToolResult.error("${pkg(ctx)} is not on screen — launch it first")
+        // As for input tools: an unreadable foreground on the phone's own screen isn't "not in front".
+        if (device.foregroundPackage().let { it != pkg(ctx) && (it != null || device.testDisplay != null) }) return ToolResult.error("${pkg(ctx)} is not on screen — launch it first")
         val png = device.screenshot(maxSide = 4096) ?: return ToolResult.error("screenshot failed")
         val f = ctx.project.resolveWritable(path)
         f.parentFile?.mkdirs(); f.writeBytes(png)

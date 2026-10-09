@@ -172,7 +172,8 @@ class Kiln(
         val prompt = spec.prompt + if (spec.kitDocs) "\n\nKit reference:\n" + toolchain.kitApi() + "\n\nKit index:\n" + toolchain.kitIndex() else ""
         return AgentLoop.headless(project, paths.sessions, providers, registry, tools, settings, prompt, task, role = "subagent",
             finished = spec.finished, unfinished = spec.unfinished, onStep = onStep,
-            onFeed = ctx?.let { c -> { feed -> c.children(feed.map { it.copy(agent = spec.tag) }) } }, readOnly = ctx?.readOnly == true)
+            // Read-only helpers (explore, reviewer: no tool list of their own) never rewrite sources, even through check's fixes.
+            onFeed = ctx?.let { c -> { feed -> c.children(feed.map { it.copy(agent = spec.tag) }) } }, readOnly = ctx?.readOnly == true || spec.tools == null)
     }
 }
 

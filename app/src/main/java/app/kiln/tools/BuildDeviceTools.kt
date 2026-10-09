@@ -289,7 +289,7 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
     /** "250,289" or "[250,289]" as a point — but not when an element is labelled that (an amount like "1,000"). */
     internal fun pointIn(s: String, nodes: List<app.kiln.device.UiNode>): Pair<Int, Int>? =
         // Exact labels only: the fuzzy finder matched "540,1200" to any "₹1200" on screen and tapped that instead.
-        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { nodes.none { n -> n.text.trim() == s.trim() || n.desc.trim() == s.trim() } }
+        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { nodes.none { n -> s.trim() in n.text || s.trim() in n.desc } }   // "1,000" in "₹1,000" is a label
             ?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
 
     internal suspend fun offScreen(n: app.kiln.device.UiNode, label: String): String {
@@ -344,7 +344,9 @@ class InstallTool(w: Warden, d: Device) : DeviceTool(w, d) {
         if (ctx.state.lastBuild?.ok == false) return ToolResult.error("the last build or check failed — fix it and build again first")
         val apk = ctx.state.lastApk?.let(::File)?.takeIf { it.isFile } ?: return ToolResult.error("no fresh APK — run build (or run_app) first; a check doesn't make one")
         // Sources edited since that build (by any tool, or a helper) would install old code: build first.
-        if (ctx.project.files().any { it.lastModified() > apk.lastModified() })
+        // Build inputs only: an attachment or a saved screenshot in the project isn't a code change.
+        val inputs = listOf("src", "res", "assets").map { File(ctx.project.dir, it) } + listOf(File(ctx.project.dir, "AndroidManifest.xml"), File(ctx.project.dir, "kiln.json"))
+        if (inputs.any { f -> if (f.isDirectory) f.walkTopDown().any { it.isFile && it.lastModified() > apk.lastModified() } else f.isFile && f.lastModified() > apk.lastModified() })
             return ToolResult.error("the sources changed since the last build — run build (or run_app) to install the current code")
         val r = device.install(apk)
         return if (r.out.contains("Success")) ToolResult.ok("installed ${pkg(ctx)}") else ToolResult.error("install failed: ${r.all.trim()}")
@@ -712,7 +714,11 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
     }
 
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        val steps = input.a("steps")?.mapNotNull { it as? JsonObject }?.flatMap(::expand) ?: return ToolResult.error("give steps")
+        val raw = input.a("steps") ?: return ToolResult.error("give steps")
+        // Every step must be an object, and something must run: "all 0 steps passed" for ["tap Save"] was a false pass.
+        if (raw.any { it !is JsonObject }) return ToolResult.error("each step must be an object, like {\"tap\": \"Save\"} or {\"expect\": \"Total\"}")
+        val steps = raw.map { it as JsonObject }.flatMap(::expand)
+        if (steps.isEmpty()) return ToolResult.error("no steps to run — give steps like {\"tap\": \"Save\"}")
         val keepGoing = input.str("keep_going") == "true"
         val pkg = pkg(ctx)
         val report = StringBuilder(); var failed = 0
@@ -780,13 +786,13 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         }
         s("key")?.let { k -> device.key(k); delay(500); return true to "key $k → ${screenChange(ctx, before)}" }
         s("expect")?.let { t ->
-            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(0, 20_000)
+            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(300, 20_000)   // at least one look
             while (System.currentTimeMillis() < until) { if (visible(t)) return true to "“$t” is on screen"; delay(300) }
             val now = device.uiTree(pkg).filter { it.text.isNotBlank() || it.desc.isNotBlank() }.take(12).joinToString { "“${it.label()}”" }
             return false to "expected “$t” — not on screen. Showing: $now"
         }
         s("expect_gone")?.let { t ->
-            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(0, 20_000)
+            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(300, 20_000)   // at least one look
             while (System.currentTimeMillis() < until) { if (!visible(t)) return true to "“$t” is gone"; delay(300) }
             return false to "expected “$t” to be gone — still on screen"
         }

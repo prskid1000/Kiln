@@ -201,7 +201,8 @@ $body</vector>
             val v = e.getAttribute(n).trim()
             if (!v.endsWith("%")) return num(v) ?: 0f
             val frac = (v.dropLast(1).toFloatOrNull() ?: 0f) / 100
-            return when (n) { "x", "cx", "x1", "x2" -> view[0]; "y", "cy", "y1", "y2" -> view[1]; else -> 0f } + frac * when (n) {
+            // A percentage is of the viewport's size, with no origin added (as the preview renders it).
+            return frac * when (n) {
                 "x", "width", "cx", "rx", "x1", "x2" -> view[2]
                 "y", "height", "cy", "ry", "y1", "y2" -> view[3]
                 else -> kotlin.math.sqrt((view[2] * view[2] + view[3] * view[3]) / 2)   // r: the SVG normalised diagonal
@@ -211,7 +212,9 @@ $body</vector>
             "path" -> e.getAttribute("d")
             "rect" -> {
                 val x = a("x"); val y = a("y"); val w = a("width"); val h = a("height")
-                var rx = num(e.getAttribute("rx")) ?: num(e.getAttribute("ry")) ?: 0f; var ry = num(e.getAttribute("ry")) ?: rx
+                // Through a(): rx="50%" (a pill) resolves against the viewBox instead of becoming 0.
+                var rx = (if (e.hasAttribute("rx")) a("rx") else null) ?: (if (e.hasAttribute("ry")) a("ry") else null) ?: 0f
+                var ry = if (e.hasAttribute("ry")) a("ry") else rx
                 rx = rx.coerceAtMost(w / 2); ry = ry.coerceAtMost(h / 2)
                 if (rx <= 0f) "M${f(x)},${f(y)}h${f(w)}v${f(h)}h${f(-w)}z"
                 else "M${f(x + rx)},${f(y)}h${f(w - 2 * rx)}a${f(rx)},${f(ry)} 0 0 1 ${f(rx)},${f(ry)}v${f(h - 2 * ry)}" +
