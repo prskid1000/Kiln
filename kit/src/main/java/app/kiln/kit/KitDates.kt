@@ -21,7 +21,8 @@ import java.time.LocalTime
  * KFormat.date(expense.date)              // "8 Oct 2026"
  * expense.date.month == LocalDate.now().month
  * ```
- * Don't store dates as String: every screen then has to parse them.
+ * Don't store dates as String: every screen then has to parse them. A server timestamp (Supabase timestamptz,
+ * created_at) is a KDateTime, not a KDate: a KDate keeps a midnight-UTC value as that date (an all-day date).
  */
 typealias KDate = @Serializable(with = KDateSerializer::class) LocalDate
 

@@ -222,7 +222,8 @@ private class KPref<T>(private val prefs: SharedPreferences, private val key: St
     @Suppress("UNCHECKED_CAST")
     // A key that holds another type (the app changed rememberPref("goal", 2000) to 2.5) starts over from the default
     // instead of crashing the screen on every launch.
-    private fun read(): T = runCatching { readTyped() }.getOrElse { prefs.edit().remove(key).apply(); default }
+    // Only a type clash is recovered: an unsupported type still fails loudly (recovering it silently lost every save).
+    private fun read(): T = try { readTyped() } catch (e: ClassCastException) { prefs.edit().remove(key).apply(); default }
 
     @Suppress("UNCHECKED_CAST")
     private fun readTyped(): T = when (default) {
@@ -231,9 +232,10 @@ private class KPref<T>(private val prefs: SharedPreferences, private val key: St
         is Long -> prefs.getLong(key, default) as T
         is Float -> prefs.getFloat(key, default) as T
         is Boolean -> prefs.getBoolean(key, default) as T
-        // `2.0` is a Double in Kotlin (it crashed the screen): stored as its raw bits.
-        is Double -> java.lang.Double.longBitsToDouble(prefs.getLong(key, java.lang.Double.doubleToRawLongBits(default))) as T
-        else -> error("rememberPref supports String, Int, Long, Float, Boolean — use rememberStored for other types")
+        // `2.0` is a Double in Kotlin (it crashed the screen): stored as raw bits under its own key, so a Long once stored
+        // under the name isn't read as bits (70L showed as 3.46E-322).
+        is Double -> java.lang.Double.longBitsToDouble(prefs.getLong("$key#d", java.lang.Double.doubleToRawLongBits(default))) as T
+        else -> error("rememberPref supports String, Int, Long, Float, Double, Boolean — use rememberStored for other types")
     }
     private val inner = mutableStateOf(read())
     override var value: T
@@ -242,7 +244,8 @@ private class KPref<T>(private val prefs: SharedPreferences, private val key: St
             inner.value = v
             prefs.edit().apply { when (v) { is String -> putString(key, v); is Int -> putInt(key, v); is Long -> putLong(key, v)
                 is Float -> putFloat(key, v); is Boolean -> putBoolean(key, v)
-                is Double -> putLong(key, java.lang.Double.doubleToRawLongBits(v)) } }.apply()
+                is Double -> putLong("$key#d", java.lang.Double.doubleToRawLongBits(v))
+                else -> error("rememberPref supports String, Int, Long, Float, Double, Boolean — use rememberStored for other types") } }.apply()
         }
     override fun component1(): T = value
     override fun component2(): (T) -> Unit = { value = it }

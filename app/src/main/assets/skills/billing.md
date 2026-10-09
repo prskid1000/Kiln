@@ -5,7 +5,8 @@
 - Purchases only work in a build installed from Play (internal testing is enough) by a tester;
   on a Kiln-installed build `buy` shows an error — say so, don't treat it as a bug.
 - Non-consumables (a "Pro" unlock) appear in `owned`. Consumables (coins) need both: list them and grant them,
-  `rememberBilling(consumable = setOf("coins_100"), onConsumed = { id -> coins += 100 })` — without `consumable` they're
+  `var coins by rememberPref("coins", 0)` then `rememberBilling(consumable = setOf("coins_100"), onConsumed = { id -> coins += 100 })`.
+  What's granted must be saved (rememberPref or a KStore): a consumed purchase can't be restored from Play — without `consumable` they're
   treated as a one-time unlock (bought once, then "already owned"); without `onConsumed` they're left unconsumed.
 - Never decide entitlement from a local flag alone: re-check `owned` after `refresh()` on start.
 

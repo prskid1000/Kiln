@@ -136,7 +136,10 @@ class Providers(dir: File, val secrets: Secrets) {
         // Each capability changes only on a clear answer: a success, or a refusal that won't change on retry. A rate
         // limit or dropped connection keeps the earlier value (tools=false disabled the profile; caching=false
         // billed every input at the full price).
-        fun clear(r: Result<*>) = r.isSuccess || r.exceptionOrNull().let { it is ProviderException && !it.retryable }
+        // A refusal counts only when it's about the feature (a missing model, a bad key or 404 says nothing about tools
+        // or images, and turned the profile off).
+        fun clear(r: Result<*>) = r.isSuccess || r.exceptionOrNull().let { e ->
+            e is ProviderException && !e.retryable && Regex("(?i)tool|function|image|vision|multimodal").containsMatchIn(e.message.orEmpty()) }
         val toolsRun = runCatching { a.stream(req("Call the echo tool once with value \"a\".")) {} }
             .onFailure { notes += "tool call failed: ${it.message}" }
         if (clear(toolsRun)) caps = caps.copy(tools = toolsRun.getOrNull()?.content?.any { (it as? JsonObject)?.str("type") == "tool_use" } == true)

@@ -707,7 +707,9 @@ private fun PlanReady(loop: AgentLoop, onBuild: (String) -> Unit) {
             Text("Build it and keep going until each done criterion is verified, or reply to change it.", style = T.label)
         }
         // The plan card goes when the build actually starts (a refused send kept the text but lost the card).
-        KButton("Build this plan", Tone.Accent) { onBuild(criteria) }
+        // Once per plan: a double tap sent it twice (the second refused, its text left without the criteria).
+        var sent by remember(p) { mutableStateOf(false) }
+        KButton("Build this plan", Tone.Accent, enabled = !sent) { sent = true; onBuild(criteria) }
     }
 }
 

@@ -93,7 +93,9 @@ class ScheduleReceiver : BroadcastReceiver() {
             try {
                 when (intent.action) {
                     Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> Schedules.armAll(context)
-                    Schedules.ACTION -> run(context, intent.getStringExtra("project") ?: return@launch)
+                    // Any failure (a full disk writing the schedule) is logged: uncaught, it killed Kiln in the background.
+                    Schedules.ACTION -> runCatching { run(context, intent.getStringExtra("project") ?: return@launch) }
+                        .onFailure { android.util.Log.e("Kiln", "scheduled run", it) }
                 }
             } finally { pending.finish() }
         }

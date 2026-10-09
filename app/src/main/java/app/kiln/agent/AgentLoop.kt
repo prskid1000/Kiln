@@ -169,7 +169,8 @@ class AgentLoop(
                               // Attachments ride on the user's bubble as chips, not as giant text.
                               val att = Attachments.nameOf(t)
                               // An image's saved-path note isn't a file chip: the picture itself follows (shown twice otherwise).
-                              if (att != null) { if ("type=\"image/" !in t) attachToLastUser(files = listOf(att)) }
+                              // Only the opening tag says it's an image's note (a text file's content may contain the words).
+                              if (att != null) { if ("type=\"image/" !in t.substringBefore('>')) attachToLastUser(files = listOf(att)) }
                               else if (t.startsWith(STEER_PREFIX)) next(Activity.Kind.USER, t.removePrefix(STEER_PREFIX))
                               else if (!t.startsWith("<system-reminder>"))
                                   next(Activity.Kind.USER, t).let { id -> update(id) { it.copy(msgIndex = mi) } }

@@ -263,7 +263,15 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
 
     // In the runs' scope, and `deleting` is always cleared: a finished activity cancelled it half-way and the
     // project stayed hidden until restart.
-    fun deleteProject(name: String) = runScope.launch { try { deleteNow(name) } finally { deleting -= name; refresh() } }
+    // `deleting` is cleared when the project's run has really ended (a run slower than the 10 s wait posted
+    // "is ready" for a deleted project), or at once if there was none.
+    fun deleteProject(name: String) = runScope.launch {
+        val job = existingState(name)?.job
+        try { deleteNow(name) } finally {
+            if (job == null || job.isCompleted) deleting -= name else job.invokeOnCompletion { deleting -= name }
+            refresh()
+        }
+    }
 
     private suspend fun deleteNow(name: String) {
         // Gone from the list at once; the uninstall and file removal below can take a few seconds.

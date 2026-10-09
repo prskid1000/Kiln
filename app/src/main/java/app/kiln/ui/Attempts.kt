@@ -172,7 +172,8 @@ fun AttemptsBar(vm: KilnVM, ps: ProjectState) {
 @Composable
 private fun AttemptsSheet(vm: KilnVM, ps: ProjectState, names: List<String>, onDismiss: () -> Unit) {
     var preview by remember { mutableStateOf<String?>(null) }
-    preview?.let { n -> PreviewSheet(vm, vm.state(n), onDismiss = { preview = null }) { preview = null } }
+    // "Ask Kiln about this" on a copy goes to the parent's composer (the copy has no chat of its own on screen).
+    preview?.let { n -> PreviewSheet(vm, vm.state(n), onDismiss = { preview = null }) { text -> ps.draft.value = text; preview = null; onDismiss() } }
     ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = N.surface) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
