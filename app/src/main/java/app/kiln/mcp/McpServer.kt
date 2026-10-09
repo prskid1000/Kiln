@@ -89,14 +89,15 @@ object McpServer {
     fun stop() { runCatching { socket?.close() }; job?.cancel(); socket = null; status.value = "stopped" }
 
     private fun serve(c: Socket) {
+        // Before the token is checked a peer must not hold a thread forever or make us allocate what it claims.
+        c.soTimeout = 30_000
         val input = BufferedInputStream(c.getInputStream())
         val head = StringBuilder()
-        while (!head.endsWith("\r\n\r\n")) { val b = input.read(); if (b < 0) return; head.append(b.toChar()) }
+        while (!head.endsWith("\r\n\r\n")) { val b = input.read(); if (b < 0 || head.length > 16_384) return; head.append(b.toChar()) }
         val lines = head.lines()
         val (method, path) = lines.first().split(" ").let { it[0] to it.getOrElse(1) { "/" } }
         val headers = lines.drop(1).mapNotNull { l -> l.indexOf(':').takeIf { it > 0 }?.let { l.substring(0, it).lowercase() to l.substring(it + 1).trim() } }.toMap()
         val len = headers["content-length"]?.toIntOrNull() ?: 0
-        val body = ByteArray(len).also { var n = 0; while (n < len) { val r = input.read(it, n, len - n); if (r < 0) break; n += r } }
         val out = c.getOutputStream()
         fun respond(code: Int, json: String?) {
             val bytes = (json ?: "").toByteArray()
@@ -105,6 +106,8 @@ object McpServer {
         }
         val auth = headers["authorization"]?.removePrefix("Bearer ")?.trim()
         if (auth == null || !MessageDigest.isEqual(auth.toByteArray(), token.toByteArray())) return respond(401, """{"error":"unauthorized"}""")
+        if (len !in 0..8_000_000) return respond(413, """{"error":"body too large"}""")
+        val body = ByteArray(len).also { var n = 0; while (n < len) { val r = input.read(it, n, len - n); if (r < 0) break; n += r } }
         if (method != "POST" || !path.startsWith("/mcp")) return respond(404, """{"error":"POST /mcp"}""")
         val req = parseJson(String(body)) as JsonObject
         val id = req["id"]
@@ -174,7 +177,8 @@ object McpServer {
         // The tool set doesn't depend on which project: list it even when there are none yet.
         val any = Graph.paths.projects.listFiles()?.firstOrNull { File(it, "kiln.json").isFile } ?: File(Graph.paths.projects, ".mcp")
         Graph.kiln.tools(Project(any)).second
-            .filter { it.name !in setOf("ask_user", "subagent", "shell") }
+            // qa_check is bound to the project the list was built for: over MCP it would test that app, not the one asked.
+            .filter { it.name !in setOf("ask_user", "subagent", "shell", "qa_check", "choose_look") }
     }
 
     private fun ctx(project: Project) = object : ToolContext {

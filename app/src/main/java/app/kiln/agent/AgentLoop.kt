@@ -39,6 +39,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
@@ -129,6 +130,8 @@ class AgentLoop(
     /** The checklist as this request began: open items left over from an earlier (stopped) request don't count. */
     private var todosAtStart: List<SessionState.Todo> = emptyList()
     private val approvalLock = kotlinx.coroutines.sync.Mutex()
+    /** A helper's loop: nobody sees its approval prompts, so a tool that needs approval is refused, not waited on. */
+    private var headless = false
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
 
@@ -439,7 +442,8 @@ class AgentLoop(
                 "Be strict: unverified means not met. Answer with MET or NOT MET on the first line, then one short reason.",
             messages = listOf(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "Done criteria:\n$criteria\n\nEvidence:\n$evidence"))))),
             tools = emptyList(), maxTokens = 300, effort = "low")
-        val turn = runCatching { providers.adapter(profile).stream(req) {} }.getOrNull() ?: return true to GOAL_UNCHECKED
+        // A Stop during the check is a stop, not "couldn't verify".
+        val turn = runCatching { providers.adapter(profile).stream(req) {} }.onFailure { kotlinx.coroutines.currentCoroutineContext().ensureActive() }.getOrNull() ?: return true to GOAL_UNCHECKED
         val c = turn.usage.cost(profile.priceFor(model)); cost.value += c; settings.addSpend(c)
         val text = turn.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }.joinToString("\n").trim()
         val first = text.lineSequence().firstOrNull()?.uppercase() ?: ""
@@ -537,6 +541,7 @@ class AgentLoop(
     private fun ctx(activityId: Int) = object : ToolContext {
         override val project = this@AgentLoop.project
         override val sessionId = session.meta.id
+        override val readOnly get() = mode == Mode.PLAN
         override val state = this@AgentLoop.state
         override val spillDir = session.spillDir
         override fun progress(line: String) = update(activityId) { it.copy(progress = line) }
@@ -608,6 +613,7 @@ class AgentLoop(
         when (if (name in sessionAllowed) Policy.ALLOW else registry.policy(tool, cfg.approval)) {
             Policy.DENY -> return result(ToolResult.error("$name is disabled by policy"), Activity.Status.DENIED)
             Policy.ASK -> {
+                if (headless) return result(ToolResult.error("$name needs the user's approval, which a helper agent can't get — report what you would do instead"), Activity.Status.DENIED)
                 // One prompt at a time: parallel tools would otherwise overwrite each other's request.
                 val (ok, always) = approvalLock.withLock {
                     if (name in sessionAllowed) return@withLock true to true
@@ -635,7 +641,8 @@ class AgentLoop(
                 r = r.copy(text = r.text + "\n\n[hook $h skipped: it needs approval]"); continue
             }
             update(aid) { it.copy(progress = "hook: $h") }
-            val hr = runCatching { withTimeout(ht.timeoutMs) { ht.run(ctx(aid), obj()) } }.getOrElse { ToolResult.error(it.message ?: "hook failed") }
+            val hr = runCatching { withTimeout(ht.timeoutMs) { ht.run(ctx(aid), obj()) } }
+                .getOrElse { kotlinx.coroutines.currentCoroutineContext().ensureActive(); ToolResult.error(it.message ?: "hook failed") }
             r = r.copy(text = r.text + "\n\n[hook $h]\n" + hr.text, images = r.images + hr.images)
         }
         todos.value = state.todos
@@ -678,7 +685,7 @@ class AgentLoop(
             onFeed: ((List<Activity>) -> Unit)? = null,
         ): Triple<String, Usage, Double> = kotlinx.coroutines.coroutineScope {
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
-            val loop = AgentLoop(project, s, providers, registry, tools, settings, role)
+            val loop = AgentLoop(project, s, providers, registry, tools, settings, role).also { it.headless = true }
             fun answer() = s.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")
             val reported = mutableSetOf<Int>()

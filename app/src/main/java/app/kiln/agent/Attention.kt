@@ -35,8 +35,10 @@ object Attention {
         Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
         PendingIntent.FLAG_IMMUTABLE)
 
+    // The request code is per project: Android matches PendingIntents ignoring extras, so one shared code made
+    // project A's Allow carry project B (FLAG_UPDATE_CURRENT replaced it) and approve the wrong request.
     private fun action(ctx: Context, project: String, what: String, req: Int, mutable: Boolean = false) =
-        PendingIntent.getBroadcast(ctx, req, Intent(ctx, AttentionReceiver::class.java).setAction(what).putExtra("project", project),
+        PendingIntent.getBroadcast(ctx, id(project) * 4 + req, Intent(ctx, AttentionReceiver::class.java).setAction(what).putExtra("project", project),
             if (mutable) PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     fun approval(ctx: Context, project: String, label: String, tool: String, detail: String) {

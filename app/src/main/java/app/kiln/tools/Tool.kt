@@ -61,6 +61,8 @@ interface ToolContext {
     fun progress(line: String)
     /** The steps a helper agent is taking inside this call (qa_check), shown nested under it in the chat. */
     fun children(steps: List<app.kiln.agent.Activity>) {}
+    /** The calling request may change nothing (plan mode): helpers it starts get read-only tools too. */
+    val readOnly: Boolean get() = false
     /** Ask the user a question with options (blocks until answered). */
     suspend fun ask(question: String, options: List<String>): String
     /** Ask up to 4 structured questions at once (Claude Code style); one answer per question, multi-select answers joined by ", ". */

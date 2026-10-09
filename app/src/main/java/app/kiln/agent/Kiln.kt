@@ -57,6 +57,7 @@ import app.kiln.tools.WaitForTool
 import app.kiln.tools.WebFetchTool
 import app.kiln.tools.WriteFileTool
 import app.kiln.tools.schema
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 import java.io.File
 
@@ -102,7 +103,7 @@ class Kiln(
         val cfg = settings.value.merged(project.dir)
         val extra = mutableListOf<Tool>()
         extra += CommandTool.load(listOf(File(paths.files, "tools.d")), warden) + CommandTool.load(listOf(File(project.kilnDir, "tools.d")), warden, trusted = false)
-        for (srv in cfg.mcpServers.filter { it.enabled }) runCatching { extra += McpClient(srv).connect() }
+        for (srv in cfg.mcpServers.filter { it.enabled }) runCatching { extra += McpClient(srv).connect() }.onFailure { kotlinx.coroutines.currentCoroutineContext().ensureActive() }
         // Many MCP tools would bloat every request: hold them back behind tool_search.
         val mcp = extra.filterIsInstance<app.kiln.tools.McpTool>()
         if (mcp.size > DEFER_MCP_OVER) mcp.forEach { it.deferred = true }
@@ -164,6 +165,8 @@ class Kiln(
         // Helpers can't ask the user (nobody answers a headless loop) or start other helpers.
         val tools = available.filter { t ->
             t.name !in HELPER_TOOLS && t.name != "ask_user" && t.name != "choose_look" &&
+                // A plan-mode request changes nothing, and neither do the helpers it starts (a project agent may list write tools).
+                (ctx?.readOnly != true || Trait.READ_ONLY in t.traits) &&
                 (spec.tools?.contains(t.name) ?: (Trait.READ_ONLY in t.traits))
         }
         val prompt = spec.prompt + if (spec.kitDocs) "\n\nKit reference:\n" + toolchain.kitApi() + "\n\nKit index:\n" + toolchain.kitIndex() else ""

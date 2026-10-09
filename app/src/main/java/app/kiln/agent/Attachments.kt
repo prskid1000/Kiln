@@ -62,7 +62,7 @@ object Attachments {
     private fun image(a: Attachment): Pair<String, String>? {
         val bmp = BitmapFactory.decodeByteArray(a.bytes, 0, a.bytes.size) ?: return null
         val k = MAX_SIDE.toFloat() / maxOf(bmp.width, bmp.height)
-        val out = if (k < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt(), (bmp.height * k).toInt(), true) else bmp
+        val out = if (k < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt().coerceAtLeast(1), (bmp.height * k).toInt().coerceAtLeast(1), true) else bmp
         val png = a.mime == "image/png" && k >= 1f && a.bytes.size < 1_500_000
         if (png) return "image/png" to Base64.getEncoder().encodeToString(a.bytes)
         val buf = ByteArrayOutputStream().also { out.compress(Bitmap.CompressFormat.JPEG, 88, it) }
