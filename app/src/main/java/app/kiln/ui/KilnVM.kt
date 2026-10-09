@@ -175,6 +175,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                     // Released first: a follow-up sent as the run ends is a new run, not "still working".
                     s.starting.set(false)
                     watch.cancel()
+                    // A prompt notification still up (the watcher was stopped before seeing it answered) goes with the run.
+                    app.kiln.agent.Attention.clear(ctx, name)
                     val last = l.feed.value.lastOrNull { it.kind == app.kiln.agent.Activity.Kind.ASSISTANT }?.text ?: ""
                     app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)

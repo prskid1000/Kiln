@@ -134,6 +134,8 @@ class AgentLoop(
     private var headless = false
     /** A helper started by a read-only (plan) request: read-only too. */
     private var inheritReadOnly = false
+    /** A helper's chat's spend when it started (counted toward the session cap). */
+    private var inheritedSpend = 0.0
     private val sessionAllowed = mutableSetOf<String>()
     private val spillN = AtomicInteger(session.spillDir.listFiles()?.size ?: 0)
 
@@ -276,7 +278,8 @@ class AgentLoop(
         val recentSingles = mutableListOf<JsonObject>()
         while (true) {
             if (++steps > cfg.maxSteps) { stoppedWith("Stopped after ${cfg.maxSteps} steps (limit in Settings)."); return }
-            if (cost.value >= cfg.sessionUsd) { next(Activity.Kind.NOTICE, "Session spending cap reached (\$${"%.2f".format(cfg.sessionUsd)})."); return }
+            // A helper counts what its chat had already spent (it started at 0 and could spend a whole cap more).
+            if (cost.value + inheritedSpend >= cfg.sessionUsd) { next(Activity.Kind.NOTICE, "Session spending cap reached (\$${"%.2f".format(cfg.sessionUsd)})."); return }
             if (settings.spentToday() >= cfg.dailyUsd) { next(Activity.Kind.NOTICE, "Daily spending cap reached (\$${"%.2f".format(cfg.dailyUsd)})."); return }
 
             val turn = callModel(cfg) ?: return
@@ -566,6 +569,7 @@ class AgentLoop(
         override val spillDir = session.spillDir
         override fun progress(line: String) = update(activityId) { it.copy(progress = line) }
         override fun children(steps: List<Activity>) = update(activityId) { it.copy(children = steps) }
+        override val spent get() = cost.value + inheritedSpend
         override fun addCost(usd: Double) {
             cost.value += usd
             session.updateMeta { it.copy(costUsd = cost.value) }
@@ -708,11 +712,12 @@ class AgentLoop(
             readOnly: Boolean = false,
             /** Gets the helper's spend however it ends (a timeout or Stop counted nothing before). */
             onCost: ((Double) -> Unit)? = null,
+            alreadySpent: Double = 0.0,
         ): Triple<String, Usage, Double> = kotlinx.coroutines.coroutineScope {
             // Scratch sessions left by a helper the process died during: cleared once they're a day old.
             File(sessionsRoot, ".sub").listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }?.forEach { it.deleteRecursively() }
             val s = Session.create(File(sessionsRoot, ".sub").apply { mkdirs() }, project.name, systemPrompt)
-            val loop = AgentLoop(project, s, providers, registry, tools, settings, role).also { it.headless = true; it.inheritReadOnly = readOnly }
+            val loop = AgentLoop(project, s, providers, registry, tools, settings, role).also { it.headless = true; it.inheritReadOnly = readOnly; it.inheritedSpend = alreadySpent }
             fun answer() = s.messages.lastOrNull { it.role == "assistant" }?.content
                 ?.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }?.joinToString("\n")
             val reported = mutableSetOf<Int>()
@@ -741,7 +746,10 @@ class AgentLoop(
                 if (onStep != null) for (a in last) if (a.kind == Activity.Kind.TOOL && a.status != Activity.Status.RUNNING && reported.add(a.id))
                     onStep(stepLine(a))
                 Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
-            } finally { onCost?.invoke(loop.cost.value); s.dir.deleteRecursively() }
+            } finally {
+                // Neither may replace the helper's result or a Stop (a full disk made onCost's save throw here).
+                runCatching { onCost?.invoke(loop.cost.value) }; runCatching { s.dir.deleteRecursively() }
+            }
         }
 
         /** Single tap / type_text / swipe / press_key calls as test_flow steps (JSON), for the batching reminder. */

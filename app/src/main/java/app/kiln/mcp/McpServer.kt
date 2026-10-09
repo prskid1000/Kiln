@@ -178,10 +178,11 @@ object McpServer {
     /** No ask_user / subagent / approvals over MCP: the remote client is the agent and the user. */
     // Built once a minute (or when settings change), not per request: building connects to every configured MCP
     // server, which cost round trips and left orphaned sessions on each call.
-    @Volatile private var cached: Triple<app.kiln.agent.Settings, Long, List<Tool>>? = null
+    @Volatile private var cached: Triple<Pair<app.kiln.agent.Settings, app.kiln.device.Warden.Status>, Long, List<Tool>>? = null
 
     private fun tools(): List<Tool> {
-        val s = Graph.kiln.settings.value; val now = System.currentTimeMillis()
+        // Keyed by Warden's state too: device tools appear only once it's ready.
+        val s = Graph.kiln.settings.value to Graph.warden.status(); val now = System.currentTimeMillis()
         cached?.let { (cs, at, t) -> if (cs == s && now - at < 60_000) return t }
         return buildTools().also { cached = Triple(s, now, it) }
     }

@@ -174,7 +174,7 @@ class Kiln(
             finished = spec.finished, unfinished = spec.unfinished, onStep = onStep,
             // Read-only helpers (explore, reviewer: no tool list of their own) never rewrite sources, even through check's fixes.
             onFeed = ctx?.let { c -> { feed -> c.children(feed.map { it.copy(agent = spec.tag) }) } }, readOnly = ctx?.readOnly == true || spec.tools == null,
-            onCost = { usd -> ctx?.addCost(usd) })
+            onCost = { usd -> ctx?.addCost(usd) }, alreadySpent = ctx?.spent ?: 0.0)
     }
 }
 

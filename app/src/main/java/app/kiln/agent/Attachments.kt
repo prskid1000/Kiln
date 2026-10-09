@@ -60,10 +60,15 @@ object Attachments {
 
     /** (media type, base64), re-encoded as JPEG/PNG and capped at [MAX_SIDE]. */
     private fun image(a: Attachment): Pair<String, String>? {
-        val bmp = BitmapFactory.decodeByteArray(a.bytes, 0, a.bytes.size) ?: return null
+        // Decoded at a fraction of its size first: a 50 MP photo at full size needed ~200 MB and failed the send.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(a.bytes, 0, a.bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
+        val bmp = BitmapFactory.decodeByteArray(a.bytes, 0, a.bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
         val k = MAX_SIDE.toFloat() / maxOf(bmp.width, bmp.height)
         val out = if (k < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt().coerceAtLeast(1), (bmp.height * k).toInt().coerceAtLeast(1), true) else bmp
-        val png = a.mime == "image/png" && k >= 1f && a.bytes.size < 1_500_000
+        val png = a.mime == "image/png" && k >= 1f && sample == 1 && a.bytes.size < 1_500_000
         if (png) return "image/png" to Base64.getEncoder().encodeToString(a.bytes)
         val buf = ByteArrayOutputStream().also { out.compress(Bitmap.CompressFormat.JPEG, 88, it) }
         return "image/jpeg" to Base64.getEncoder().encodeToString(buf.toByteArray())

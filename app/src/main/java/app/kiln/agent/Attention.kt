@@ -55,7 +55,7 @@ object Attention {
 
     fun approval(ctx: Context, project: String, label: String, tool: String, detail: String) {
         if (visible && onScreen == project) return
-        val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground)
+        val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground).setOnlyAlertOnce(true)
             .setContentTitle("$label: allow $tool?").setContentText(detail.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail.take(600)))
             .setContentIntent(open(ctx, project)).setAutoCancel(true)
@@ -69,7 +69,7 @@ object Attention {
         if (visible && onScreen == project) return
         val reply = NotificationCompat.Action.Builder(0, "Answer", action(ctx, project, "answer", 3, key(text), mutable = true))
             .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Your answer").build()).build()
-        val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground)
+        val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground).setOnlyAlertOnce(true)
             .setContentTitle("$label asks").setContentText(text.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open(ctx, project)).setAutoCancel(true).apply { if (answerable) addAction(reply) }.build()
@@ -78,7 +78,7 @@ object Attention {
 
     fun done(ctx: Context, project: String, label: String, summary: String) {
         if (visible && onScreen == project) return
-        val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground)
+        val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground).setOnlyAlertOnce(true)
             .setContentTitle("$label is ready").setContentText(summary.take(140))
             .setStyle(NotificationCompat.BigTextStyle().bigText(summary.take(800)))
             .setContentIntent(open(ctx, project)).setAutoCancel(true).build()

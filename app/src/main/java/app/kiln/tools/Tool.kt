@@ -89,6 +89,8 @@ interface ToolContext {
     val spillDir: File
     /** Spend made on this request's behalf (a subagent's model calls) — counts toward the chat's cap. */
     fun addCost(usd: Double) {}
+    /** What the calling chat has spent so far: a helper's spending cap counts it too. */
+    val spent: Double get() = 0.0
 }
 
 interface Tool {
