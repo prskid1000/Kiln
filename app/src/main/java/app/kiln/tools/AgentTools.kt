@@ -10,9 +10,22 @@ private fun JsonObject.req(k: String) = str(k) ?: throw IllegalArgumentException
 
 class TodoTool : Tool {
     override val name = "todo"
-    override val description = "Keep a visible checklist for the task. Send the complete list each time; status is pending | in_progress | done. Use it for anything with 3+ steps."
+    override val description = "Your plan, shown to the user as a live checklist. Send the complete list each time; status is " +
+        "pending | in_progress | done.\n" +
+        "How to plan:\n" +
+        "- 4–10 items, each a concrete outcome you can check off — say what will be true, not an activity: " +
+        "\"Expenses screen: list grouped by date, search, swipe to delete\", not \"work on expenses\" or \"load skills\".\n" +
+        "- In build order: data (models, stores) → one item per screen or feature → builds and runs → one item per user journey " +
+        "tested with test_flow → qa_check passes.\n" +
+        "- Exactly one item in_progress: the one you're on now.\n" +
+        "- Mark an item done the moment it's finished and checked, in the same step as your next action — don't save ticks for later.\n" +
+        "- Add an item when you discover work; if one becomes unnecessary, mark it done and say why in its text.\n" +
+        "Example (expense tracker): [done] Data: Expense (KDate), Repo with KCollection + KStore · [in_progress] Home: month total, " +
+        "donut by category, latest 5, budget warning · [pending] Expenses: grouped by date, search, swipe-to-delete, tap to edit · " +
+        "[pending] Add: form with validation · [pending] Settings: budget, currency, reminder · [pending] Builds and runs on the phone · " +
+        "[pending] Journeys tested: add, edit, delete, search, settings · [pending] qa_check passes."
     override val schema = schema {
-        objList("items", "The full checklist.", { str("text", "Step."); str("status", "Status.", enum = listOf("pending", "in_progress", "done")) })
+        objList("items", "The full checklist.", { str("text", "An outcome you can check off."); str("status", "Status.", enum = listOf("pending", "in_progress", "done")) })
     }
     override val traits = setOf(Trait.READ_ONLY)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
