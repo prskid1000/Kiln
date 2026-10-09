@@ -64,6 +64,7 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -298,6 +299,12 @@ private fun Message(a: Activity, hasSnapshot: Boolean = false, onAction: ((TurnA
         }
         Activity.Kind.NOTICE -> Banner(Icons.Rounded.Warning, a.text, N.warn, onContinue?.let { "Continue" to it })
         Activity.Kind.ERROR -> Banner(Icons.Rounded.ErrorOutline, a.text, N.danger, onContinue?.let { "Retry" to it })
+        // A choice the user made (the look): a quiet line, not a warning banner.
+        Activity.Kind.INFO -> Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Palette, null, tint = N.textMuted, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(a.text, style = T.bodySmall.copy(color = N.textMuted))
+        }
         else -> {}
     }
 }

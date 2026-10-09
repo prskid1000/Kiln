@@ -72,7 +72,8 @@ data class Activity(
     /** Transcript index of a USER message (for rewind / fork / change review); -1 if none. */
     val msgIndex: Int = -1,
 ) {
-    enum class Kind { USER, ASSISTANT, THINKING, TOOL, NOTICE, ERROR }
+    /** NOTICE is something to look at (a cap, a retry, a stop); INFO just records a choice (the look picked). */
+    enum class Kind { USER, ASSISTANT, THINKING, TOOL, NOTICE, INFO, ERROR }
     enum class Status { RUNNING, DONE, FAILED, DENIED, STOPPED }
 }
 
@@ -244,7 +245,7 @@ class AgentLoop(
                 pending.delete()
                 val applied = runCatching { app.kiln.tools.Looks.applyTo(project, answer) }.getOrDefault(false)
                 val (note, summary) = app.kiln.tools.Looks.instruction(answer)
-                next(Activity.Kind.NOTICE, summary)
+                next(Activity.Kind.INFO, summary)   // the user's own choice, not a warning
                 obj("type" to "text", "text" to "<system-reminder>Before you started, the user picked this app's look. " +
                     (if (applied) "Kiln has already put it in MainActivity (the Theme override) — keep that override exactly as it is when you edit MainActivity; style screens only with Nocturne.* tokens and K components. "
                      else "") + note + "</system-reminder>")
