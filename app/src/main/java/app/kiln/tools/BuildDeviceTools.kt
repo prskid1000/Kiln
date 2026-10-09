@@ -818,9 +818,22 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
             device.tap(x, y); delay(600)
             return true to "tap “$t” → ${screenChange(ctx, before, x, y)}"
         }
+        // type "" into a field clears it (a flow clearing a search had no way to).
+        if (st.str("type") == "" && s("into") != null) {
+            val field = s("into")!!
+            val node = before.filter { "EditText" in it.cls }.let { device.find(it, field) } ?: device.find(before, field)
+                ?: return false to "clear “$field”: no such field on screen"
+            val (fx, fy) = reachable(node) ?: return false to "clear “$field”: ${offScreen(node, field)}"
+            device.tap(fx, fy); delay(400)
+            val r = device.type("", replace = true)
+            return r.ok to (if (r.ok) "cleared “$field”" else "clear “$field”: ${r.err}")
+        }
         s("type")?.let { text ->
             s("into")?.let { field ->
-                val node = device.find(before, field) ?: return false to "type into “$field”: no such field on screen"
+                // The field itself, not a label with the same words (its placeholder "Search expenses" was tapped,
+                // and nothing had focus).
+                val node = before.filter { "EditText" in it.cls }.let { device.find(it, field) } ?: device.find(before, field)
+                    ?: return false to "type into “$field”: no such field on screen"
                 // Same reachability as tap: a field under the keyboard isn't focused, and the text would go elsewhere.
                 val (fx, fy) = reachable(node) ?: return false to "type into “$field”: ${offScreen(node, field)}"
                 device.tap(fx, fy); delay(400)
@@ -931,6 +944,12 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
                 }
                 is JsonObject -> {
                     opt(v)
+                    // {"expect": {"not_contains": "x"}} (and absent/gone/hidden): an expect_gone, not an unknown step.
+                    if (k == "expect") listOf("not_contains", "notContains", "not", "absent", "gone", "hidden", "not_visible")
+                        .firstNotNullOfOrNull { v.str(it) }?.let { gone ->
+                            out += JsonObject(mapOf("expect_gone" to JsonPrimitive(gone)) + (opts["timeout_ms"]?.let { mapOf("timeout_ms" to it) } ?: emptyMap()))
+                            continue
+                        }
                     val c = listOf("contains", "texts", "containsText", "contains_text", "text_contains", "has_text").firstNotNullOfOrNull { v[it] }
                     if (c is JsonArray) c.mapNotNull { (it as? JsonPrimitive)?.content }
                     // For typing, the text is text/value — label/target name the field (review: it typed "Amount").

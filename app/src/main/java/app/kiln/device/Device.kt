@@ -307,7 +307,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
             val m = bounds.find(e.getAttribute("bounds")) ?: continue
             val (l, t, rr, b) = m.destructured
             val n = UiNode(
-                text = e.getAttribute("text"), desc = e.getAttribute("content-desc"),
+                // Runs of spaces collapsed: merged rows read "Shopping  ₹750.00", and "Shopping ₹750.00" never matched.
+                text = e.getAttribute("text").replace(Regex("""[ \t]{2,}"""), " "), desc = e.getAttribute("content-desc").replace(Regex("""[ \t]{2,}"""), " "),
                 id = e.getAttribute("resource-id"), cls = e.getAttribute("class"),
                 clickable = e.getAttribute("clickable") == "true", scrollable = e.getAttribute("scrollable") == "true",
                 checked = if (e.getAttribute("checkable") == "true") e.getAttribute("checked") == "true" else null,

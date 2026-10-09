@@ -35,6 +35,9 @@ class CoreTest {
     @Test fun `test_flow steps are read the way models write them`() {
         fun steps(json: String) = app.kiln.tools.TestFlowTool.expand(app.kiln.core.parseJson(json) as kotlinx.serialization.json.JsonObject)
             .map { it.toString() }
+        // A "not contains" expectation is an expect_gone; the final run's flow failed it as an unknown step.
+        assertEquals(listOf("""{"expect_gone":"Shopping ₹750.00"}"""), steps("""{"expect":{"not_contains":"Shopping ₹750.00"}}"""))
+        assertEquals(listOf("""{"type":"shopping","into":"Search expenses"}"""), steps("""{"type_text":{"text":"shopping","into":"Search expenses"}}"""))
         // Several actions in one step run in order; contains lists become one expectation each (run 8).
         assertEquals(listOf("""{"tap":"Home tab"}""", """{"expect":"₹500"}""", """{"expect":"Food"}"""),
             steps("""{"tap":"Home tab","expect":{"contains":["₹500","Food"]}}"""))
