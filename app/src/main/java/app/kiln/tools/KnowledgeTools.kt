@@ -530,6 +530,18 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 out += "Give KCollection/KStore its item type: KCollection<Expense>(context, \"expenses\"), KStore(context, \"settings\", Settings()). Without it every later use fails to infer."
             else out += "Kotlin can't infer a type here: add the type explicitly (val x: List<Expense> = …, map<Expense, String> { … }) — usually one missing type causes the rest of these errors."
         }
+        // Run 14: a bare LocalDate in a @Serializable class.
+        if ("serializer was not found for type 'LocalDate" in m || "serializer was not found for type 'LocalTime" in m || "serializer was not found for type 'LocalDateTime" in m)
+            out += "Dates in stored data need the kit's types: `val date: KDate = LocalDate.now()` (KTime for LocalTime, KDateTime for LocalDateTime) — they save as ISO text."
+        // Run 14: KStore(ctx, name, Foo.serializer()) — the serializer taken as the default value.
+        if (Regex("KStore<KSerializer<").containsMatchIn(m) || (Regex("""KStore\s*\(""").containsMatchIn(src) && ".serializer()" in src))
+            out += "KStore takes a name and a default value — no Context or serializer: `val settings = KStore(\"settings\", AppSettings())` (in an object Repo)."
+        // Run 14: inventing a way to reach the app context.
+        if (Regex("unresolved reference '(appContext|context|applicationContext|instance)'").containsMatchIn(m) && "KitInitProvider" in src)
+            out += "Stores need no Context: `KCollection<Expense>(\"expenses\")`, `KStore(\"settings\", Settings())`. If you really need one, use `KApp.context`."
+        // Run 14: KListRow's trailing is text now; custom content goes in trailingContent.
+        if (Regex("""\btrailing\s*=\s*\{""").containsMatchIn(src) && "'String?' was expected" in m)
+            out += "KListRow's `trailing` is text (`trailing = KFormat.money(e.amount, \"INR\")`); for a composable use `trailingContent = { … }`."
         // Text styles are on MaterialTheme, not the Typography class (runs 2, 5, 7).
         if (Regex("""\bTypography\.(display|headline|title|body|label)\w*""").containsMatchIn(src))
             out += "Text styles come from the theme: `style = MaterialTheme.typography.bodyMedium` (import androidx.compose.material3.MaterialTheme), not `Typography.bodyMedium`."
