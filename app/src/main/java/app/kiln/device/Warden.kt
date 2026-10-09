@@ -8,6 +8,7 @@ import app.warden.api.IWarden
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -67,12 +68,15 @@ class Warden(private val context: Context) {
             coroutineScope {
                 val out = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.inputStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
                 val err = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.errorStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
-                // A child that exits early closes its stdin: that's not our failure.
-                runCatching { ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).use { o -> if (stdin != null) o.write(stdin) } }
                 val done = java.util.concurrent.CompletableFuture<Int>()
                 Thread({ done.complete(runCatching { p.waitFor() }.getOrDefault(-1)) }, "warden-wait").apply { isDaemon = true }.start()
-                val code = runCatching { done.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrNull()
+                // stdin is written alongside the wait: a child that stops reading must not block us past the timeout
+                // (destroy() ends the write). One that exits early closes its stdin: that's not our failure.
+                val feed = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).use { o -> if (stdin != null) o.write(stdin) } } }
+                // Suspending, so Stop cancels it (a blocking get held an install for up to 5 minutes).
+                val code = withTimeoutOrNull(timeoutMs) { done.await() }
                 if (code == null) runCatching { p.destroy() }
+                feed.await()
                 Raw(code ?: -1, out.await(), err.await(), System.currentTimeMillis() - t0, timedOut = code == null)
             }
         } catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; throw e

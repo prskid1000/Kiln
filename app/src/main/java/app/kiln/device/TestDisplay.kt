@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
@@ -54,14 +55,20 @@ class TestDisplay(private val context: Context, private val size: Triple<Int, In
      * What the display shows now, full size. A still screen produces no new frames, so the last
      * frame read is kept and returned: it is still what's showing. Null before anything drew.
      */
-    suspend fun bitmap(wait: Boolean = true): Bitmap? = withContext(Dispatchers.IO) {
-        val r = reader ?: return@withContext null
-        var img = r.acquireLatestImage()
+    suspend fun bitmap(wait: Boolean = true): Bitmap? = withContext(Dispatchers.IO) { frameLock.withLock { frame(wait) } }
+
+    /** One reader at a time: the recorder, the preview and screenshots each holding a frame overran maxImages (2) and threw. */
+    private val frameLock = kotlinx.coroutines.sync.Mutex()
+
+    private suspend fun frame(wait: Boolean): Bitmap? {
+        val r = reader ?: return null
+        fun latest() = runCatching { r.acquireLatestImage() }.getOrNull()
+        var img = latest()
         var tries = 0
-        while (img == null && wait && lastFrame == null && tries++ < 20) { delay(100); img = r.acquireLatestImage() }
-        img ?: return@withContext lastFrame
+        while (img == null && wait && lastFrame == null && tries++ < 20) { delay(100); img = latest() }
+        img ?: return lastFrame
         // Always close the image: with maxImages = 2, two leaked frames would end all captures.
-        try {
+        return try {
             val plane = img.planes[0]
             val stride = plane.rowStride / plane.pixelStride
             // Some GPUs don't pad the last row: copy only the rows the buffer actually holds.

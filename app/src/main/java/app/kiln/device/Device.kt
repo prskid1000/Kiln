@@ -48,7 +48,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         // A project recreated under an old name has a new signing key: Android refuses the update.
         // For Kiln's own apps the fix is a clean reinstall (the old copy's data goes with it).
         if (!r.ok && "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in r.all) {
-            val pkg = Regex("package (kiln\\.app\\.[a-z0-9_]+)").find(r.all)?.groupValues?.get(1) ?: return r
+            // "Existing package …" (older Android) or "Package … signatures do not match" (newer): either case.
+            val pkg = Regex("package (kiln\\.app\\.[a-z0-9_]+)", RegexOption.IGNORE_CASE).find(r.all)?.groupValues?.get(1) ?: return r
             uninstall(pkg)
             return push().let { it.copy(out = it.out + "\n(reinstalled: the signing key changed, so the old copy and its data were removed)") }
         }
