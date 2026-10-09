@@ -318,7 +318,9 @@ class OpenAIResponsesAdapter(profile: Profile, apiKey: String?) : OpenAIBase(pro
                         // content_filter isn't "keep going": only max_output_tokens maps to MAX_TOKENS.
                         incomplete = ((final?.get("incomplete_details") as? JsonObject)?.str("reason")) ?: "max_output_tokens"
                     }
-                    "response.failed", "error" -> throw ProviderException(data.take(600), retryable = false)
+                    // A server error or rate limit inside the stream is worth a retry: judge it like any stream error.
+                    "response.failed", "error" -> throw streamError(
+                        ((j["response"] as? JsonObject)?.get("error") as? JsonObject) ?: (j["error"] as? JsonObject) ?: j, data.take(600))
                 }
             }
         }

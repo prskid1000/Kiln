@@ -25,7 +25,9 @@ class CrashReceiver : BroadcastReceiver() {
         val report = intent.getStringExtra("report")?.take(20_000) ?: return
         // Only Kiln's own projects, and only from the app itself when Android can tell us the sender.
         if (!pkg.startsWith("kiln.app.")) return
-        if (android.os.Build.VERSION.SDK_INT >= 34) sentFromPackage?.let { if (it != pkg) return }
+        // Android 14+: the kit shares its identity, so a report must come from the app it names (any app could
+        // otherwise post fake crash notifications and pre-fill the chat).
+        if (android.os.Build.VERSION.SDK_INT >= 34 && sentFromPackage != pkg) return
         Graph.init(context.applicationContext as android.app.Application)
         val name = pkg.removePrefix("kiln.app.")
         val dir = File(Graph.paths.projects, name).takeIf { File(it, "kiln.json").isFile } ?: return

@@ -27,7 +27,12 @@ object Attempts {
         discard(root, from.name)
         val label = from.meta().label
         return (1..n).map { i ->
-            val name = "${from.name.take(30)}_try$i"
+            // A folder of that name that isn't this project's attempt (a real "notes_try1", or another project
+            // sharing the first 30 characters) is never deleted: pick a free name instead.
+            val base = "${from.name.take(30)}_try$i"
+            fun mine(f: File) = runCatching { File(f, ".kiln/$MARKER").readText().trim() }.getOrNull() == from.name
+            val name = generateSequence(0) { it + 1 }.map { k -> if (k == 0) base else "${base}_$k" }
+                .first { val f = File(root, it); !f.exists() || mine(f) }
             File(root, name).deleteRecursively()
             Project.duplicate(root, from, name, "$label · try $i").also {
                 File(it.kilnDir, MARKER).writeText(from.name)

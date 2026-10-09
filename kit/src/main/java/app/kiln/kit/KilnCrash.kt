@@ -42,9 +42,14 @@ object KilnCrash {
                 Log.e(TAG, line.toString())
                 // A development build tells Kiln on this phone, which offers to fix it. Release builds
                 // never do: on someone else's phone the report would go to whatever app is there.
-                if (debuggable) context.sendBroadcast(Intent("app.kiln.CRASH")
-                    .setClassName("app.kiln", "app.kiln.agent.CrashReceiver")
-                    .putExtra("pkg", pkg).putExtra("report", line.toString()))
+                if (debuggable) {
+                    val report = Intent("app.kiln.CRASH").setClassName("app.kiln", "app.kiln.agent.CrashReceiver")
+                        .putExtra("pkg", pkg).putExtra("report", line.toString())
+                    // Android 14+: say who we are, so Kiln can refuse reports other apps forge in our name.
+                    if (android.os.Build.VERSION.SDK_INT >= 34) context.sendBroadcast(report, null,
+                        android.app.BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle())
+                    else context.sendBroadcast(report)
+                }
             }
             previous?.uncaughtException(thread, error)
         }

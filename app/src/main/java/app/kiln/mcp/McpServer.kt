@@ -137,6 +137,9 @@ object McpServer {
             val projectName = args.str("project") ?: error("missing project")
             val project = Project(File(Graph.paths.projects, projectName)).also { require(it.metaFile.isFile) { "no project $projectName" } }
             val tool = tools().firstOrNull { it.name == name } ?: error("unknown tool $name")
+            // The user's settings hold over MCP too: a tool set to deny, or switched off for this project, doesn't run.
+            val cfg = Graph.kiln.settings.value.merged(project.dir)
+            if (cfg.approval[name]?.lowercase() == "deny" || name in cfg.disabledTools) error("$name is disabled by the user's settings")
             val r = runBlocking { tool.run(ctx(project), JsonObject(args - "project")) }
             obj("content" to JsonArray(listOf(obj("type" to "text", "text" to r.text)) + r.images.map {
                 obj("type" to "image", "mimeType" to "image/png", "data" to Base64.getEncoder().encodeToString(it)) }),
@@ -179,6 +182,8 @@ object McpServer {
         Graph.kiln.tools(Project(any)).second
             // qa_check is bound to the project the list was built for: over MCP it would test that app, not the one asked.
             .filter { it.name !in setOf("ask_user", "subagent", "shell", "qa_check", "choose_look") }
+            // A project's own command tools (.kiln/tools.d) are untrusted and would run in every project from here.
+            .filter { it !is app.kiln.tools.CommandTool || it.trusted }
     }
 
     private fun ctx(project: Project) = object : ToolContext {

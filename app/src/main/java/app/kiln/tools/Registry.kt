@@ -43,7 +43,7 @@ data class CommandToolDef(
     val timeoutMs: Long = 60_000,
 )
 
-class CommandTool(private val def: CommandToolDef, private val warden: Warden, trusted: Boolean = true) : Tool {
+class CommandTool(private val def: CommandToolDef, private val warden: Warden, val trusted: Boolean = true) : Tool {
     override val name = def.name
     override val description = def.description + if (def.runAs == "broker") " (runs as shell through Warden)" else ""
     override val schema: JsonObject = obj("type" to "object", "properties" to JsonObject(def.params),
@@ -71,10 +71,15 @@ class CommandTool(private val def: CommandToolDef, private val warden: Warden, t
         fun load(dirs: List<File>, warden: Warden, trusted: Boolean = true): List<CommandTool> = dirs.flatMap { d ->
             d.listFiles { f -> f.extension == "json" }?.sortedBy { it.name }?.mapNotNull { f ->
                 runCatching { CommandTool(KJ.decodeFromString(CommandToolDef.serializer(), f.readText()), warden, trusted) }.getOrNull()
+                    // A bad or reserved name would fail every request (or crash opening the chat): skip that tool.
+                    ?.takeIf { Regex("^[a-zA-Z0-9_-]{1,64}$").matches(it.name) && it.name !in RESERVED_TOOL_NAMES }
             } ?: emptyList()
         }
     }
 }
+
+/** Tools Kiln adds after the others: a command tool may not take their names. */
+private val RESERVED_TOOL_NAMES = setOf("subagent", "qa_check", "tool_search")
 
 // ---------------------------------------------------------------- MCP client
 

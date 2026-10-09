@@ -37,8 +37,10 @@ object Attention {
 
     // The request code is per project: Android matches PendingIntents ignoring extras, so one shared code made
     // project A's Allow carry project B (FLAG_UPDATE_CURRENT replaced it) and approve the wrong request.
-    private fun action(ctx: Context, project: String, what: String, req: Int, mutable: Boolean = false) =
-        PendingIntent.getBroadcast(ctx, id(project) * 4 + req, Intent(ctx, AttentionReceiver::class.java).setAction(what).putExtra("project", project),
+    // [key] names the request the buttons answer: a stale notification must not answer a later, different one.
+    private fun action(ctx: Context, project: String, what: String, req: Int, key: String, mutable: Boolean = false) =
+        PendingIntent.getBroadcast(ctx, id(project) * 4 + req, Intent(ctx, AttentionReceiver::class.java).setAction(what)
+            .putExtra("project", project).putExtra("key", key),
             if (mutable) PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     fun approval(ctx: Context, project: String, label: String, tool: String, detail: String) {
@@ -47,14 +49,14 @@ object Attention {
             .setContentTitle("$label: allow $tool?").setContentText(detail.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail.take(600)))
             .setContentIntent(open(ctx)).setAutoCancel(true)
-            .addAction(0, "Deny", action(ctx, project, "deny", 1))
-            .addAction(0, "Allow", action(ctx, project, "allow", 2)).build()
+            .addAction(0, "Deny", action(ctx, project, "deny", 1, key(tool, detail)))
+            .addAction(0, "Allow", action(ctx, project, "allow", 2, key(tool, detail))).build()
         runCatching { nm(ctx).notify(id(project), n) }
     }
 
     fun question(ctx: Context, project: String, label: String, text: String) {
         if (visible) return
-        val reply = NotificationCompat.Action.Builder(0, "Answer", action(ctx, project, "answer", 3, mutable = true))
+        val reply = NotificationCompat.Action.Builder(0, "Answer", action(ctx, project, "answer", 3, key(text), mutable = true))
             .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Your answer").build()).build()
         val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("$label asks").setContentText(text.take(120))
@@ -72,6 +74,8 @@ object Attention {
         runCatching { nm(ctx).notify(id(project), n) }
     }
 
+    internal fun key(vararg parts: String) = parts.joinToString("|").hashCode().toString()
+
     fun clear(ctx: Context, project: String) { runCatching { nm(ctx).cancel(id(project)) } }
 
     internal fun reply(intent: Intent): String? = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)?.toString()
@@ -81,10 +85,10 @@ class AttentionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val project = intent.getStringExtra("project") ?: return
         val loop = Attention.loops(project) ?: return
+        val key = intent.getStringExtra("key")
         when (intent.action) {
-            "allow" -> loop.answerApproval(true)
-            "deny" -> loop.answerApproval(false)
-            "answer" -> Attention.reply(intent)?.let { loop.answerQuestion(it) }
+            "allow", "deny" -> loop.approval.value?.takeIf { Attention.key(it.tool, it.input) == key }?.let { loop.answerApproval(intent.action == "allow") }
+            "answer" -> loop.question.value?.takeIf { Attention.key(it.text) == key }?.let { Attention.reply(intent)?.let { r -> loop.answerQuestion(r) } }
         }
         Attention.clear(ctx, project)
     }

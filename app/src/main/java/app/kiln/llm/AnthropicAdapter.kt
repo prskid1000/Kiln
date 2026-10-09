@@ -87,7 +87,10 @@ class AnthropicAdapter(
         } catch (e: InternalServerException) {
             throw ProviderException("server error: ${e.message}", retryable = true, e)
         } catch (e: AnthropicServiceException) {
-            throw ProviderException("${e.statusCode()}: ${e.message}", retryable = e.statusCode() == 529 || e.statusCode() >= 500, e)
+            // An error inside a stream (overloaded_error, api_error) arrives under the stream's 200: judge it by its text.
+            val transient = e.statusCode() == 529 || e.statusCode() >= 500 ||
+                (e.statusCode() in 200..299 && Regex("overload|api_error|rate.?limit|capacity|timeout|unavailable", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty()))
+            throw ProviderException("${e.statusCode()}: ${e.message}", retryable = transient, e)
         }
         val msg = parseJson(mapper.writeValueAsString(acc.message())) as JsonObject
         val content = splitThinkTags(msg["content"] as? JsonArray ?: JsonArray(emptyList()))

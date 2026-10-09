@@ -51,8 +51,12 @@ class Session private constructor(val dir: File, meta: SessionMeta, messages: Li
 
     companion object {
         fun create(root: File, project: String, systemPrompt: String): Session {
-            val id = "s" + System.currentTimeMillis().toString(36)
-            val dir = File(root, id).apply { mkdirs() }
+            // Unique even when two chats start in the same millisecond (two schedules at 02:00 shared a folder).
+            // mkdir() claims the folder atomically: only the call that creates it gets it.
+            root.mkdirs()
+            var id: String; var n = 0
+            do { id = "s" + System.currentTimeMillis().toString(36) + (if (n++ == 0) "" else "-$n") } while (!File(root, id).mkdir())
+            val dir = File(root, id)
             val s = Session(dir, SessionMeta(id, project, System.currentTimeMillis(), systemPrompt = systemPrompt), emptyList())
             s.updateMeta { it }
             return s

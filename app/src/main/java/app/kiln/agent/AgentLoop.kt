@@ -204,18 +204,20 @@ class AgentLoop(
     suspend fun send(userText: String, attachments: List<Attachment> = emptyList(), mode: Mode = Mode.BUILD, goal: String? = null) {
         // Atomic: a double-tap must not start two loops on one transcript.
         if (!running.compareAndSet(expect = false, update = true)) return
-        if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }
         startedAt = System.currentTimeMillis()
         stopGuards = 0; unfinishedGuards = 0; goalChecks = 0; qaGuards = 0
         // A failed QA from an earlier request doesn't bind this one (the user may have moved on).
         lastQaFailures = null
         todosAtStart = state.todos
         this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
-        // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
-        closeDanglingToolUses()
+        // Disk writes go inside the try: an error here left `running` true for good (the chat could never send again).
         try {
-            // Snapshot the sources before this turn: rewind and change review are keyed to it.
-            runCatching { Turns.snapshot(session, project, session.messages.size) }
+            if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }
+            // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
+            closeDanglingToolUses()
+            // Snapshot the sources before this turn: rewind and change review are keyed to it. A helper's loop
+            // doesn't: it changes nothing worth rewinding, and each snapshot copied the whole project.
+            if (!headless) runCatching { Turns.snapshot(session, project, session.messages.size) }
             val id = next(Activity.Kind.USER, userText)
             update(id) { it.copy(msgIndex = session.messages.size) }
             // A new app made in Kiln: the user picks its look before the agent writes any UI.
@@ -445,6 +447,9 @@ class AgentLoop(
         // A Stop during the check is a stop, not "couldn't verify".
         val turn = runCatching { providers.adapter(profile).stream(req) {} }.onFailure { kotlinx.coroutines.currentCoroutineContext().ensureActive() }.getOrNull() ?: return true to GOAL_UNCHECKED
         val c = turn.usage.cost(profile.priceFor(model)); cost.value += c; settings.addSpend(c)
+        // Saved like any turn's cost: a goal run that ends on this check otherwise under-counted (and its cap after reopening).
+        if (profile.priceFor(model) == null) costKnown.value = false
+        session.updateMeta { it.copy(costUsd = cost.value) }
         val text = turn.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }.joinToString("\n").trim()
         val first = text.lineSequence().firstOrNull()?.uppercase() ?: ""
         return (first.startsWith("MET") && !first.startsWith("NOT")) to text.lines().drop(1).joinToString(" ").ifBlank { text }.take(200)
@@ -697,15 +702,18 @@ class AgentLoop(
                         onStep(stepLine(a))
                 }
             }
-            loop.send(task)
-            // A model may end its turn on "Let me check…" without doing it.
-            var nudges = 0
-            while (finished != null && nudges < 2 && answer()?.let { finished.containsMatchIn(it) } != true) {
-                nudges++
-                loop.send(unfinished)
-            }
-            watcher?.cancel()
-            Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
+            // The helper's session is scratch: removed however it ends (each one left megabytes of screenshots).
+            try {
+                loop.send(task)
+                // A model may end its turn on "Let me check…" without doing it.
+                var nudges = 0
+                while (finished != null && nudges < 2 && answer()?.let { finished.containsMatchIn(it) } != true) {
+                    nudges++
+                    loop.send(unfinished)
+                }
+                watcher?.cancel()
+                Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
+            } finally { s.dir.deleteRecursively() }
         }
 
         /** Single tap / type_text / swipe / press_key calls as test_flow steps (JSON), for the batching reminder. */
