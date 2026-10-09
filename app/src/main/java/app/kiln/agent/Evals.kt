@@ -48,7 +48,8 @@ object Evals {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
         for ((i, c) in list.withIndex()) {
             val t0 = System.currentTimeMillis()
-            val name = "eval_${c.id}_$stamp".lowercase().take(40)
+            // Project names allow only [a-z0-9_]: the stamp's "-" made every eval case fail to create.
+            val name = "eval_${c.id}_$stamp".lowercase().replace(Regex("[^a-z0-9_]"), "_").take(40)
             scores += runCatching {
                 val p = Project.create(Graph.paths.projects, name, c.label, File(Graph.toolchain.templates(), "compose"))
                 val loop = Graph.kiln.newSession(p)
