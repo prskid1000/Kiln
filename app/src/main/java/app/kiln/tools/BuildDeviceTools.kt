@@ -766,6 +766,13 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
                 continue
             }
             val values: List<String> = when (v) {
+                // {"swipe": {"target": "Auto to office", "direction": "left"}} (run 13): the value is the direction,
+                // the element is where — taking "target" as the direction swiped nothing.
+                is JsonObject if k == "swipe" -> {
+                    opt(v)
+                    listOf("target", "text", "label", "on", "element").firstNotNullOfOrNull { v.str(it) }?.let { opts["on"] = JsonPrimitive(it) }
+                    listOf(v.str("direction") ?: v.str("dir") ?: "left")
+                }
                 is JsonObject -> {
                     opt(v)
                     val c = listOf("contains", "texts", "containsText", "contains_text", "text_contains", "has_text").firstNotNullOfOrNull { v[it] }

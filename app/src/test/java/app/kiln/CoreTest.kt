@@ -45,6 +45,8 @@ class CoreTest {
         assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+        // Run 13: a swipe given its row as "target" keeps "direction" as the direction.
+        assertEquals(listOf("""{"swipe":"left","on":"Auto to office"}"""), steps("""{"swipe":{"target":"Auto to office","direction":"left"}}"""))
         // Run 13: expect {"containsText": …}.
         assertEquals(listOf("""{"expect":"₹500.00"}"""), steps("""{"expect":{"containsText":"₹500.00"}}"""))
         // Run 12: the field given as "at", and a dropdown choice.
