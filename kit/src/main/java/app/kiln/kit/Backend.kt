@@ -44,7 +44,7 @@ private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row
     // Server-filled columns left empty or null are never sent: an update's explicit nulls would otherwise wipe the
     // row's id, owner or creation time (or fail on NOT NULL). Other fields' nulls go through, so clearing works.
     val serverFilled = setOf("id", "created_at", "updated_at", "user_id")
-    fun placeholder(k: String, v: kotlinx.serialization.json.JsonElement) =
+    fun placeholder(k: String, v: kotlinx.serialization.json.JsonElement): Boolean =
         (k in serverFilled && (v is kotlinx.serialization.json.JsonNull || (v as? kotlinx.serialization.json.JsonPrimitive)?.content == "")) ||
         (v as? kotlinx.serialization.json.JsonPrimitive)?.content.let { c ->
             (k == "id" && (c == "0" || c == "")) || (k in setOf("created_at", "updated_at") && c == "") }
@@ -64,8 +64,8 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
     private val base = url.trimEnd('/')
     private val json = "application/json".toMediaType()
 
-    suspend fun signUp(email: String, password: String) = auth("$base/auth/v1/signup", email, password)
-    suspend fun signIn(email: String, password: String) = auth("$base/auth/v1/token?grant_type=password", email, password)
+    suspend fun signUp(email: String, password: String): Unit = auth("$base/auth/v1/signup", email, password)
+    suspend fun signIn(email: String, password: String): Unit = auth("$base/auth/v1/token?grant_type=password", email, password)
 
     fun signOut() { prefs.edit().clear().apply(); _user.value = null }
 
@@ -105,7 +105,7 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         text
     }
 
-    fun table(name: String) = Table(name)
+    fun table(name: String): Table = Table(name)
 
     inner class Table(private val name: String) {
         private fun at(query: String) = "$base/rest/v1/$name" + if (query.isBlank()) "" else "?$query"
@@ -130,7 +130,7 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         suspend fun <T> update(filter: String, serializer: KSerializer<T>, row: T) {
             send(Request.Builder().url(at(filter)).patch(insertBody(serializer, row, updateJson).toRequestBody(json)))
         }
-        suspend inline fun <reified T> update(filter: String, row: T) = update(filter, KJson.serializersModule.serializer<T>(), row)
+        suspend inline fun <reified T> update(filter: String, row: T): Unit = update(filter, KJson.serializersModule.serializer<T>(), row)
 
         suspend fun delete(filter: String) { send(Request.Builder().url(at(filter)).delete()) }
     }

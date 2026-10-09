@@ -44,6 +44,15 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             val pkg = fq.substringBeforeLast('.', "")
             if (fq.startsWith("app.kiln.kit.")) {
                 if (index.exists(fq) || index.exists(pkg) || (pkg == "app.kiln.kit" && name in kit)) continue   // a kit symbol, or a member of a kit object
+                // The project's own class imported from the kit's package (import app.kiln.kit.Expense): its real package.
+                if (name in declared) {
+                    val realFq = projectFq(project, name)
+                    if (realFq != null) {
+                        text = replaceImport(text, fq, realFq); fixed += "import $fq → $realFq ($name is this project's, not the kit's)"
+                        corrections += Correction(fq, realFq, import = true)
+                    }
+                    continue
+                }
                 // Not a kit name but a real class elsewhere (import app.kiln.kit.Icons): the import points there.
                 val real = if (name !in kit) runCatching { index.uniqueClass(name) }.getOrNull()?.takeIf { !it.startsWith("app.kiln.kit.") } else null
                 if (real != null) {
@@ -58,7 +67,7 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
                     // An import of a name that doesn't exist and isn't used (import app.kiln.kit.KText, …Kt): dropping it
                     // is certain. Reported as missing, the model looked for it in its code, called the errors "phantom".
                     is Fix.None -> if (!Regex("""(?<![\w.$])${Regex.escape(name)}\b""").containsMatchIn(codeOnly(text).replace(IMPORT, ""))) {
-                        text = Regex("""(?m)^import\s+${Regex.escape(fq)}\s*\n?""").replace(text, "")
+                        text = importLine(fq).replace(text, "")
                         fixed += "removed import $fq (no such name, and the file doesn't use it)"
                     } else problems += unknown(name, lineOf(original, m.range.first), s.closest)
                 }
@@ -75,6 +84,9 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         val code = codeOnly(text)
         val imported = IMPORT.findAll(text).map { it.groupValues[2].ifEmpty { it.groupValues[1].substringAfterLast('.') } }.toSet()
         val wildcard = Regex("""(?m)^import\s+app\.kiln\.kit\.\*""").containsMatchIn(text)
+        // Another package's wildcard (kotlinx.serialization.*, kotlin.reflect.*) may supply K-names (KSerializer, KClass):
+        // then nothing unknown is reported, only certain fixes are made.
+        val otherWildcard = Regex("""(?m)^import\s+(?!app\.kiln\.kit\.)[\w.]+\.\*""").containsMatchIn(text)
         val missing = sortedSetOf<String>()
         for (n in USE.findAll(code).map { it.value }.toSortedSet()) {
             if (n in renamed || n in declared) continue
@@ -82,9 +94,13 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             if (n in imported) continue   // imported from somewhere (checked above)
             when (val s = kitFix(n, kit, declared)) {
                 is Fix.Exact -> {}
-                is Fix.Typo -> { text = rename(text, n, s.to); renamed += n; if (!wildcard && s.to !in imported) missing += s.to
-                    fixed += "$n → ${s.to} (the kit's name; every use)"; corrections += Correction(n, s.to, import = false) }
-                is Fix.None -> if (KIT_SHAPED.matches(n)) problems += unknown(n, lineOf(text, code.indexOf(n).coerceAtLeast(0)), s.closest)
+                // Renamed only when it's a garbled "Kiln" (KolnScreen): another K-name a letter or two off a kit name may be
+                // the project's own, in a file not written yet (KidsTheme is not KilnTheme).
+                is Fix.Typo -> if (GARBLED_KILN.matches(n)) {
+                    text = rename(text, n, s.to); renamed += n; if (!wildcard && s.to !in imported) missing += s.to
+                    fixed += "$n → ${s.to} (the kit's name; every use)"; corrections += Correction(n, s.to, import = false)
+                } else if (!otherWildcard) problems += unknown(n, lineOf(text, code.indexOf(n).coerceAtLeast(0)), listOf(s.to))
+                is Fix.None -> if (KIT_SHAPED.matches(n) && !otherWildcard) problems += unknown(n, lineOf(text, code.indexOf(n).coerceAtLeast(0)), s.closest)
             }
         }
         // Lower-case kit functions called without their import (rememberKToast(), rememberPref(…)).
@@ -98,9 +114,10 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         // four times over Icons.Filled.Circle).
         val iconCode = codeOnly(text)
         for (m in ICON.findAll(iconCode).distinctBy { it.value }) {
-            val (mirrored, style, name) = m.destructured
+            val (mirrored, style0, name) = m.destructured
+            val style = if (style0 == "Default") "Filled" else style0   // Icons.Default is Icons.Filled
             val pkg = "androidx.compose.material.icons." + (if (mirrored.isNotEmpty()) "automirrored." else "") + style.lowercase()
-            if (index.exists("$pkg.$name")) continue
+            if (index.exists("$pkg.$name") || name in declared) continue   // a real icon, or one the project defines
             val names = runCatching { index.iconNames(pkg) }.getOrDefault(emptyList())
             if (names.isEmpty()) continue   // icons not on this classpath: nothing to compare with
             val mapped = MATERIAL_ICON_NAMES[name.lowercase()]?.takeIf { it in names }
@@ -180,12 +197,30 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
     private fun signature(name: String): String? =
         index.kitSignature(name)?.let { s -> if (s.length > 220) s.take(220) + "…)" else s }
 
+    /** Every name the project declares: types, functions, properties, parameters, lambda parameters, enum entries. */
     private fun declarations(project: Project, file: File, text: String): Set<String> {
         val out = HashSet<String>()
         val sources = runCatching { project.files().filter { it.extension == "kt" && it.canonicalFile != file.canonicalFile }.map { it.readText() } }.getOrDefault(emptyList())
-        for (src in sources + text) DECL.findAll(src).forEach { out += it.groupValues[1] }
+        for (src0 in sources + text) {
+            val src = codeOnly(src0)
+            DECL.findAll(src).forEach { out += it.groupValues[1] }
+            PARAM.findAll(src).forEach { out += it.groupValues[1] }          // fun f(loader: …), class C(val x: …)
+            LAMBDA.findAll(src).forEach { m -> m.groupValues[1].split(',').map { it.trim().substringBefore(':').trim() }
+                .filter { it.matches(Regex("""[A-Za-z_]\w*""")) }.forEach { out += it } }   // { a, b -> … }
+            ENUM.findAll(src).forEach { m -> m.groupValues[1].substringBefore(';').split(',')
+                .map { it.trim().substringBefore('(').substringBefore('{').trim() }.filter { it.matches(Regex("""[A-Za-z_]\w*""")) }.forEach { out += it } }
+        }
         return out
     }
+
+    /** The fully-qualified name of a class/object/function the project declares at top level, from its file's package. */
+    private fun projectFq(project: Project, name: String): String? = runCatching {
+        project.files().filter { it.extension == "kt" }.firstNotNullOfOrNull { f ->
+            val t = f.readText()
+            if (!Regex("""(?m)^(?:[\w@]+\s+)*(?:class|object|interface|typealias|fun)\s+(?:<[^>]*>\s*)?${Regex.escape(name)}\b""").containsMatchIn(t)) null
+            else Regex("""(?m)^package\s+([\w.]+)""").find(t)?.groupValues?.get(1)?.let { "$it.$name" }
+        }
+    }.getOrNull()
 
     internal companion object {
         val IMPORT = Regex("""(?m)^import\s+([\w.]+)(?:\s+as\s+(\w+))?\s*$""")
@@ -193,7 +228,12 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         // never reported, so ordinary names of that shape (KeyEvent) are left alone.
         val USE = Regex("""(?<![\w.$])(?:K[A-Z]\w*|Kiln[A-Z]\w*|K[a-z]{2,4}[A-Z]\w*)\b""")
         val KIT_SHAPED = Regex("""K[A-Z]\w*|Kiln[A-Z]\w*""")
-        val ICON = Regex("""(?<![\w.])Icons\.(AutoMirrored\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.([A-Z]\w*)""")
+        val ICON = Regex("""(?<![\w.])Icons\.(AutoMirrored\.)?(Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.([A-Z]\w*)""")
+        /** "Kiln" with one letter garbled (KolnScreen, KilmTabs…): the only K-names renamed without asking. */
+        val GARBLED_KILN = Regex("""K(?:[a-z]ln|i[a-z]n|il[a-z])[A-Z]\w*""")
+        val PARAM = Regex("""[(,]\s*(?:@\w+\s+)*(?:(?:private|internal|override|open|vararg|crossinline|noinline)\s+)*(?:val\s+|var\s+)?([A-Za-z_]\w*)\s*:""")
+        val LAMBDA = Regex("""\{\s*((?:[A-Za-z_]\w*(?:\s*:\s*[\w.<>?]+)?\s*,\s*)*[A-Za-z_]\w*(?:\s*:\s*[\w.<>?]+)?)\s*->""")
+        val ENUM = Regex("""\benum\s+class\s+\w+[^{]*\{([^}]*)""")
         /** A bare lower-case call (not a member: no "." before it). */
         val LOWER_CALL = Regex("""(?<![\w.$])([a-z]\w*)\s*[({]""")
         val DECL = Regex("""\b(?:class|object|interface|typealias|fun|val|var)\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)""")
@@ -202,10 +242,19 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
 
         fun lineOf(text: String, at: Int) = text.substring(0, at.coerceIn(0, text.length)).count { it == '\n' } + 1
 
+        /**
+         * The whole `import [from]` line (with any `as` alias) → `import [to]` (alias kept), or dropped when [to] is
+         * already imported. Anchored at the line's end: `…LocalDate` must not match the start of `…LocalDateTime`.
+         */
         fun replaceImport(text: String, from: String, to: String): String {
-            val has = Regex("""(?m)^import\s+${Regex.escape(to)}\s*$""").containsMatchIn(text)
-            return Regex("""(?m)^import\s+${Regex.escape(from)}\s*\n?""").replace(text) { if (has) "" else "import $to\n" }
+            val has = Regex("""(?m)^import\s+${Regex.escape(to)}[ \t]*$""").containsMatchIn(text)
+            return importLine(from).replace(text) { m ->
+                val alias = m.groupValues[1]
+                if (has && alias.isEmpty()) "" else "import $to$alias\n" }
         }
+
+        /** Matches the whole line importing exactly [fq] (alias as group 1), with its line break. */
+        fun importLine(fq: String) = Regex("""(?m)^import\s+${Regex.escape(fq)}(\s+as\s+\w+)?[ \t]*(?:\r?\n|$)""")
 
         /** [from] → [to] wherever it is a whole name in code (not inside strings or other words). */
         fun rename(text: String, from: String, to: String): String {
@@ -223,8 +272,14 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
                     b.startsWith("//", i) -> { while (i < b.length && b[i] != '\n') { b.setCharAt(i, ' '); i++ } }
                     b.startsWith("/*", i) -> { val end = b.indexOf("*/", i + 2).let { if (it < 0) b.length else it + 2 }
                         while (i < end) { if (b[i] != '\n') b.setCharAt(i, ' '); i++ } }
+                    // A raw string spans lines: all of it is text (only its line breaks stay, so line numbers hold).
+                    b.startsWith("\"\"\"", i) -> { val end = b.indexOf("\"\"\"", i + 3).let { if (it < 0) b.length else it + 3 }
+                        i += 3; while (i < end - 3) { if (b[i] != '\n') b.setCharAt(i, ' '); i++ }; i = end }
                     b[i] == '"' -> { i++; while (i < b.length && b[i] != '"' && b[i] != '\n') { if (b[i] == '\\') { b.setCharAt(i, ' '); i++ }
                         if (i < b.length) { b.setCharAt(i, ' '); i++ } }; i++ }
+                    // A char literal ('(', '\n', '"'): blanked, so it can't open a string or unbalance parentheses.
+                    b[i] == '\'' -> { val end = (i + 1 until minOf(b.length, i + 8)).firstOrNull { j -> b[j] == '\'' && b[j - 1] != '\\' || (b[j] == '\'' && j >= 2 && b[j - 1] == '\\' && b[j - 2] == '\\') }
+                        if (end == null) i++ else { for (j in i + 1 until end) b.setCharAt(j, ' '); i = end + 1 } }
                     else -> i++
                 }
             }

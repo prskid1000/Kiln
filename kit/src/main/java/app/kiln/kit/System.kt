@@ -55,9 +55,9 @@ object KNotify {
 
 /** A runtime permission: `granted`, and `request()` to ask. */
 class KPermission internal constructor(granted: Boolean, private val ask: () -> Unit) {
-    var granted by mutableStateOf(granted)
+    var granted: Boolean by mutableStateOf(granted)
         internal set
-    fun request() = ask()
+    fun request(): Unit = ask()
 }
 
 /** Remember a runtime permission, e.g. `rememberPermission(Manifest.permission.CAMERA)`. */

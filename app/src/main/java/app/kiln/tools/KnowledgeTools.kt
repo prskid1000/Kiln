@@ -188,6 +188,8 @@ class ClassIndex(private val toolchain: Toolchain) {
         runCatching {
             (kotlinx.serialization.json.Json.parseToJsonElement(toolchain.kitCatalog()) as kotlinx.serialization.json.JsonArray).mapNotNull { el ->
                 val o = el as JsonObject
+                // Libraries and the toolchain are catalog entries too ("loader", "window"…): not names code can use.
+                if ((o["kind"] as? kotlinx.serialization.json.JsonPrimitive)?.content in setOf("library", "toolchain")) return@mapNotNull null
                 val n = (o["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
                 val sig = (o["signature"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
                 n to sig
@@ -373,7 +375,9 @@ class SdkLookupTool(private val index: ClassIndex) : Tool {
         val exact = hits.firstOrNull { it == q || it.endsWith(".$q") || it.substringAfterLast('.') == q || it.substringAfterLast('.').substringAfterLast('$') == q }
         // Kit names aren't in the SDK index (run 14 asked sdk_lookup for KListRow, app.kiln.kit.KilnTheme, KStore…):
         // answer from the kit's own signatures.
-        val kitName = q0.removePrefix("app.kiln.kit.").substringBefore('.')
+        // A member asked for by name (KFormat.money) is answered with the member, not its owner.
+        val dotted = q0.removePrefix("app.kiln.kit.")
+        val kitName = if (index.kitSignature(dotted) != null) dotted else dotted.substringBefore('.')
         val kitSig = if (exact == null) index.kitSignature(kitName) else null
         // A top-level function (a composable such as DatePickerDialog, in DatePickerDialog.android.kt): its signatures from
         // the file it's compiled into. The old android.app class of the same name was answered instead, and the model
@@ -651,7 +655,7 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             // `Repo.currentMonthTotal()`: the compiler often names no receiver for an object's member — the source line does.
             val recv = Regex("""\b([A-Z]\w*)\.${Regex.escape(n)}\b""").find(src)?.groupValues?.get(1)
             val recvMembers = recv?.let { symbols.members(it) }.orEmpty()
-            if (recv != null && recvMembers.isNotEmpty()) {
+            if (recv != null && recvMembers.isNotEmpty() && symbols.isType(recv)) {   // its own type, not Modifier with one extension
                 val near = symbols.closest(n, recvMembers, 3)
                 out += "$recv has no `$n`." + (if (near.isNotEmpty()) " Closest:\n" + near.joinToString("\n") { "      ${it.signature}" } else "") +
                     "\n    $recv has: " + recvMembers.joinToString { it.name } + "\n    Use one of those, or add `$n` to $recv ${where(recvMembers.first()).removePrefix("(").substringBefore(",").removeSuffix(")")}."
@@ -755,7 +759,7 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             val kitMembers = if (members.isEmpty()) index?.kitMembers(type).orEmpty() else emptyList()
             when {
                 // The app's own type (Repo, AppSettings…): everything it has, closest first, with signatures.
-                members.isNotEmpty() -> {
+                members.isNotEmpty() && symbols.isType(type) -> {
                     val near = symbols.closest(prop, members, 3)
                     val rest = members.filter { it !in near }.take(12)
                     out += "$type has no `$prop`." + (if (near.isNotEmpty()) " Closest:\n" + near.joinToString("\n") { "      ${it.signature}" } else "") +

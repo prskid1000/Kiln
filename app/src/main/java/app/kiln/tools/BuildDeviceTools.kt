@@ -130,6 +130,7 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     for (pass in 1..3) {
     val before = fixes.size
     val decls = projectDeclarations(ctx.project)
+    val projectNames by lazy { ProjectSymbols.of(ctx.project).all.filter { Regex("""\b(class|object|interface)\s""").containsMatchIn(it.signature) }.map { it.name }.toSet() }
     for (e in r.errors) {
         val icon = wrongIcon.find(e.message)
         // Imports between the project's own files: point a broken import at where the symbol really is.
@@ -168,6 +169,9 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         if (!f.isFile || f.extension != "kt") continue
         val filePkg = Regex("(?m)^package\\s+([\\w.]+)").find(f.readText())?.groupValues?.get(1).orEmpty()
         val own = decls[name]?.singleOrNull()?.takeIf { it.substringBeforeLast('.') != filePkg }
+        // A name the project declares somewhere (nested ones too: Repo.Location) is never a library's of the same name
+        // (android.location.Location was imported over it, and the errors turned into type mismatches).
+        if (icon == null && own == null && (decls[name] != null || projectNames.contains(name))) continue
         val fq = (if (icon != null) "androidx.compose.material.icons." + (if (icon.groupValues[1].isNotEmpty()) "automirrored." else "") +
             icon.groupValues[2].lowercase() + "." + name else own ?: index.uniqueClass(name, e.source ?: "")) ?: continue
         var text = f.readText()

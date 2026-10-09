@@ -110,6 +110,13 @@ def parse_file(path: Path):
                 body = lines[nxt - 1] if nxt > i else line
                 opens = kw != "fun" and body.rstrip().endswith("{")
                 owner = (name if public else None) if opens else None
+            # A public function with an expression body and no declared type: its catalog signature shows no return
+            # type, and the model can't see what it gets back (KSupabase.table returned a Table nobody could see).
+            if kw == "fun" and name and public and not composable and re.search(r"\)\s*=", line) and not re.search(r"\)\s*:", sig):
+                print(f"[catalog] warning: {category}: {name} has no declared return type (write `): Type =`)")
+            # Same for a public property: `val bg get() = …` showed no type at all.
+            if kw in ("val", "var") and name and public and not re.search(rf"\b{re.escape(name)}\s*:", sig):
+                print(f"[catalog] warning: {category}: {name} has no declared type (write `val {name}: Type`)")
             if name and public and "companion" not in mods:
                 if not top and name == "invoke":           # companion invoke = the constructor most code calls
                     entries.append(dict(name=owner, member=None, kind="constructor", category=category,

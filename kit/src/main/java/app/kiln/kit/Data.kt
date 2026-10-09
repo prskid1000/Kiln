@@ -70,7 +70,7 @@ class KStore<T> @PublishedApi internal constructor(context: Context, name: Strin
         scope.launch { lock.withLock { write(flow.value) } }
     }
 
-    fun set(value: T) = update { value }
+    fun set(value: T): Unit = update { value }
 
     // A save that fails (full disk, a value that can't be encoded) is logged; it ran in the background and
     // would otherwise kill the app with no app frame in the trace. The value stays in memory.

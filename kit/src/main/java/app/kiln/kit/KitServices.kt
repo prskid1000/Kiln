@@ -173,7 +173,7 @@ internal class KDb private constructor(context: Context) : SQLiteOpenHelper(cont
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {}
     companion object {
         @Volatile private var instance: KDb? = null
-        fun get(context: Context) = instance ?: synchronized(this) { instance ?: KDb(context.applicationContext).also { instance = it } }
+        fun get(context: Context): KDb = instance ?: synchronized(this) { instance ?: KDb(context.applicationContext).also { instance = it } }
     }
 }
 
@@ -263,9 +263,9 @@ object KFiles {
     fun file(context: Context, path: String): File = File(context.filesDir, path).also { it.parentFile?.mkdirs() }
     /** A file under the cache dir (the system may clear it). */
     fun cacheFile(context: Context, path: String): File = File(context.cacheDir, path).also { it.parentFile?.mkdirs() }
-    fun writeText(context: Context, path: String, text: String) = file(context, path).writeText(text)
+    fun writeText(context: Context, path: String, text: String): Unit = file(context, path).writeText(text)
     fun readText(context: Context, path: String): String? = file(context, path).takeIf { it.isFile }?.readText()
-    fun writeBytes(context: Context, path: String, bytes: ByteArray) = file(context, path).writeBytes(bytes)
+    fun writeBytes(context: Context, path: String, bytes: ByteArray): Unit = file(context, path).writeBytes(bytes)
     fun readBytes(context: Context, path: String): ByteArray? = file(context, path).takeIf { it.isFile }?.readBytes()
     fun exists(context: Context, path: String): Boolean = File(context.filesDir, path).exists()
     fun delete(context: Context, path: String): Boolean = File(context.filesDir, path).deleteRecursively()
@@ -427,33 +427,33 @@ object KNetwork {
 
 // ---------------------------------------------------------------- intents
 
-/** Hand off to other apps: phone, SMS, email, maps, calendar, settings, Play Store. */
+/** Hand off to other apps: phone, SMS, email, maps, calendar, settings, Play Store. Each returns false when no app can open it (say so to the user). */
 object KOpen {
     private fun go(context: Context, intent: Intent) = runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
     /** Open the dialer with [number] filled in (no permission needed). */
-    fun dial(context: Context, number: String) = go(context, Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")))
-    fun sms(context: Context, number: String, text: String = "") = go(context, Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).putExtra("sms_body", text))
-    fun email(context: Context, to: String, subject: String = "", body: String = "") =
+    fun dial(context: Context, number: String): Boolean = go(context, Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")))
+    fun sms(context: Context, number: String, text: String = ""): Boolean = go(context, Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).putExtra("sms_body", text))
+    fun email(context: Context, to: String, subject: String = "", body: String = ""): Boolean =
         go(context, Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
             .putExtra(Intent.EXTRA_SUBJECT, subject).putExtra(Intent.EXTRA_TEXT, body))
     /** Maps search for [query] (an address or "coffee near me"). */
-    fun map(context: Context, query: String) = go(context, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(query))))
-    fun url(context: Context, url: String) = go(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    fun map(context: Context, query: String): Boolean = go(context, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(query))))
+    fun url(context: Context, url: String): Boolean = go(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     /** Add an event to the calendar app (the user confirms it there). */
-    fun calendarEvent(context: Context, title: String, startMillis: Long, endMillis: Long, location: String = "") =
+    fun calendarEvent(context: Context, title: String, startMillis: Long, endMillis: Long, location: String = ""): Boolean =
         go(context, Intent(Intent.ACTION_INSERT).setData(android.provider.CalendarContract.Events.CONTENT_URI)
             .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMillis)
             .putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, endMillis)
             .putExtra(android.provider.CalendarContract.Events.TITLE, title)
             .putExtra(android.provider.CalendarContract.Events.EVENT_LOCATION, location))
     /** This app's system settings page (permissions, notifications). */
-    fun appSettings(context: Context) = go(context, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName)))
-    fun notificationSettings(context: Context) = go(context, Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
-    fun wifiSettings(context: Context) = go(context, Intent(Settings.ACTION_WIFI_SETTINGS))
+    fun appSettings(context: Context): Boolean = go(context, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName)))
+    fun notificationSettings(context: Context): Boolean = go(context, Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+    fun wifiSettings(context: Context): Boolean = go(context, Intent(Settings.ACTION_WIFI_SETTINGS))
     /** This app's Play Store page (for "Rate us"). */
-    fun playStore(context: Context, pkg: String = context.packageName) = go(context, Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")))
+    fun playStore(context: Context, pkg: String = context.packageName): Boolean = go(context, Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")))
     /** Share plain text. */
-    fun shareText(context: Context, text: String, subject: String? = null) =
+    fun shareText(context: Context, text: String, subject: String? = null): Boolean =
         go(context, Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
             .apply { subject?.let { putExtra(Intent.EXTRA_SUBJECT, it) } }, null))
 }
@@ -462,7 +462,7 @@ object KOpen {
 
 /** Copy and paste text. */
 object KClipboard {
-    fun copy(context: Context, text: String, label: String = "text") =
+    fun copy(context: Context, text: String, label: String = "text"): Unit =
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
     fun paste(context: Context): String? = context.getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
 }
@@ -472,12 +472,12 @@ object KHaptics {
     private fun v(context: Context) = context.getSystemService(Vibrator::class.java)?.takeIf { it.hasVibrator() }
     // Haptics are a nicety: never let one crash the app (no vibrator, permission stripped).
     private inline fun safe(block: () -> Unit) { runCatching(block) }
-    fun tick(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)) }
-    fun click(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)) }
-    fun heavy(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)) }
-    fun success(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 30, 60, 30), -1)) }
-    fun error(context: Context) = safe { v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1)) }
-    fun buzz(context: Context, millis: Long = 300) = safe { v(context)?.vibrate(VibrationEffect.createOneShot(millis, VibrationEffect.DEFAULT_AMPLITUDE)) }
+    fun tick(context: Context): Unit = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)) }
+    fun click(context: Context): Unit = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)) }
+    fun heavy(context: Context): Unit = safe { v(context)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)) }
+    fun success(context: Context): Unit = safe { v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 30, 60, 30), -1)) }
+    fun error(context: Context): Unit = safe { v(context)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1)) }
+    fun buzz(context: Context, millis: Long = 300): Unit = safe { v(context)?.vibrate(VibrationEffect.createOneShot(millis, VibrationEffect.DEFAULT_AMPLITUDE)) }
 }
 
 /** Facts about the device. */

@@ -32,9 +32,24 @@ class ProjectSymbols private constructor(val all: List<Symbol>) {
     }
 
     companion object {
-        private val TYPE = Regex("""\b(?:(?:data|sealed|enum|abstract|open|private|internal|inner|value)\s+)*(class|object|interface)\s+(\w+)""")
-        private val FUN = Regex("""\bfun\s+(?:<[^>]*>\s*)?(?:([A-Z][\w.]*?(?:<[^>]*>)?)\.)?(\w+)\s*\(""")
+        // Not `Foo::class` (a class literal), and the name on the same line.
+        private val TYPE = Regex("""\b(?:(?:data|sealed|enum|abstract|open|private|internal|inner|value|fun)\s+)*(?<!::)(class|object|interface)[ \t]+(\w+)""")
+        // Type parameters may nest (<T : Comparable<T>>); a receiver may be nullable (String?.orDash).
+        private val FUN = Regex("""\bfun\s+(?:<(?:[^<>]|<[^<>]*>)*>\s*)?(?:([A-Z][\w.]*?(?:<(?:[^<>]|<[^<>]*>)*>)?\??)\.)?(\w+)\s*\(""")
         private val PROP = Regex("""\b(val|var)\s+(\w+)\s*(:\s*[^=\n{]+)?""")
+        private val HEADER_PROP = Regex("""^\s*(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|internal|protected|public|override|open)\s+)*(?:val|var)\s+(\w+)""")
+
+        /** [s] split at its top-level commas (not inside (), <>, [], {}). */
+        private fun topLevelCommas(s: String): List<Pair<Int, Int>> {
+            val out = mutableListOf<Pair<Int, Int>>(); var depth = 0; var start = 0
+            for ((i, c) in s.withIndex()) when (c) {
+                '(', '<', '[', '{' -> depth++
+                ')', '>', ']', '}' -> depth = maxOf(0, depth - 1)
+                ',' -> if (depth == 0) { out += start to i; start = i + 1 }
+            }
+            out += start to s.length
+            return out
+        }
 
         fun of(project: Project): ProjectSymbols {
             val out = mutableListOf<Symbol>()
@@ -53,6 +68,11 @@ class ProjectSymbols private constructor(val all: List<Symbol>) {
             var d = 0
             for (i in code.indices) { depth[i] = d; when (code[i]) { '{' -> d++; '}' -> d = maxOf(0, d - 1) } }
             depth[code.length] = d
+            // Parenthesis depth before each character (one pass; recounting the prefix per property was quadratic).
+            val parens = IntArray(code.length + 1)
+            var p = 0
+            for (i in code.indices) { parens[i] = p; when (code[i]) { '(' -> p++; ')' -> p = maxOf(0, p - 1) } }
+            parens[code.length] = p
             data class Body(val name: String, val from: Int, val to: Int, val inner: Int)
             val bodies = mutableListOf<Body>()
             val out = mutableListOf<Symbol>()
@@ -66,9 +86,19 @@ class ProjectSymbols private constructor(val all: List<Symbol>) {
                 var i = m.range.last + 1; var paren = 0
                 while (i < code.length) { val c = code[i]; if (c == '(') paren++ else if (c == ')') paren-- else if (paren == 0 && (c == '{' || c == '\n')) break; i++ }
                 out += Symbol(name, ownerAt(m.range.first)?.name, cut(m.range.first, i), file)
-                // Constructor properties belong to the type.
-                val header = code.substring(m.range.last + 1, i)
-                PROP.findAll(header).forEach { p -> out += Symbol(p.groupValues[2], name, cut(m.range.last + 1 + p.range.first, m.range.last + 1 + p.range.last + 1).trimEnd(',', ')'), file) }
+                // Constructor properties belong to the type: each top-level part of the parameter list on its own (a
+                // one-line `(val id: Long, val title: String)` gave only `id`, with the rest as its type).
+                val headerStart = m.range.last + 1
+                val open = code.indexOf('(', headerStart).takeIf { it in headerStart until i }
+                if (open != null) {
+                    var close = open + 1; var k = 1
+                    while (close < i && k > 0) { if (code[close] == '(') k++ else if (code[close] == ')') k--; close++ }
+                    val params = code.substring(open + 1, (close - 1).coerceAtLeast(open + 1))
+                    for ((a, b) in topLevelCommas(params)) {
+                        val pm = HEADER_PROP.find(params.substring(a, b)) ?: continue
+                        out += Symbol(pm.groupValues[1], name, cut(open + 1 + a, open + 1 + b), file)
+                    }
+                }
                 if (i < code.length && code[i] == '{') {
                     var j = i + 1; var k = 1
                     while (j < code.length && k > 0) { if (code[j] == '{') k++ else if (code[j] == '}') k--; j++ }
@@ -84,15 +114,18 @@ class ProjectSymbols private constructor(val all: List<Symbol>) {
                 // The return type, if written: up to "{", "=" or the line's end.
                 var e = i
                 while (e < code.length && code[e] != '{' && code[e] != '=' && code[e] != '\n') e++
-                val receiver = m.groupValues[1].substringBefore('<').ifEmpty { null }
-                out += Symbol(m.groupValues[2], receiver ?: owner?.name, cut(m.range.first, e), file)
+                val receiver = m.groupValues[1].substringBefore('<').trimEnd('?').ifEmpty { null }
+                // An expression body with no declared type (fun total() = expenses.sumOf { … }): the start of the
+                // expression is the only clue to what it returns, so it's kept.
+                val sig = cut(m.range.first, e) + if (e < code.length && code[e] == '=' && !code.substring(i, e).contains(':'))
+                    " = " + cut(e + 1, code.indexOf('\n', e + 1).let { if (it < 0) code.length else it }).let { if (it.length > 60) it.take(60) + "…" else it } else ""
+                out += Symbol(m.groupValues[2], receiver ?: owner?.name, sig, file)
             }
             for (m in PROP.findAll(code)) {
                 val owner = ownerAt(m.range.first)
                 if (depth[m.range.first] != (owner?.inner ?: 0)) continue
                 // Constructor parameters are inside a header's parentheses: already taken above.
-                val before = code.substring(0, m.range.first)
-                if (before.count { it == '(' } > before.count { it == ')' }) continue
+                if (parens[m.range.first] > 0) continue
                 out += Symbol(m.groupValues[2], owner?.name, cut(m.range.first, m.range.last + 1), file)
             }
             return out

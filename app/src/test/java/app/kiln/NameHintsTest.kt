@@ -38,6 +38,7 @@ class NameHintsTest {
             }
 
             fun formatMoney(amount: Double, currency: String): String = "x"
+            fun budgetLeft(spent: Double) = 100.0 - spent
             fun Repo.byCategory(): Map<String, Double> = emptyMap()
         """.trimIndent())
         return Project(dir)
@@ -48,6 +49,7 @@ class NameHintsTest {
 
     @Test fun indexesDeclarationsWithSignatures() {
         val s = ProjectSymbols.of(project())
+        assertEquals("fun budgetLeft(spent: Double) = 100.0 - spent", s.named("budgetLeft").single().signature)
         assertEquals("fun formatMoney(amount: Double, currency: String): String", s.named("formatMoney").single().signature)
         assertEquals(setOf("expenses", "monthTotal", "byCategory"), s.members("Repo").map { it.name }.toSet())
         assertEquals(setOf("budget", "currency"), s.members("Settings").map { it.name }.toSet())
@@ -81,6 +83,22 @@ class NameHintsTest {
         // "no parameter 'keyboard'" at the argument inside KeyboardOptions(…); "no value passed" at the KeyboardOptions call.
         assertTrue(hint("no parameter with name 'keyboard' found.", src.indexOf("keyboard =", 30) + 1).contains("(KeyboardOptions)"))
         assertTrue(hint("no value passed for parameter 'autoCorrect'.", src.indexOf("KeyboardOptions") + 1).contains("(KeyboardOptions)"))
+    }
+
+    @Test fun reviewCases() {
+        // Import replacement is whole-line: LocalDateTime is left alone; an alias is kept.
+        val t = "import kotlinx.datetime.LocalDate\nimport kotlinx.datetime.LocalDateTime\nimport app.kiln.kit.ui.KButton as Btn\nx\n"
+        val r = NameCheck.replaceImport(NameCheck.replaceImport(t, "kotlinx.datetime.LocalDate", "java.time.LocalDate"), "app.kiln.kit.ui.KButton", "app.kiln.kit.KButton")
+        assertEquals("import java.time.LocalDate\nimport kotlinx.datetime.LocalDateTime\nimport app.kiln.kit.KButton as Btn\nx\n", r)
+        // One-line constructor: every property; Foo::class isn't a type; nested generics and nullable receivers are found.
+        val src = "data class Expense(val id: Long, val title: String, val amount: Double = 0.0)\nval k = Foo::class\nfun load() { val total = 1 }\n" +
+            "fun <T : Comparable<T>> top(xs: List<T>): T = xs.max()\nfun String?.orDash(): String = this ?: \"-\"\nval c = '('\nval after: Int = 2\n"
+        val s = ProjectSymbols.parse(NameCheck.codeOnly(src), src, "a.kt")
+        assertEquals(listOf("id", "title", "amount"), s.filter { it.owner == "Expense" }.map { it.name })
+        assertEquals("val amount: Double = 0.0", s.single { it.name == "amount" }.signature)
+        assertTrue(s.none { it.name == "fun" || it.name == "total" })
+        assertTrue(s.any { it.name == "top" } && s.single { it.name == "orDash" }.owner == "String")
+        assertTrue(s.any { it.name == "after" })   // a '(' char literal doesn't hide later properties
     }
 
     @Test fun helpers() {

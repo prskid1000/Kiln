@@ -101,12 +101,12 @@ enum class KDensity(val scale: Float) { Compact(0.85f), Default(1f), Comfortable
 
 /** Ready-made font families for [KilnTheme]; or pass any FontFamily (e.g. from res/font). */
 object KFonts {
-    val Inter = FontFamily(
+    val Inter: FontFamily = FontFamily(
         Font(R.font.inter_variable, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
         Font(R.font.inter_variable, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
         Font(R.font.inter_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
     )
-    val Mono = FontFamily(
+    val Mono: FontFamily = FontFamily(
         Font(R.font.jetbrains_mono_variable, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
         Font(R.font.jetbrains_mono_variable, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
     )
@@ -126,32 +126,32 @@ data class KTheme(val name: String, val palette: KPalette, val font: FontFamily 
  * closest; for a specific brand colour use `KilnTheme(accent = …)`.
  */
 object KThemes {
-    val Nocturne = KTheme("Nocturne", KPalette.Nocturne, description = "Kiln's default: dark, calm, soft violet")
-    val ArcticFrost = KTheme("Arctic Frost", KPalette.from(Color(0xFF4A6FA5), Color(0xFF7D9CC9), dark = false,
+    val Nocturne: KTheme = KTheme("Nocturne", KPalette.Nocturne, description = "Kiln's default: dark, calm, soft violet")
+    val ArcticFrost: KTheme = KTheme("Arctic Frost", KPalette.from(Color(0xFF4A6FA5), Color(0xFF7D9CC9), dark = false,
         background = Color(0xFFF2F6FB), text = Color(0xFF1E2A3A)), corners = KCorners.Soft,
         description = "Cool, crisp, clean: ice blue and steel")
-    val BotanicalGarden = KTheme("Botanical Garden", KPalette.from(Color(0xFF4A7C59), Color(0xFFF9A620), dark = false,
+    val BotanicalGarden: KTheme = KTheme("Botanical Garden", KPalette.from(Color(0xFF4A7C59), Color(0xFFF9A620), dark = false,
         background = Color(0xFFF5F3ED), danger = Color(0xFFB7472A), warn = Color(0xFFC98200), text = Color(0xFF2B3A2F)),
         KFonts.Serif, KCorners.Soft, "Fresh, organic: fern green, marigold, terracotta")
-    val DesertRose = KTheme("Desert Rose", KPalette.from(Color(0xFFB87D6D), Color(0xFFD4A5A5), dark = false,
+    val DesertRose: KTheme = KTheme("Desert Rose", KPalette.from(Color(0xFFB87D6D), Color(0xFFD4A5A5), dark = false,
         background = Color(0xFFF6EDE4), text = Color(0xFF5D2E46)), KFonts.Serif, KCorners.Round,
         "Soft, sophisticated: dusty rose, clay, sand")
-    val ForestCanopy = KTheme("Forest Canopy", KPalette.from(Color(0xFF2D4A2B), Color(0xFF7D8471), dark = false,
+    val ForestCanopy: KTheme = KTheme("Forest Canopy", KPalette.from(Color(0xFF2D4A2B), Color(0xFF7D8471), dark = false,
         background = Color(0xFFFAF9F6), text = Color(0xFF1F2A1E)), description = "Grounded, natural: forest green, sage, olive")
-    val GoldenHour = KTheme("Golden Hour", KPalette.from(Color(0xFFC1666B), Color(0xFFF4A900), dark = false,
+    val GoldenHour: KTheme = KTheme("Golden Hour", KPalette.from(Color(0xFFC1666B), Color(0xFFF4A900), dark = false,
         background = Color(0xFFF7EFE3), text = Color(0xFF4A403A)), corners = KCorners.Soft,
         description = "Warm, autumnal: mustard, terracotta, beige")
-    val MidnightGalaxy = KTheme("Midnight Galaxy", KPalette.from(Color(0xFFA490C2), Color(0xFF8B90D6), dark = true,
+    val MidnightGalaxy: KTheme = KTheme("Midnight Galaxy", KPalette.from(Color(0xFFA490C2), Color(0xFF8B90D6), dark = true,
         background = Color(0xFF2B1E3E), text = Color(0xFFE6E6FA)), description = "Dramatic, cosmic: deep purple, cosmic blue, lavender")
-    val ModernMinimalist = KTheme("Modern Minimalist", KPalette.from(Color(0xFF36454F), Color(0xFF708090), dark = false,
+    val ModernMinimalist: KTheme = KTheme("Modern Minimalist", KPalette.from(Color(0xFF36454F), Color(0xFF708090), dark = false,
         background = Color(0xFFF7F7F7), text = Color(0xFF222B31)), corners = KCorners.Sharp,
         description = "Clean, contemporary: charcoal and greys")
-    val OceanDepths = KTheme("Ocean Depths", KPalette.from(Color(0xFF2D8B8B), Color(0xFFA8DADC), dark = true,
+    val OceanDepths: KTheme = KTheme("Ocean Depths", KPalette.from(Color(0xFF2D8B8B), Color(0xFFA8DADC), dark = true,
         background = Color(0xFF1A2332), text = Color(0xFFF1FAEE)), description = "Professional, calming: navy, teal, seafoam")
-    val SunsetBoulevard = KTheme("Sunset Boulevard", KPalette.from(Color(0xFFE76F51), Color(0xFFF4A261), dark = false,
+    val SunsetBoulevard: KTheme = KTheme("Sunset Boulevard", KPalette.from(Color(0xFFE76F51), Color(0xFFF4A261), dark = false,
         background = Color(0xFFFDF6EC), warn = Color(0xFFC99A1E), text = Color(0xFF264653)), corners = KCorners.Round,
         description = "Vibrant, warm: burnt orange, coral, sand")
-    val TechInnovation = KTheme("Tech Innovation", KPalette.from(Color(0xFF0066FF), Color(0xFF00E5E5), dark = true,
+    val TechInnovation: KTheme = KTheme("Tech Innovation", KPalette.from(Color(0xFF0066FF), Color(0xFF00E5E5), dark = true,
         background = Color(0xFF1E1E1E), text = Color(0xFFFFFFFF)), corners = KCorners.Sharp,
         description = "Bold, modern: electric blue, neon cyan, near-black")
 
@@ -177,29 +177,29 @@ object Nocturne {
     val isDark: Boolean get() = palette.dark
     /** The theme's surface style (Flat, Glass, Neumorphic…). */
     val surfaceStyle: KStyle get() = style
-    val bg get() = palette.bg
-    val surface get() = palette.surface
-    val surfaceHi get() = palette.surfaceHi
-    val text get() = palette.text
-    val accent get() = palette.accent
-    val accent2 get() = palette.accent2
-    val accent100 get() = palette.accent100
-    val accent300 get() = palette.accent300
-    val accent800 get() = palette.accent800
-    val accent900 get() = palette.accent900
-    val neutral100 get() = palette.neutral100
-    val neutral300 get() = palette.neutral300
-    val neutral600 get() = palette.neutral600
-    val neutral700 get() = palette.neutral700
-    val neutral800 get() = palette.neutral800
-    val ok get() = palette.ok
-    val warn get() = palette.warn
-    val danger get() = palette.danger
-    val textMuted get() = palette.textMuted
-    val textLabel get() = palette.textLabel
+    val bg: Color get() = palette.bg
+    val surface: Color get() = palette.surface
+    val surfaceHi: Color get() = palette.surfaceHi
+    val text: Color get() = palette.text
+    val accent: Color get() = palette.accent
+    val accent2: Color get() = palette.accent2
+    val accent100: Color get() = palette.accent100
+    val accent300: Color get() = palette.accent300
+    val accent800: Color get() = palette.accent800
+    val accent900: Color get() = palette.accent900
+    val neutral100: Color get() = palette.neutral100
+    val neutral300: Color get() = palette.neutral300
+    val neutral600: Color get() = palette.neutral600
+    val neutral700: Color get() = palette.neutral700
+    val neutral800: Color get() = palette.neutral800
+    val ok: Color get() = palette.ok
+    val warn: Color get() = palette.warn
+    val danger: Color get() = palette.danger
+    val textMuted: Color get() = palette.textMuted
+    val textLabel: Color get() = palette.textLabel
     /** A colour as text, readable on every surface: `Text("Over budget", color = Nocturne.ink(Nocturne.danger))`. */
-    fun ink(c: androidx.compose.ui.graphics.Color) = palette.ink(c)
-    val divider get() = palette.divider
+    fun ink(c: androidx.compose.ui.graphics.Color): androidx.compose.ui.graphics.Color = palette.ink(c)
+    val divider: Color get() = palette.divider
 
     /** The theme's text font. */
     val sans: FontFamily get() = font
@@ -310,4 +310,4 @@ fun KilnTheme(
 }
 
 /** A text size scaled by the theme's `textScale`: `fontSize = kt(14)`. */
-fun kt(sp: Int) = (sp * Nocturne.textScale).sp
+fun kt(sp: Int): androidx.compose.ui.unit.TextUnit = (sp * Nocturne.textScale).sp

@@ -238,6 +238,17 @@ class ToolsOnDeviceTest {
             Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport app.kiln.kit.KCollection\nimport kotlinx.serialization.Serializable\n\n@Serializable data class Exp(val amount: Double = 0.0)\nval exps = KCollection<Exp>(\"exps\")\nval total = exps.rows.value.sumOf { it.amount }\n"}"""),
             Case("check", "{}", expectError = true, expect = "it.value.amount"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // Review cases: the project's own names are left alone — a K-name close to a kit one (KidsTheme), a parameter
+            // named like a library (loader), enum entries (KG), its own icon; its own class imported from the kit's package
+            // is pointed at its package.
+            Case("write_file", """{"path":"$src/Own.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.ui.graphics.vector.ImageVector\n\nenum class WeightUnit { KG, LB }\nclass Expense(val amount: Double)\nval Icons.Filled.Logo: ImageVector get() = Icons.Filled.Home\n"}"""),
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.runtime.Composable\nimport app.kiln.kit.Expense\n\n@Composable\nfun Section(loader: @Composable () -> Unit) { KidsTheme { loader() } }\nval u = WeightUnit.KG\nval logo = Icons.Filled.Logo\nval e = Expense(1.0)\n"}""",
+                expect = "import app.kiln.kit.Expense → kiln.app.tooltest.Expense", absent = "KilnTheme"),
+            Case("grep", """{"pattern":"import app.kiln.kit.loader|KilnTheme","glob":"**/Bad2.kt"}""", expect = "(no matches)"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            Case("delete", """{"path":"$src/Own.kt"}"""),
+            // A member asked for by name gets the member's signature.
+            Case("sdk_lookup", """{"query":"KFormat.money"}""", expect = "fun money("),
             // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).
             Case("sdk_lookup", """{"query":"DatePickerDialog"}""", expect = "androidx.compose.material3.DatePickerDialog — a top-level function"),
             // A name a letter off another component is suggested, never swapped in (KSlide meant KSwipeRow).

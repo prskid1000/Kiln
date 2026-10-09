@@ -194,9 +194,9 @@ fun KSvg(source: String, description: String, modifier: Modifier = Modifier) {
  * ```
  */
 class KSpeechToText internal constructor(private val context: Context, private val locale: Locale) {
-    var text by mutableStateOf(""); internal set
-    var listening by mutableStateOf(false); internal set
-    var error by mutableStateOf<String?>(null); internal set
+    var text: String by mutableStateOf(""); internal set
+    var listening: Boolean by mutableStateOf(false); internal set
+    var error: String? by mutableStateOf(null); internal set
     private var recognizer: SpeechRecognizer? = null
 
     val available: Boolean get() = SpeechRecognizer.isRecognitionAvailable(context)
