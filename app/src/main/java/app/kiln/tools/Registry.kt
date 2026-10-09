@@ -103,10 +103,17 @@ class McpClient(private val cfg: McpServerConfig) {
             .header("Accept", "application/json, text/event-stream")
             .apply { cfg.token?.let { header("Authorization", "Bearer $it") }; session?.let { header("Mcp-Session-Id", it) } }.build()
         // Stop cancels the HTTP call too (a slow MCP tool held the turn for up to 5 minutes).
+        // enqueue + invokeOnCancellation: cancellation fires at once (a job's completion handler only ran after the
+        // blocking execute() returned).
         val call = http.newCall(req)
-        val job = currentCoroutineContext()[kotlinx.coroutines.Job]
-        val onCancel = job?.invokeOnCompletion { if (job.isCancelled) call.cancel() }
-        try { rpcBody(call.execute(), method, notify) } finally { onCancel?.dispose() }
+        val response = kotlinx.coroutines.suspendCancellableCoroutine<okhttp3.Response> { c ->
+            c.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : okhttp3.Callback {
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) { c.resumeWith(Result.success(response)) }
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) { c.resumeWith(Result.failure(e)) }
+            })
+        }
+        rpcBody(response, method, notify)
     }
 
     private fun rpcBody(response: okhttp3.Response, method: String, notify: Boolean): JsonObject? =

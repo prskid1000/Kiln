@@ -288,7 +288,8 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
 
     /** "250,289" or "[250,289]" as a point — but not when an element is labelled that (an amount like "1,000"). */
     internal fun pointIn(s: String, nodes: List<app.kiln.device.UiNode>): Pair<Int, Int>? =
-        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { device.find(nodes, s) == null }
+        // Exact labels only: the fuzzy finder matched "540,1200" to any "₹1200" on screen and tapped that instead.
+        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { nodes.none { n -> n.text.trim() == s.trim() || n.desc.trim() == s.trim() } }
             ?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
 
     internal suspend fun offScreen(n: app.kiln.device.UiNode, label: String): String {
@@ -296,7 +297,10 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
         // Which side it's off (a carousel item is off to the side, not "above the top").
         val (where, swipe) = when {
             n.right - n.left < 8 || n.bottom - n.top < 8 -> "too small to tap (it has no size on screen)" to null
-            // By where it sticks out, so a row with 5 px showing at the bottom is "below", not "off the left edge".
+            // By the direction that's short of visible room: too little width showing means off a side (a carousel
+            // item, even in a row that also dips below the edge); otherwise it sticks out the top or bottom.
+            minOf(n.right, w) - maxOf(n.left, 0) < 8 && n.right > w -> "off the right edge of the screen" to "left"
+            minOf(n.right, w) - maxOf(n.left, 0) < 8 && n.left < 0 -> "off the left edge of the screen" to "right"
             n.bottom > h -> "below the bottom of the screen (y=${n.top}, screen is $h px tall)" to "up"
             n.top < 0 -> "above the top of the screen" to "down"
             n.right > w -> "off the right edge of the screen" to "left"
@@ -339,6 +343,9 @@ class InstallTool(w: Warden, d: Device) : DeviceTool(w, d) {
         // A failed build may leave an APK behind (lint errors): never install what was reported as failing.
         if (ctx.state.lastBuild?.ok == false) return ToolResult.error("the last build or check failed — fix it and build again first")
         val apk = ctx.state.lastApk?.let(::File)?.takeIf { it.isFile } ?: return ToolResult.error("no fresh APK — run build (or run_app) first; a check doesn't make one")
+        // Sources edited since that build (by any tool, or a helper) would install old code: build first.
+        if (ctx.project.files().any { it.lastModified() > apk.lastModified() })
+            return ToolResult.error("the sources changed since the last build — run build (or run_app) to install the current code")
         val r = device.install(apk)
         return if (r.out.contains("Success")) ToolResult.ok("installed ${pkg(ctx)}") else ToolResult.error("install failed: ${r.all.trim()}")
     }
@@ -724,6 +731,13 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
 
     private suspend fun step(ctx: ToolContext, pkg: String, st: JsonObject, visible: suspend (String) -> Boolean): Pair<Boolean, String> {
         fun s(k: String) = st.str(k)?.takeIf { it.isNotBlank() }
+        // Every input step re-checks the app is in front: after a BACK that left it (or a crash) the rest of the
+        // flow would tap whatever else is on screen.
+        if (listOf("tap", "type", "swipe", "swipe_by", "key").any { s(it) != null }) {
+            val front = device.foregroundPackage()
+            if (front != pkg && (front != null || device.testDisplay != null))
+                return false to "the app isn't in front any more (${front ?: "nothing"} is) — the step was not sent"
+        }
         val before = device.uiTree(pkg)
         // A raw swipe: "x,y,dx,dy".
         s("swipe_by")?.split(',')?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 4 }?.let { (x, y, dx, dy) ->

@@ -196,7 +196,17 @@ $body</vector>
     }
 
     private fun emitShape(e: Element, tag: String, st: Style, out: StringBuilder, ind: String, grads: Map<String, Element>, skipped: MutableSet<String>) {
-        fun a(n: String) = num(e.getAttribute(n)) ?: 0f
+        // Percentages are of the viewBox (width="100%" — a full-size background — came out as an empty path).
+        fun a(n: String): Float {
+            val v = e.getAttribute(n).trim()
+            if (!v.endsWith("%")) return num(v) ?: 0f
+            val frac = (v.dropLast(1).toFloatOrNull() ?: 0f) / 100
+            return when (n) { "x", "cx", "x1", "x2" -> view[0]; "y", "cy", "y1", "y2" -> view[1]; else -> 0f } + frac * when (n) {
+                "x", "width", "cx", "rx", "x1", "x2" -> view[2]
+                "y", "height", "cy", "ry", "y1", "y2" -> view[3]
+                else -> kotlin.math.sqrt((view[2] * view[2] + view[3] * view[3]) / 2)   // r: the SVG normalised diagonal
+            }
+        }
         val d = when (tag) {
             "path" -> e.getAttribute("d")
             "rect" -> {
