@@ -243,7 +243,7 @@ fun KProgressBar(progress: Number?, modifier: Modifier = Modifier, label: String
     Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (label != null || (showPercent && progress != null)) Row(Modifier.fillMaxWidth()) {
             Text(label.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Nocturne.textLabel, modifier = Modifier.weight(1f))
-            if (showPercent && progress != null) Text("${if (progress.isFinite()) (progress * 100).toInt() else 0}%", style = MaterialTheme.typography.bodySmall, color = bar)
+            if (showPercent && progress != null) Text("${if (progress.isNaN()) 0 else (progress.coerceIn(0f, 1f) * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = bar)
         }
         val mod = Modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(50))
         if (progress == null) LinearProgressIndicator(mod, color = bar, trackColor = Nocturne.surfaceHi)
@@ -255,7 +255,7 @@ fun KProgressBar(progress: Number?, modifier: Modifier = Modifier, label: String
 /** Circular progress (0–1, Float or Double) with text in the middle (goal rings, timers). */
 @Composable
 fun KProgressRing(progress: Number, modifier: Modifier = Modifier, size: Dp = ks(120), stroke: Dp = 10.dp, tone: KTone = KTone.Accent, color: Color? = null,
-                  center: (@Composable () -> Unit)? = { Text("${progress.toFloat().let { if (it.isFinite()) (it * 100).toInt() else 0 }}%", style = MaterialTheme.typography.titleLarge) }) {
+                  center: (@Composable () -> Unit)? = { Text("${progress.toFloat().let { if (it.isNaN()) 0 else (it.coerceIn(0f, 1f) * 100).toInt() }}%", style = MaterialTheme.typography.titleLarge) }) {
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
         val c = color ?: tone.color()
         Canvas(Modifier.size(size)) {

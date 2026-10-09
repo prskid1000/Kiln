@@ -220,7 +220,12 @@ object KPrefs {
 
 private class KPref<T>(private val prefs: SharedPreferences, private val key: String, private val default: T) : MutableState<T> {
     @Suppress("UNCHECKED_CAST")
-    private fun read(): T = when (default) {
+    // A key that holds another type (the app changed rememberPref("goal", 2000) to 2.5) starts over from the default
+    // instead of crashing the screen on every launch.
+    private fun read(): T = runCatching { readTyped() }.getOrElse { prefs.edit().remove(key).apply(); default }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun readTyped(): T = when (default) {
         is String -> prefs.getString(key, default) as T
         is Int -> prefs.getInt(key, default) as T
         is Long -> prefs.getLong(key, default) as T
@@ -646,7 +651,9 @@ object KFormat {
     /** An ISO date string ("2026-10-08", or the date part of "2026-10-08T09:30"); shown as-is if it isn't one. */
     fun date(iso: String, pattern: String = "d MMM yyyy"): String =
         // A timestamp with an offset is shown as its local date ("…T21:30+00:00" is the next day in India).
-        runCatching { date(java.time.OffsetDateTime.parse(iso).atZoneSameInstant(ZoneId.systemDefault()).toLocalDate(), pattern) }
+        // (Midnight UTC is an all-day date, kept as written — as KDate reads it.)
+        runCatching { date(java.time.OffsetDateTime.parse(iso).takeIf { it.toLocalTime() != java.time.LocalTime.MIDNIGHT }!!
+            .atZoneSameInstant(ZoneId.systemDefault()).toLocalDate(), pattern) }
             .recoverCatching { date(LocalDate.parse(iso.take(10)), pattern) }.getOrDefault(iso)
     fun dateTime(millis: Long, pattern: String = "d MMM, HH:mm"): String =
         Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern(pattern))

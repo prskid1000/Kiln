@@ -120,7 +120,11 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
             if (ids.any { it in consumable }) {
                 val grant = onConsumed ?: continue   // left for a later refresh, once the app is listening
                 val r = client.consumePurchase(ConsumeParams.newBuilder().setPurchaseToken(p.purchaseToken).build())
-                if (r.billingResult.responseCode == BillingClient.BillingResponseCode.OK) ids.forEach(grant)
+                // The grant runs on the main thread (a Toast or UI update in it crashed the app on IO, after the
+                // purchase was already consumed), and its failure is logged, not fatal.
+                if (r.billingResult.responseCode == BillingClient.BillingResponseCode.OK)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        runCatching { ids.forEach(grant) }.onFailure { KLog.w("billing: granting ${ids} failed: ${it.message}") } }
             } else {
                 if (!p.isAcknowledged) client.acknowledgePurchase(AcknowledgePurchaseParams.newBuilder().setPurchaseToken(p.purchaseToken).build())
                 owned += ids
