@@ -83,6 +83,15 @@ class CoreTest {
         assertEquals(0, errors("fun E() { KilnScreen(\"T\", content = { p -> Box(Modifier.padding(p)) }) }").size)
     }
 
+    @Test fun `a list key made from hashCode is flagged`() {
+        val dir = kotlin.io.path.createTempDirectory("lintkey").toFile()
+        File(dir, "src/a").mkdirs()
+        File(dir, "src/a/H.kt").writeText("fun H() { LazyColumn { items(latest, key = { it.date.hashCode() + it.category.hashCode() }) { e -> } } }\n" +
+            "fun G() { LazyColumn { items(rows, key = { it.id }) { r -> } } }\n")
+        val w = app.kiln.build.Lint.run(app.kiln.build.Project(dir)).filter { "hashCode()" in it.message }
+        assertEquals(listOf(1), w.map { it.line })
+    }
+
     @Test fun `no skill example ignores KilnScreen's padding`() {
         val dir = kotlin.io.path.createTempDirectory("lintskills").toFile()
         File("src/main/assets/skills").listFiles { f -> f.extension == "md" }!!.forEach { skill ->
