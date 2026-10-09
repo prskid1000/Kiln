@@ -106,6 +106,15 @@ class CoreTest {
         assertTrue(bad.joinToString("\n") { "${it.file}:${it.line} ${it.message.take(60)}" }, bad.isEmpty())
     }
 
+    @Test fun `a reminder goes inside the last tool result`() {
+        val a = app.kiln.core.obj("type" to "tool_result", "tool_use_id" to "1", "content" to app.kiln.core.arrOf(listOf(app.kiln.core.obj("type" to "text", "text" to "ok"))))
+        val b = app.kiln.core.obj("type" to "tool_result", "tool_use_id" to "2", "content" to app.kiln.core.arrOf(listOf(app.kiln.core.obj("type" to "text", "text" to "built"))))
+        val out = app.kiln.agent.withNote(listOf(a, b), "\n\n[Kiln] update the checklist")
+        assertEquals(a, out[0])
+        assertEquals("""[{"type":"text","text":"built"},{"type":"text","text":"\n\n[Kiln] update the checklist"}]""", out[1]["content"].toString())
+        assertEquals("2", out[1].str("tool_use_id"))
+    }
+
     @Test fun `dropped connections are retried, other failures are not`() {
         assertTrue(app.kiln.agent.isNetworkFailure(java.io.IOException("Stream failed")))
         assertTrue(app.kiln.agent.isNetworkFailure(RuntimeException("model call", java.net.ConnectException("Connection refused"))))

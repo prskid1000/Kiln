@@ -357,11 +357,11 @@ class AgentLoop(
             // with every screen written). Every 8 steps without an update, show the list and ask.
             if (uses.any { it.str("name") == "todo" }) lastTodoStep = steps
             val stale = steps - lastTodoStep
+            // As a separate note it was ignored (run 15: 5 reminders, 2 updates in 73 calls). It now goes inside the latest
+            // tool result, with the list as the call to send — only the statuses need changing.
             val todoNudge = state.todos.filter { it.status != "done" }.takeIf { it.isNotEmpty() && finish == null && stale >= 8 && stale % 8 == 0 }?.let {
-                obj("type" to "text", "text" to "<system-reminder>Your checklist hasn't changed in $stale steps:\n" +
-                    state.todos.joinToString("\n") { t -> "[${when (t.status) { "done" -> "x"; "in_progress" -> "~"; else -> " " }}] ${t.text}" } +
-                    "\nIf you've finished some of these, send the updated list with todo now (one item in_progress at a time). " +
-                    "Don't mention this reminder.</system-reminder>")
+                "\n\n[Kiln] Your checklist hasn't changed in $stale steps. Update it now — mark what's finished as done and the " +
+                    "current item in_progress — by sending:\n  todo " + obj("items" to arrOf(state.todos.map { t -> obj("text" to t.text, "status" to t.status) })).toString()
             }
             // Single taps add up: runs 7–10 used 30–47 of them where a few test_flow calls would do.
             // After 8 single interactions in a row, suggest batching.
@@ -377,7 +377,8 @@ class AgentLoop(
                     "Test the rest of this journey that way: one test_flow with its taps, typing and an expect at the end.</system-reminder>")
             } else null
             // Queued user messages ride along with the tool results: the model sees them at its next step.
-            session.append(Msg("user", JsonArray(results + listOfNotNull(budget, finish, todoNudge, flowNudge) + (drainSteering() ?: emptyList()))))
+            val withNudge = if (todoNudge == null) results else withNote(results, todoNudge)
+            session.append(Msg("user", JsonArray(withNudge + listOfNotNull(budget, finish, flowNudge) + (drainSteering() ?: emptyList()))))
         }
     }
 
@@ -705,6 +706,14 @@ class AgentLoop(
             return (if (a.status == Activity.Status.FAILED) "✗ " else "") + "${a.tool}$what" + (if (out.isNotBlank()) " → $out" else "")
         }
     }
+}
+
+/** [results] with [note] added as a text block inside the last tool result (where the model reads most closely). */
+internal fun withNote(results: List<JsonObject>, note: String): List<JsonObject> {
+    val last = results.lastOrNull() ?: return results
+    val blocks = (last["content"] as? JsonArray)?.toList() ?: listOf(obj("type" to "text", "text" to (last.str("content") ?: "")))
+    val content = JsonArray(blocks + obj("type" to "text", "text" to note))
+    return results.dropLast(1) + JsonObject(last + mapOf("content" to content))
 }
 
 /** Waits between retries after a dropped connection: about a minute and a half in all. */
