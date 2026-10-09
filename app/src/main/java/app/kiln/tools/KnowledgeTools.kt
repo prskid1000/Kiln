@@ -46,8 +46,11 @@ internal fun classPublicStatics(b: ByteArray): List<String> {
     skipMembers { _, _ -> }
     val out = mutableListOf<String>()
     // public (1) + static (8), not synthetic (0x1000); no generated/mangled names.
-    skipMembers { access, name ->
-        if (access and 0x9 == 0x9 && access and 0x1000 == 0 && name.none { it == '$' || it == '-' || it == '<' })
+    skipMembers { access, raw ->
+        // A function taking an inline value class (Dp) gets a mangled JVM name, KCardBox-e-sFG2g: the Kotlin name is the
+        // part before the "-" (skipping those dropped KCardBox, KDivider, KButton and flagged them as invented).
+        val name = raw.substringBefore('-')
+        if (access and 0x9 == 0x9 && access and 0x1000 == 0 && name.isNotEmpty() && name.none { it == '$' || it == '<' })
             if (name.length > 3 && name.startsWith("get") && name[3].isUpperCase()) {
                 // A top-level val: `val Nocturne` and `val kilnColors` both compile to getX.
                 out += name.substring(3); out += name[3].lowercase() + name.substring(4)
@@ -76,7 +79,8 @@ class ClassIndex(private val toolchain: Toolchain) {
 
     /** Simple names of everything public in the kit (classes, objects, top-level functions and vals). */
     private val kit = HashSet<String>(2_000)
-    fun kitNames(): Set<String> { ensure(); return kit }
+    // Plus every name the kit's catalog lists: a name the class reader can't see is never called invented.
+    fun kitNames(): Set<String> { ensure(); return kit + kitSigs.keys.filter { '.' !in it } }
 
     @Synchronized private fun ensure() {   // parallel sdk_lookup calls share one index
         val dir = toolchain.dir ?: error("toolchain not installed")

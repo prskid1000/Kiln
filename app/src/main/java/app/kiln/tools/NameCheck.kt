@@ -35,7 +35,7 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             val name = fq.substringAfterLast('.')
             val pkg = fq.substringBeforeLast('.', "")
             if (fq.startsWith("app.kiln.kit.")) {
-                if (index.exists(fq) || index.exists(pkg)) continue   // a kit symbol, or a member of a kit object
+                if (index.exists(fq) || index.exists(pkg) || (pkg == "app.kiln.kit" && name in kit)) continue   // a kit symbol, or a member of a kit object
                 when (val s = kitFix(name, kit, declared)) {
                     is Fix.Exact -> { text = replaceImport(text, fq, "app.kiln.kit.$name"); fixed += "import $fq → app.kiln.kit.$name" }
                     is Fix.Typo -> { text = rename(replaceImport(text, fq, "app.kiln.kit.${s.to}"), name, s.to); renamed += name
@@ -127,7 +127,8 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
     }
 
     private fun unknown(name: String, line: Int, closest: List<String>): String =
-        "line $line: $name doesn't exist in the kit" + (if (closest.isEmpty()) "" else ". Closest:\n" +
+        // Not "invented" outright: it may be the model's own, in a file it hasn't written yet.
+        "line $line: $name isn't in the kit or declared in the project (yet — fine if you're about to write it)" + (if (closest.isEmpty()) "" else ". Kit names closest to it:\n" +
             closest.joinToString("\n") { "      ${signature(it) ?: it}" }) +
             "\n    (or kit_search what you need, e.g. \"swipe to delete\")"
 

@@ -567,7 +567,8 @@ private fun StepRow(a: Activity) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(22.dp)) {
             Box(Modifier.size(22.dp).clip(RoundedCornerShape(11.dp)).background(N.surface), contentAlignment = Alignment.Center) {
                 if (a.status == Activity.Status.RUNNING) CircularProgressIndicator(Modifier.size(12.dp), color = N.accent, strokeWidth = 1.5.dp)
-                else Icon(icon, null, tint = color, modifier = Modifier.size(13.dp))
+                // Written by the model, saved when its reply ends: no spinner, a muted icon.
+                else Icon(icon, null, tint = if (a.status == Activity.Status.QUEUED) N.textMuted else color, modifier = Modifier.size(13.dp))
             }
             Box(Modifier.width(1.dp).height(if (open) 0.dp else 10.dp).background(N.divider))
         }
@@ -575,7 +576,8 @@ private fun StepRow(a: Activity) {
         Column(Modifier.weight(1f).clip(N.shapeSm).clickable { open = !open }.padding(top = 2.dp, bottom = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 a.agent?.let { AgentTag(it); Spacer(Modifier.width(6.dp)) }
-                Text(title, style = T.bodySmall.copy(color = color), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(if (a.status == Activity.Status.QUEUED && a.progress.isNotBlank()) a.progress else title, style = T.bodySmall.copy(color = if (a.status == Activity.Status.QUEUED) N.textMuted else color),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (a.ms >= 100) Text("%.1fs".format(a.ms / 1000.0), style = T.monoSmall)
             }
             val detail = if (a.kind == Activity.Kind.THINKING) a.text else a.summary

@@ -74,7 +74,8 @@ data class Activity(
 ) {
     /** NOTICE is something to look at (a cap, a retry, a stop); INFO just records a choice (the look picked). */
     enum class Kind { USER, ASSISTANT, THINKING, TOOL, NOTICE, INFO, ERROR }
-    enum class Status { RUNNING, DONE, FAILED, DENIED, STOPPED }
+    /** QUEUED: the model has finished writing this call; it runs when the reply ends (no spinner meanwhile). */
+    enum class Status { QUEUED, RUNNING, DONE, FAILED, DENIED, STOPPED }
 }
 
 data class ApprovalRequest(val tool: String, val input: String, val answer: CompletableDeferred<Pair<Boolean, Boolean>>) // (allow, forSession)
@@ -270,7 +271,7 @@ class AgentLoop(
             _feed.update { l -> l.map { a ->
                 // Helpers' nested steps stop too (their own loop was cancelled before it could say so).
                 val kids = a.children.map { c -> if (c.status == Activity.Status.RUNNING) c.copy(status = Activity.Status.STOPPED) else c }
-                (if (a.status == Activity.Status.RUNNING) a.copy(status = Activity.Status.STOPPED) else a).copy(children = kids)
+                (if (a.status == Activity.Status.RUNNING || a.status == Activity.Status.QUEUED) a.copy(status = Activity.Status.STOPPED) else a).copy(children = kids)
             } }
             stoppedWith("Stopped.")
             runCatching { closeDanglingToolUses() }   // a disk error here must not replace the cancellation
@@ -551,16 +552,19 @@ class AgentLoop(
         class Streaming(val aid: Int, val name: String, val args: StringBuilder = StringBuilder(), var path: String? = null, var shown: Long = 0)
         val streaming = mutableListOf<Streaming>()
         val byCallId = HashMap<String, Streaming>()
-        fun showProgress(s: Streaming, force: Boolean = false) {
+        // [done]: the model has finished writing this call — it waits, without a spinner, for the reply to end and run.
+        fun showProgress(s: Streaming, force: Boolean = false, done: Boolean = false) {
             val now = System.currentTimeMillis()
-            if (!force && now - s.shown < 300) return
+            if (!force && !done && now - s.shown < 300) return
             s.shown = now
             if (s.path == null) PATH_ARG.find(s.args.take(600))?.let { m -> s.path = m.groupValues[1].replace("\\/", "/") }
             val file = s.path?.substringAfterLast('/')
-            val verb = when (s.name) { "write_file" -> "Writing"; "edit_file", "multi_edit" -> "Editing"; else -> null }
+            val verb = when (s.name) { "write_file" -> if (done) "Written:" else "Writing"; "edit_file", "multi_edit" -> if (done) "Edit ready:" else "Editing"; else -> null }
             val size = if (s.args.length >= 1024) "%.1f KB".format(s.args.length / 1024.0) else "${s.args.length} B"
-            val text = if (verb != null) "$verb ${file ?: "a file"}… $size" else "Preparing ${s.name}… $size"
-            update(s.aid) { it.copy(progress = text, input = s.path?.let { p -> obj("path" to p).compact() } ?: it.input) }
+            val text = if (done) (if (verb != null) "$verb ${file ?: "a file"} · $size — saved when this reply ends" else "${s.name} ready — runs when this reply ends")
+                else if (verb != null) "$verb ${file ?: "a file"}… $size" else "Preparing ${s.name}… $size"
+            update(s.aid) { it.copy(progress = text, input = s.path?.let { p -> obj("path" to p).compact() } ?: it.input,
+                status = if (done) Activity.Status.QUEUED else it.status) }
         }
         val turn = adapter.stream(req) { ev ->
             when (ev) {
@@ -574,6 +578,8 @@ class AgentLoop(
                 }
                 is ModelEvent.ToolStart -> {
                     textId = null
+                    // The call before this one is complete: it stops spinning.
+                    streaming.lastOrNull()?.let { showProgress(it, done = true) }
                     val s = Streaming(next(Activity.Kind.TOOL, tool = ev.name, status = Activity.Status.RUNNING), ev.name)
                     streaming += s; if (ev.id.isNotEmpty()) byCallId[ev.id] = s
                     showProgress(s, force = true)
@@ -590,7 +596,7 @@ class AgentLoop(
         val calls = turn.content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "tool_use" }?.str("id") }
         streaming.forEachIndexed { i, s ->
             val callId = calls.getOrNull(i)
-            if (callId != null) { update(s.aid) { it.copy(progress = "") }; streamedSteps[callId] = s.aid }
+            if (callId != null) { showProgress(s, done = true); streamedSteps[callId] = s.aid }
             else _feed.update { l -> l.filter { it.id != s.aid } }
         }
         textId?.let { id -> update(id) { it.copy(status = Activity.Status.DONE) } }
@@ -673,7 +679,7 @@ class AgentLoop(
         // Strict schemas make optional fields nullable; null means "not given" for every tool (incl. MCP).
         val input = (use["input"] as? JsonObject)?.let { o -> JsonObject(o.filterValues { it !is kotlinx.serialization.json.JsonNull }) } ?: obj()
         // The step shown while the model wrote this call becomes its real step.
-        val aid = streamedSteps.remove(id)?.also { a -> update(a) { it.copy(tool = name, input = input.compact(), progress = "") } }
+        val aid = streamedSteps.remove(id)?.also { a -> update(a) { it.copy(tool = name, input = input.compact(), progress = "", status = Activity.Status.RUNNING) } }
             ?: next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
         val t0 = System.currentTimeMillis()
         fun result(r: ToolResult, status: Activity.Status): JsonObject {

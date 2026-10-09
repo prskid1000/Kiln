@@ -127,7 +127,7 @@ private fun SourceList(ps: ProjectState, uploads: Int, onOpen: (Open) -> Unit) {
     val loop by ps.loop.collectAsStateWithLifecycle()
     // Re-list whenever the agent finishes a step.
     val feed = loop?.feed?.collectAsStateWithLifecycle()?.value
-    val tick = feed?.count { it.status != app.kiln.agent.Activity.Status.RUNNING } ?: 0
+    val tick = feed?.count { it.status != app.kiln.agent.Activity.Status.RUNNING && it.status != app.kiln.agent.Activity.Status.QUEUED } ?: 0
     // Walking the project and reading each file's size and time is IO: off the main thread.
     val files by androidx.compose.runtime.produceState(emptyList<Triple<String, File, String>>(), ps.project, tick, uploads) {
         value = withContext(Dispatchers.IO) { ps.project.files().map { f -> Triple(ps.project.rel(f), f, humanBytes(f.length()) + " · " + relativeTime(f.lastModified())) }.sortedBy { it.first } }
