@@ -4,6 +4,7 @@ import app.kiln.build.KotlinFormat
 import app.kiln.tools.replaceIgnoringIndent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KotlinFormatTest {
@@ -109,6 +110,14 @@ class KotlinFormatTest {
             assertEquals("${file.name}: only whitespace and import order may change", content(src), content(out))
             assertEquals("${file.name}: formatting twice changes it again", out, KotlinFormat.format(out))
         }
+    }
+
+    @Test fun `a whole-file edit that misses says to use write_file and keep the Theme line`() {
+        val file = "package a\n\nimport b.B\n\nclass MainActivity : KilnActivity() {\n    override fun Theme(content: @Composable () -> Unit) = KilnTheme(content = content)\n    @Composable\n    override fun Content() { }\n}\n"
+        val remembered = "package a\n\nimport b.B\n\nclass MainActivity : KilnActivity() {\n    @Composable\n    override fun Content() { }\n}\n"
+        val hint = app.kiln.tools.wholeFileHint(file, remembered)
+        assertTrue(hint, "write_file" in hint && "override fun Theme(content: @Composable () -> Unit) = KilnTheme(content = content)" in hint)
+        assertEquals("", app.kiln.tools.wholeFileHint(file, "class MainActivity"))    // a small edit: no such hint
     }
 
     @Test fun `star imports don't indent the next line`() {

@@ -134,7 +134,7 @@ class EditFileTool : Tool {
         // Files are formatted on save, so the agent's copy may be indented differently: match ignoring indentation.
         val loose = if (count == 0) importEdit(text, old, new) ?: replaceIgnoringIndent(text, old, new) else null
         when {
-            count == 0 && loose == null -> return ToolResult.error("old_text not found in $rel." + closestMatch(text, old))
+            count == 0 && loose == null -> return ToolResult.error("old_text not found in $rel." + wholeFileHint(text, old) + closestMatch(text, old))
             count > 1 && !all -> return ToolResult.error("old_text matches $count places in $rel — add surrounding lines to make it unique, or set replace_all")
         }
         val edited = loose ?: if (all) text.replace(old, new) else text.replaceFirst(old, new)
@@ -244,6 +244,18 @@ internal fun misplacedSource(path: String?): String? {
     if (!p.endsWith(".kt") || p.startsWith("src/")) return null
     return "Kotlin sources must be under src/ (the app's package directory, e.g. src/kiln/app/<name>/$p) or they won't be compiled. " +
         "Write it there instead — project_info shows the package."
+}
+
+/**
+ * When a failed edit's old_text is (nearly) the whole file from its package line — the model rewriting a
+ * file it remembers, not the one on disk (run 11: MainActivity without the Theme line the look picker
+ * added) — say to rewrite it with write_file, keeping what Kiln added. Empty otherwise.
+ */
+internal fun wholeFileHint(text: String, old: String): String {
+    if (!old.trimStart().startsWith("package ") || old.lines().size < text.lines().size * 0.6) return ""
+    val theme = text.lines().firstOrNull { "override fun Theme(" in it }?.trim()
+    return " It looks like you meant to replace the whole file: read_file it and send the full new content with write_file" +
+        (if (theme != null) ", keeping this line Kiln added for the app's look:\n  $theme\n" else ".\n")
 }
 
 /**
