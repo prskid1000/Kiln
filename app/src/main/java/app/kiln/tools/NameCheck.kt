@@ -29,6 +29,20 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         if (file.extension != "kt") return null
         var text = original
         val fixed = mutableListOf<String>()
+        // 0. The package line follows the folder (src/kiln/app/x/ui/ → kiln.app.x.ui): a screen written in ui/ with the
+        // root package made every `import …ui.SettingsScreen` fail, and the build fixer then followed the wrong line.
+        runCatching {
+            val src = File(project.dir, "src").canonicalFile
+            val dir = file.canonicalFile.parentFile
+            if (dir.path.startsWith(src.path + File.separator)) {
+                val want = dir.relativeTo(src).invariantSeparatorsPath.replace('/', '.')
+                val m = Regex("""(?m)^package\s+([\w.]+)""").find(text)
+                if (m != null && m.groupValues[1] != want && want.matches(Regex("""[a-z_][\w]*(\.[a-z_][\w]*)*"""))) {
+                    text = text.replaceRange(m.groups[1]!!.range, want)
+                    fixed += "package ${m.groupValues[1]} → $want (the package follows the file's folder; imports of it use $want)"
+                }
+            }
+        }
         // Each problem points at its import line or its first use; the line number is read from the final text, after the
         // imports added or removed above it (it was taken before them, and was off by as many lines).
         class Problem(val at: Regex, val inImports: Boolean, val msg: (Int) -> String)

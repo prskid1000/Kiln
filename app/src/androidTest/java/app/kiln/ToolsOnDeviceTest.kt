@@ -171,10 +171,12 @@ class ToolsOnDeviceTest {
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.lifecycle.compose.collectAsStateWithLifecycle"),
             // The project's own symbols: a wrong-package import is pointed at the real package, a missing one is added.
             Case("delete", """{"path":"$src/Bad.kt"}"""),
-            Case("write_file", """{"path":"$src/data/Repo.kt","content":"package kiln.app.tooltest\n\nobject ExpenseRepo { val n = 1 }\n"}"""),
+            // A package line that doesn't match its folder is corrected as written; the import of it then resolves.
+            Case("write_file", """{"path":"$src/data/Repo.kt","content":"package kiln.app.tooltest\n\nobject ExpenseRepo { val n = 1 }\n"}""",
+                expect = "package kiln.app.tooltest → kiln.app.tooltest.data"),
             Case("write_file", """{"path":"$src/data/Helper.kt","content":"package kiln.app.tooltest.data\n\nobject Helper { val m = 2 }\n"}"""),
             Case("write_file", """{"path":"$src/ui/Use.kt","content":"package kiln.app.tooltest.ui\n\nimport kiln.app.tooltest.data.ExpenseRepo\n\nval total = ExpenseRepo.n + Helper.m\n"}"""),
-            Case("check", "{}", expect = "import kiln.app.tooltest.ExpenseRepo (was kiln.app.tooltest.data.ExpenseRepo)"),
+            Case("check", "{}", expect = "BUILD OK"),
             Case("read_file", """{"path":"$src/ui/Use.kt"}""", expect = "import kiln.app.tooltest.data.Helper"),
             Case("delete", """{"path":"$src/data"}"""),
             Case("delete", """{"path":"$src/ui"}"""),
