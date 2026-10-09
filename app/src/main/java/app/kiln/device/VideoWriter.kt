@@ -29,8 +29,14 @@ class VideoWriter(private val file: File, width: Int, height: Int, private val f
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
         }
-        codec.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        codec.start()
+        // A codec that won't take this format is released, not leaked (a hardware instance per failed attempt).
+        try {
+            codec.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            codec.start()
+        } catch (e: Exception) {
+            runCatching { codec.release() }; runCatching { muxer.release() }; file.delete()
+            throw e
+        }
     }
 
     fun add(frame: Bitmap) {

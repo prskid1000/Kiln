@@ -278,7 +278,8 @@ class QaCheckTool(
                 "criterion failed or the smoke check found a problem, else VERDICT: PASS."
         ctx.progress(if (plan.carried.isEmpty()) "QA agent testing the app" else "QA agent re-testing ${plan.test.size} criteria (${plan.carried.size} carried over)")
         val video = File(ctx.spillDir, "qa-${System.currentTimeMillis()}.mp4")
-        val rec = device.testDisplay?.record(video, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+        // A recording that can't start (no free encoder, a size it rejects) means QA runs without a video, not that it fails.
+        val rec = runCatching { device.testDisplay?.record(video, CoroutineScope(SupervisorJob() + Dispatchers.IO)) }.getOrNull()
         // The QA agent's own steps: live in the chat while it works, and listed under its report.
         val trail = java.util.Collections.synchronizedList(mutableListOf<String>())
         // Every QA step — its tool call, result and screenshot — nested under this call in the chat, live.

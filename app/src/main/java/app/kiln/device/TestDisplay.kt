@@ -94,7 +94,8 @@ class TestDisplay(private val context: Context, private val size: Triple<Int, In
     fun record(file: File, scope: kotlinx.coroutines.CoroutineScope): Recording {
         id()
         val k = minOf(1f, 720f / height)
-        val writer = VideoWriter(file, (width * k).toInt(), (height * k).toInt(), fps = 4)
+        // Even sizes, multiples of 16: some hardware encoders reject odd ones.
+        val writer = VideoWriter(file, ((width * k).toInt() / 16 * 16).coerceAtLeast(16), ((height * k).toInt() / 16 * 16).coerceAtLeast(16), fps = 4)
         val job = scope.launch(Dispatchers.IO) {
             while (isActive) { bitmap(wait = false)?.let { runCatching { writer.add(it) } }; delay(250) }
         }
