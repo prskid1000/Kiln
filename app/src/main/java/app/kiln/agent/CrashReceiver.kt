@@ -45,8 +45,10 @@ class CrashReceiver : BroadcastReceiver() {
         val label = runCatching { project.meta().label }.getOrDefault(name)
         val draft = "The app crashed while I was using it:$nl$type: $message$nl" +
             frames.joinToString(nl) { "    at $it" } + nl + nl + "Find the cause and fix it, then check on the device that it no longer crashes."
-        val open = PendingIntent.getActivity(context, name.hashCode(),
+        val open = PendingIntent.getActivity(context, 0,
             Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                // Distinct per project: by hash code, another project's crash could rewrite this one's draft.
+                .setData(android.net.Uri.parse("kiln://crash/" + android.net.Uri.encode(name)))
                 // A best-of copy's crash opens its parent (a fix in the copy would be discarded with it).
                 .putExtra(MainActivity.EXTRA_PROJECT, Attempts.ownerOf(project) ?: name).putExtra(MainActivity.EXTRA_DRAFT, draft),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

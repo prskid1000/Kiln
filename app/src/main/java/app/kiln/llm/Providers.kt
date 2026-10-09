@@ -38,8 +38,11 @@ class Providers(dir: File, val secrets: Secrets) {
 
     // Only a missing file means "first run": a damaged one falls back to its last good copy, never silently to the
     // presets (custom profiles vanished and the roles moved to a paid model).
-    private fun load(): List<Profile> = if (!file.isFile && !File(file.path + ".bak").isFile) PRESETS else
-        readAtomic(file) { KJ.decodeFromString(ListSerializer(Profile.serializer()), it) } ?: PRESETS
+    private fun load(): List<Profile> = (if (!file.isFile && !File(file.path + ".bak").isFile) PRESETS else
+        readAtomic(file) { KJ.decodeFromString(ListSerializer(Profile.serializer()), it) } ?: PRESETS)
+        // Saved copies of the two compatible presets still carry the old fixed price of 0, which hid a cloud
+        // endpoint's spend: cleared, so the local-address check decides.
+        .map { if (it.id in setOf("openai-compatible", "anthropic-compatible") && it.price == Price(0.0, 0.0, 0.0, 0.0)) it.copy(price = null) else it }
 
     private fun loadRoles(): Map<String, RoleBinding> = readAtomic(rolesFile) {
         KJ.decodeFromString(kotlinx.serialization.builtins.MapSerializer(
@@ -130,15 +133,20 @@ class Providers(dir: File, val secrets: Secrets) {
             extra + Msg("user", arrOf(listOf(obj("type" to "text", "text" to text)))), tools, maxTokens = 2048)
 
         var caps = p.caps
-        val tools = runCatching { a.stream(req("Call the echo tool once with value \"a\".")) {} }
-            .onFailure { notes += "tool call failed: ${it.message}" }.getOrNull()
-        caps = caps.copy(tools = tools?.content?.any { (it as? JsonObject)?.str("type") == "tool_use" } == true)
+        // Each capability changes only on a clear answer: a success, or a refusal that won't change on retry. A rate
+        // limit or dropped connection keeps the earlier value (tools=false disabled the profile; caching=false
+        // billed every input at the full price).
+        fun clear(r: Result<*>) = r.isSuccess || r.exceptionOrNull().let { it is ProviderException && !it.retryable }
+        val toolsRun = runCatching { a.stream(req("Call the echo tool once with value \"a\".")) {} }
+            .onFailure { notes += "tool call failed: ${it.message}" }
+        if (clear(toolsRun)) caps = caps.copy(tools = toolsRun.getOrNull()?.content?.any { (it as? JsonObject)?.str("type") == "tool_use" } == true)
         notes += "tools: ${caps.tools}"
 
         if (caps.tools) {
-            val par = runCatching { a.stream(req("Call the echo tool twice in parallel, with \"a\" and \"b\".")) {} }.getOrNull()
-            val n = par?.content?.count { (it as? JsonObject)?.str("type") == "tool_use" } ?: 0
-            caps = caps.copy(parallelTools = n >= 2); notes += "parallel tool calls: ${n >= 2}"
+            val parRun = runCatching { a.stream(req("Call the echo tool twice in parallel, with \"a\" and \"b\".")) {} }
+            val n = parRun.getOrNull()?.content?.count { (it as? JsonObject)?.str("type") == "tool_use" } ?: 0
+            if (clear(parRun)) caps = caps.copy(parallelTools = n >= 2)
+            notes += "parallel tool calls: ${caps.parallelTools}"
         }
         // 1×1 PNG: does the endpoint accept images at all?
         val png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -155,10 +163,12 @@ class Providers(dir: File, val secrets: Secrets) {
 
         if (p.protocol == Protocol.ANTHROPIC || caps.caching) {
             val big = "Kiln cache probe. " + "lorem ipsum dolor sit amet ".repeat(800)
-            val r1 = runCatching { a.stream(ModelRequest(model, big, listOf(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "ok?"))))), emptyList(), maxTokens = 64)) {} }.getOrNull()
-            val r2 = runCatching { a.stream(ModelRequest(model, big, listOf(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "ok?"))))), emptyList(), maxTokens = 64)) {} }.getOrNull()
+            val run1 = runCatching { a.stream(ModelRequest(model, big, listOf(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "ok?"))))), emptyList(), maxTokens = 64)) {} }
+            val run2 = runCatching { a.stream(ModelRequest(model, big, listOf(Msg("user", arrOf(listOf(obj("type" to "text", "text" to "ok?"))))), emptyList(), maxTokens = 64)) {} }
+            val r1 = run1.getOrNull(); val r2 = run2.getOrNull()
             val cached = (r2?.usage?.cacheRead ?: 0) > 0 || (r1?.usage?.cacheWrite ?: 0) > 0
-            caps = caps.copy(caching = cached); notes += "prompt caching: $cached"
+            if (cached || (run1.isSuccess && run2.isSuccess)) caps = caps.copy(caching = cached)
+            notes += "prompt caching: ${caps.caching}"
         }
         // OpenRouter publishes per-model prices: fill them in so costs (and caps) are real, not $0.
         val prices = if ("openrouter.ai" in p.baseUrl) runCatching { openRouterPrices() }.getOrDefault(emptyMap()) else emptyMap()

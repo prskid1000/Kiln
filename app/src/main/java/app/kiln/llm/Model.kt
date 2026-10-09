@@ -150,7 +150,10 @@ fun Profile.isLocal(): Boolean {
     // Loopback, private networks (LAN, tailnet), and bare or .local names (a tailnet short name, a LAN host):
     // a custom local model there was charged the estimate and hit the spending cap.
     val o = host.split('.').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 4 }
-    return host == "localhost" || host == "::1" || host.endsWith(".ts.net") || host.endsWith(".local") || '.' !in host ||
+    // An IPv6 literal is local only if loopback, unique-local (fc00::/7) or link-local (fe80::/10); a public one isn't.
+    if (':' in host) return host == "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe8") ||
+        host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb")
+    return host == "localhost" || host.endsWith(".ts.net") || host.endsWith(".local") || '.' !in host ||
         (o != null && (o[0] == 127 || o[0] == 10 || (o[0] == 192 && o[1] == 168) || (o[0] == 172 && o[1] in 16..31) ||
             (o[0] == 100 && o[1] in 64..127)))
 }

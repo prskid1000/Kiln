@@ -107,6 +107,7 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         runCatching { hideCrashDialogs() }
         val resolve = warden.exec(listOf("cmd", "package", "resolve-activity", "--brief",
             "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", pkg))
+        if (!resolve.ok) return resolve   // Warden's error, not "no launcher activity"
         val component = resolve.out.lines().lastOrNull { '/' in it }?.trim()
             ?: return ExecResult(1, "", "no launcher activity in $pkg", 0)
         return warden.exec(listOf("am", "start", "-W", "-S") + displayArgs("--display") + listOf("-n", component))
@@ -258,7 +259,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         for (attempt in 0 until 6) {
             val r = warden.exec(listOf("sh", "-c", "rm -f $path; uiautomator dump $path >/dev/null 2>&1; cat $path 2>/dev/null"), timeoutMs = 30_000)
             xml = r.out.substring(r.out.indexOf('<').coerceAtLeast(0))
-            if (xml.startsWith("<") && "<node" in xml && (expect == null || "package=\"$expect\"" in xml)) break
+            if (xml.startsWith("<") && "<node" in xml && (expect == null || "package=\"$expect\"" in xml ||
+                    Regex("package=\"([^\"]+)\"").find(xml)?.groupValues?.get(1) in SYSTEM_DIALOGS)) break   // a dialog is a valid answer
             kotlinx.coroutines.delay(300)
         }
         // Never another window's tree for an app we expected (Kiln's own chat after a BACK or crash): "nothing" instead.
@@ -266,7 +268,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         // what the user sees, and the agent must see it to answer it.
         if (expect != null && "package=\"$expect\"" !in xml) {
             val shown = Regex("""package="([^"]+)"""").find(xml)?.groupValues?.get(1)
-            return if (shown in SYSTEM_DIALOGS) parseTree(xml) else emptyList()
+            // Only a dialog that is the foreground activity (not the shade, lock screen or a crash dialog layered over).
+            return if (shown in SYSTEM_DIALOGS && foregroundPackage() == shown) parseTree(xml) else emptyList()
         }
         return parseTree(xml)
     }
@@ -405,8 +408,9 @@ fun findNode(nodes: List<UiNode>, target: String): UiNode? {
 }
 
 /** System windows an app opens over itself (permission prompts, pickers, share sheets): shown to the agent as its screen. */
-private val SYSTEM_DIALOGS = setOf(
-    "com.android.permissioncontroller", "com.google.android.permissioncontroller", "com.android.systemui",
-    "com.android.documentsui", "com.google.android.documentsui", "com.android.intentresolver", "android",
+internal val SYSTEM_DIALOGS = setOf(
+    // Not systemui or "android": the notification shade, lock screen and crash dialogs aren't the app's screen.
+    "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+    "com.android.documentsui", "com.google.android.documentsui", "com.android.intentresolver",
     "com.google.android.providers.media.module", "com.android.providers.media.module", "com.android.camera2",
 )

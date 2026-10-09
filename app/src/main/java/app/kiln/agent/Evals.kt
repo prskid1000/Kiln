@@ -78,7 +78,8 @@ object Evals {
             }
             state.value = state.value.copy(done = i + 1, report = report(scores))
         }
-        File(Graph.paths.evals, "$stamp.json").writeText(KJPretty.encodeToString(ListSerializer(Score.serializer()), scores))
+        // A full disk mustn't crash Kiln or lose the report shown below.
+        runCatching { File(Graph.paths.evals, "$stamp.json").writeText(KJPretty.encodeToString(ListSerializer(Score.serializer()), scores)) }
         state.value = state.value.copy(running = false, report = report(scores))
     }
 

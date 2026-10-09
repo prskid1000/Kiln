@@ -342,7 +342,8 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
         // another app (a stray tap once pressed Warden's Stop button).
         if (inputTool) {
             val front = device.foregroundPackage()
-            if (front != pkg(ctx) && (front != null || device.testDisplay != null))
+            // A system dialog the app opened (permission prompt, picker) may be answered on the phone's screen.
+            if (front != pkg(ctx) && (front != null || device.testDisplay != null) && !(device.testDisplay == null && front in app.kiln.device.SYSTEM_DIALOGS))
                 return ToolResult.error("${pkg(ctx)} is not in front (${front ?: "nothing"} is) — launch it first with launch or run_app.")
         }
         return exec(ctx, input)
@@ -679,7 +680,8 @@ internal fun projectDeclarations(project: app.kiln.build.Project): Map<String, L
 internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.kiln.device.UiNode>, x: Int? = null, y: Int? = null): String {
     val pkg = pkg(ctx)
     val after = device.uiTree(pkg)
-    if (after.isEmpty() && device.pid(pkg) == null) return "The app is no longer running — it may have crashed: call last_crash."
+    // Checked whatever the screen shows: a crash dialog over the screen isn't the app still running.
+    if (device.pid(pkg) == null) return "The app is no longer running — it may have crashed: call last_crash."
     fun labels(nodes: List<app.kiln.device.UiNode>) =
         nodes.filter { it.text.isNotBlank() || it.desc.isNotBlank() }.map { it.label().take(60) }.distinct()
     val was = labels(before); val now = labels(after)
@@ -766,7 +768,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         // flow would tap whatever else is on screen.
         if (listOf("tap", "type", "swipe", "swipe_by", "key").any { s(it) != null }) {
             val front = device.foregroundPackage()
-            if (front != pkg && (front != null || device.testDisplay != null))
+            if (front != pkg && (front != null || device.testDisplay != null) && !(device.testDisplay == null && front in app.kiln.device.SYSTEM_DIALOGS))
                 return false to "the app isn't in front any more (${front ?: "nothing"} is) — the step was not sent"
         }
         val before = device.uiTree(pkg)

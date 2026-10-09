@@ -55,12 +55,20 @@ object Schedules {
         timeInMillis
     }
 
-    private fun intent(ctx: Context, name: String) = PendingIntent.getBroadcast(ctx, name.hashCode(),
-        Intent(ctx, ScheduleReceiver::class.java).setAction(ACTION).putExtra("project", name),
+    // A data URI per project: by hash code alone, two projects could share one alarm and one's run never fired.
+    private fun intent(ctx: Context, name: String) = PendingIntent.getBroadcast(ctx, 0,
+        Intent(ctx, ScheduleReceiver::class.java).setAction(ACTION).putExtra("project", name)
+            .setData(android.net.Uri.parse("kiln://schedule/" + android.net.Uri.encode(name))),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    /** The alarm as armed before the data URI (cancelled once, so it can't fire twice). */
+    private fun legacyIntent(ctx: Context, name: String) = PendingIntent.getBroadcast(ctx, name.hashCode(),
+        Intent(ctx, ScheduleReceiver::class.java).setAction(ACTION).putExtra("project", name),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE)
 
     fun arm(ctx: Context, name: String, s: Schedule?) {
         val am = ctx.getSystemService(AlarmManager::class.java)
+        legacyIntent(ctx, name)?.let { am.cancel(it); it.cancel() }
         if (s == null || !s.enabled) { am.cancel(intent(ctx, name)); return }
         val at = next(s)
         if (am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent(ctx, name))

@@ -99,6 +99,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         private val active = java.util.concurrent.atomic.AtomicInteger()
         /** No run (or best-of round) is going. */
         internal fun idle(): Boolean = active.get() == 0
+        /** Preview sheets open: they need crash dialogs hidden, so a run ending meanwhile leaves them hidden. */
+        internal val previewsOpen = java.util.concurrent.atomic.AtomicInteger()
         private val serviceLock = Any()
         private val messages = MutableStateFlow<String?>(null)
 
@@ -114,7 +116,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                 (active.decrementAndGet() == 0).also { if (it) ctx.stopService(Intent(ctx, RunService::class.java)) }
             }
             // The last run is over (a held best-of round's runs never see 0 themselves): the user's crash dialogs come back.
-            if (last) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
+            if (last) if (previewsOpen.get() == 0) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
         }
 
         init { app.kiln.agent.Attention.loops = { name -> synchronized(states) { states[name] }?.loop?.value } }
@@ -192,7 +194,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                     s.stopping.value = false
                     if (synchronized(serviceLock) { (active.decrementAndGet() == 0).also { if (it) ctx.stopService(Intent(ctx, RunService::class.java)) } }) {
                         // The last run is over: the user's crash dialogs come back.
-                        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
+                        if (previewsOpen.get() == 0) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
                     }
                     onFinish()
                 }
