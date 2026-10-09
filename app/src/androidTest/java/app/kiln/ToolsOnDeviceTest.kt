@@ -268,6 +268,11 @@ class ToolsOnDeviceTest {
                 expect = "line 7: KSlide", absent = "KM isn't"),
             Case("grep", """{"pattern":"KilnTabs","glob":"**/Bad2.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // A bare LocalDate in a @Serializable class (no serializer: doesn't compile) becomes the kit's KDate as written.
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport kotlinx.serialization.Serializable\nimport java.time.LocalDate\n\n@Serializable\ndata class Exp2(val amount: Double = 0.0, val date: LocalDate = LocalDate.now())\n"}""",
+                expect = "Exp2.date: LocalDate → KDate"),
+            Case("check", "{}", expect = "BUILD OK"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
             // A member asked for by name gets the member's (Kotlin) signature from the kit catalog.
             Case("sdk_lookup", """{"query":"KFormat.money"}""", expect = "fun money(amount: Double"),
             // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).

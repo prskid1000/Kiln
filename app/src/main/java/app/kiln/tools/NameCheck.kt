@@ -122,6 +122,31 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         }
         for (n in missing) { text = addImport(text, "app.kiln.kit.$n"); fixed += "added import app.kiln.kit.$n" }
 
+        // 2b. A bare java.time type in a @Serializable class's constructor doesn't compile (no serializer); the kit's
+        // KDate / KTime / KDateTime are the same types, carrying it. Certain, so swapped (a run reasoned "KDate is just
+        // LocalDate, the kit handles it" and wrote LocalDate).
+        for (h in SERIALIZABLE_CLASS.findAll(text).toList().reversed()) {
+            val open = h.range.last
+            var close = open + 1; var k = 1
+            while (close < text.length && k > 0) { if (text[close] == '(') k++ else if (text[close] == ')') k--; close++ }
+            val header = text.substring(open, close)
+            val swapped = TIME_PROP.replace(header) { pm ->
+                // A property that names its own serializer is left alone.
+                if ("@Serializable(" in pm.groupValues[1]) pm.value else pm.groupValues[1] + KIT_TIME.getValue(pm.groupValues[3])
+            }
+            if (swapped != header) {
+                TIME_PROP.findAll(header).filter { "@Serializable(" !in it.groupValues[1] }.forEach { pm ->
+                    val kt = KIT_TIME.getValue(pm.groupValues[3])
+                    fixed += "${h.groupValues[1]}.${pm.groupValues[2]}: ${pm.groupValues[3]} → $kt " +
+                        "(a bare ${pm.groupValues[3]} can't be saved; $kt is the same type, saved as text)"
+                    if (!Regex("""(?m)^import\s+app\.kiln\.kit\.(?:$kt|\*)\s*$""").containsMatchIn(text)) missing += kt
+                }
+                text = text.substring(0, open) + swapped + text.substring(close)
+            }
+        }
+        for (n in missing) if (!Regex("""(?m)^import\s+app\.kiln\.kit\.${Regex.escape(n)}\s*$""").containsMatchIn(text)) {
+            text = addImport(text, "app.kiln.kit.$n"); if (fixed.none { it == "added import app.kiln.kit.$n" }) fixed += "added import app.kiln.kit.$n" }
+
         // 3. Material icons: whether Icons.Filled.X exists is settled now, not left to a build (a run went back and forth
         // four times over Icons.Filled.Circle).
         val iconCode = codeOnly(text)
@@ -253,6 +278,11 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         val KIT_SHAPED = Regex("""K[A-Z]\w*|Kiln[A-Z]\w*""")
         val ICON = Regex("""(?<![\w.])Icons\.(AutoMirrored\.)?(Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.([A-Z]\w*)""")
         val OWN_ICON = Regex("""\bva[lr]\s+Icons\.(?:AutoMirrored\.)?\w+\.(\w+)""")
+        /** `@Serializable data class Name(` — up to the constructor's "(" (group 1: the class name). */
+        val SERIALIZABLE_CLASS = Regex("""@(?:kotlinx\.serialization\.)?Serializable\s+(?:(?:data|private|internal|public)\s+)*class\s+(\w+)[^(\n{]*\(""")
+        /** A constructor property typed LocalDate/LocalTime/LocalDateTime (group 1: all before the type, 2: its name, 3: the type). */
+        val TIME_PROP = Regex("""((?:@[\w.]+(?:\([^)]*\))?\s+)*(?:val|var)\s+(\w+)\s*:\s*)(?:java\.time\.)?(LocalDateTime|LocalDate|LocalTime)\b""")
+        val KIT_TIME = mapOf("LocalDate" to "KDate", "LocalTime" to "KTime", "LocalDateTime" to "KDateTime")
         /** "Kiln" with one letter garbled (KolnScreen, KilmTabs…): the only K-names renamed without asking. */
         val GARBLED_KILN = Regex("""K(?!iln)(?:[a-z]ln|i[a-z]n|il[a-z])[A-Z]\w*""")   // never a correct Kiln… (the project's own KilnTags)
         val PARAM = Regex("""[(,]\s*(?:@\w+\s+)*(?:(?:private|internal|override|open|vararg|crossinline|noinline)\s+)*(?:val\s+|var\s+)?([A-Za-z_]\w*)\s*:""")

@@ -15,7 +15,9 @@ import java.time.LocalTime
 
 /**
  * A date you can keep in a `@Serializable` data class (and so in KCollection / KStore): it is a plain
- * java.time.LocalDate, stored as ISO text ("2026-10-08").
+ * java.time.LocalDate, stored as ISO text ("2026-10-08"). Write the type as `KDate`, not `LocalDate`: the name is what
+ * carries the serializer — `val date: LocalDate` in a @Serializable class doesn't compile ("Serializer has not been
+ * found"). Everywhere else (KDateField, LocalDate.now(), comparisons) it is just a LocalDate.
  * ```
  * @Serializable data class Expense(val amount: Double = 0.0, val date: KDate = LocalDate.now())
  * KFormat.date(expense.date)              // "8 Oct 2026"
