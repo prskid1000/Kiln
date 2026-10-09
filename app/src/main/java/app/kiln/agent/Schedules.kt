@@ -96,9 +96,11 @@ class ScheduleReceiver : BroadcastReceiver() {
         val p = Project(dir)
         val s = Schedules.get(p)?.takeIf { it.enabled } ?: return
         val charging = ctx.getSystemService(BatteryManager::class.java).isCharging
-        // The toolchain may still be unpacking after an update: give it the chance to finish.
-        if (Graph.toolchain.state.value !is app.kiln.toolchain.Toolchain.State.Ready) Graph.toolchain.syncBundled(Graph.app.assets)
+        // The toolchain may still be unpacking after an update. Waiting for it here could outlast the broadcast's time
+        // limit (the process killed, the run lost, tomorrow's alarm never re-armed): skip tonight and say why.
+        val toolsReady = Graph.toolchain.state.value is app.kiln.toolchain.Toolchain.State.Ready
         val result = when {
+            !toolsReady -> "skipped — the build tools were updating"
             s.chargingOnly && !charging -> "skipped — the phone wasn't charging"
             else -> KilnVM.startRun(ctx, name, s.prompt, freshChat = true) ?: "started"
         }

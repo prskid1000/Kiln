@@ -719,7 +719,7 @@ private fun Spend(loop: AgentLoop) {
     val prompt = usage.input + usage.cacheRead + usage.cacheWrite
     if (prompt == 0L) return
     val cache = (usage.cacheRead * 100 / prompt).toInt()
-    Text((if (known) "$" + "%.3f".format(cost) else "cost unknown (no price for this model)") +
+    Text((if (known) "$" + "%.3f".format(cost) else "~$" + "%.3f".format(cost) + " (estimated: no price for this model)") +
         " · ${(prompt + usage.output) / 1000}k tokens · cache $cache%",
         style = T.monoSmall, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
 }

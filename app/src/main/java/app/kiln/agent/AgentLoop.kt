@@ -521,7 +521,9 @@ class AgentLoop(
         val specs = registry.specs(if (mode == Mode.PLAN) offered.filter { Trait.READ_ONLY in it.traits } else offered)
         val req = ModelRequest(
             model = model, system = session.meta.systemPrompt,
-            messages = ContextFit.fit(session.messages, session.meta.systemPrompt, profile.caps.contextWindow), tools = specs,
+            // A model that can't see images gets a note in their place: an image it can't take failed every later request.
+            messages = ContextFit.fit(session.messages, session.meta.systemPrompt, profile.caps.contextWindow)
+                .let { if (profile.caps.vision) it else it.map(::withoutImages) }, tools = specs,
             maxTokens = minOf(profile.caps.maxOutput, 64_000),
             effort = if (role == "agent") cfg.effort else cfg.subagentEffort,
             taskBudgetTokens = cfg.taskBudgetTokens,
@@ -814,3 +816,16 @@ private val CLOSING = Regex("""(?i)let me know|if you('d| would)? (like|want|nee
 
 /** A model turn arrived but couldn't be saved: stops the run instead of being retried like a model failure. */
 private class SaveFailed(cause: Throwable) : Exception(cause.message, cause)
+
+/** [m] with every image (in its content, or in a tool result's) replaced by a short note. */
+internal fun withoutImages(m: Msg): Msg {
+    fun strip(blocks: JsonArray): JsonArray = JsonArray(blocks.map { e ->
+        val o = e as? JsonObject ?: return@map e
+        when (o.str("type")) {
+            "image" -> obj("type" to "text", "text" to "[an image was here — this model can't see images]")
+            "tool_result" -> (o["content"] as? JsonArray)?.let { c -> JsonObject(o + ("content" to strip(c))) } ?: o
+            else -> o
+        }
+    })
+    return m.copy(content = strip(m.content))
+}

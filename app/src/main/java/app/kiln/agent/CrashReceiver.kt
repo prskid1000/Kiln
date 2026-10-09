@@ -47,7 +47,8 @@ class CrashReceiver : BroadcastReceiver() {
             frames.joinToString(nl) { "    at $it" } + nl + nl + "Find the cause and fix it, then check on the device that it no longer crashes."
         val open = PendingIntent.getActivity(context, name.hashCode(),
             Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                .putExtra(MainActivity.EXTRA_PROJECT, name).putExtra(MainActivity.EXTRA_DRAFT, draft),
+                // A best-of copy's crash opens its parent (a fix in the copy would be discarded with it).
+                .putExtra(MainActivity.EXTRA_PROJECT, Attempts.ownerOf(project) ?: name).putExtra(MainActivity.EXTRA_DRAFT, draft),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val nm = context.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null)
@@ -56,8 +57,7 @@ class CrashReceiver : BroadcastReceiver() {
             .setContentTitle("$label crashed").setContentText("$type: $message".take(140))
             .setStyle(NotificationCompat.BigTextStyle().bigText("$type: $message".take(600)))
             .setContentIntent(open).setAutoCancel(true).addAction(0, "Fix with Kiln", open).build()
-        // Its own id range: it overlapped the prompts' (1000+) and could replace one.
-        runCatching { nm.notify(10_000 + (name.hashCode() and 0xfff), n) }
+        runCatching { nm.notify("crash:$name", 1, n) }   // tagged per project: hashed ids could collide
     }
 
     companion object { const val CHANNEL = "kiln_crashes" }

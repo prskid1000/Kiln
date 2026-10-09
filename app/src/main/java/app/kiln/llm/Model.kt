@@ -56,6 +56,9 @@ data class Profile(
 @Serializable
 data class Price(val input: Double, val output: Double, val cacheRead: Double = input * 0.1, val cacheWrite: Double = input * 1.25)
 
+/** USD per million tokens assumed for a model with no known price (on the high side, for the caps). */
+val ESTIMATE_PRICE = Price(5.0, 25.0)
+
 /** A tool as the model sees it. */
 @Serializable
 data class ToolSpec(val name: String, val description: String, val schema: JsonObject, val strict: Boolean = false)
@@ -101,8 +104,10 @@ enum class Stop { TOOL_USE, END_TURN, MAX_TOKENS, REFUSAL, PAUSE_TURN, OTHER }
 @Serializable
 data class Usage(val input: Long = 0, val output: Long = 0, val cacheRead: Long = 0, val cacheWrite: Long = 0) {
     operator fun plus(o: Usage) = Usage(input + o.input, output + o.output, cacheRead + o.cacheRead, cacheWrite + o.cacheWrite)
-    fun cost(p: Price?): Double = if (p == null) 0.0 else
-        (input * p.input + output * p.output + cacheRead * p.cacheRead + cacheWrite * p.cacheWrite) / 1_000_000.0
+    // No known price (a provider without one): counted at a conservative estimate, so the spending caps still stop a
+    // run — at $0 they never could. Local providers set a price of 0.
+    fun cost(p: Price?): Double = (p ?: ESTIMATE_PRICE).let { p ->
+        (input * p.input + output * p.output + cacheRead * p.cacheRead + cacheWrite * p.cacheWrite) / 1_000_000.0 }
 }
 
 data class ModelTurn(

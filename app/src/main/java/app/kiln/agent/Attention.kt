@@ -68,7 +68,7 @@ object Attention {
             .setContentIntent(open(ctx, project)).setAutoCancel(true)
             .addAction(0, "Deny", action(ctx, project, "deny", 1, key(tool, detail)))
             .addAction(0, "Allow", action(ctx, project, "allow", 2, key(tool, detail))).build()
-        runCatching { nm(ctx).notify(id(project), n) }
+        runCatching { nm(ctx).notify(project, PROMPT_ID, n) }
     }
 
     /** [answerable]: a plain question gets an inline reply; a card (several questions, the look picker) opens Kiln. */
@@ -80,7 +80,7 @@ object Attention {
             .setContentTitle("$label asks").setContentText(text.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open(ctx, project)).setAutoCancel(true).apply { if (answerable) addAction(reply) }.build()
-        runCatching { nm(ctx).notify(id(project), n) }
+        runCatching { nm(ctx).notify(project, PROMPT_ID, n) }
     }
 
     fun done(ctx: Context, project: String, label: String, summary: String) {
@@ -89,12 +89,14 @@ object Attention {
             .setContentTitle("$label is ready").setContentText(summary.take(140))
             .setStyle(NotificationCompat.BigTextStyle().bigText(summary.take(800)))
             .setContentIntent(open(ctx, project)).setAutoCancel(true).build()
-        runCatching { nm(ctx).notify(id(project), n) }
+        runCatching { nm(ctx).notify(project, PROMPT_ID, n) }
     }
 
     internal fun key(vararg parts: String) = parts.joinToString("|").hashCode().toString()
 
-    fun clear(ctx: Context, project: String) { runCatching { nm(ctx).cancel(id(project)) } }
+    // Tagged by project: a hashed id could be shared, and clearing one project's notification removed another's live prompt.
+    fun clear(ctx: Context, project: String) { runCatching { nm(ctx).cancel(project, PROMPT_ID) } }
+    private const val PROMPT_ID = 1000
 
     internal fun reply(intent: Intent): String? = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)?.toString()
 }
