@@ -70,10 +70,18 @@ class ClassIndex(private val toolchain: Toolchain) {
     /** Whether [fq] names a class or top-level symbol on the classpath (a.b.C, or pkg.Icon from a facade). */
     fun exists(fq: String): Boolean { ensure(); return fq in where || fq in topLevel }
 
+    /** Packages that have at least one class or top-level symbol (kotlinx.datetime isn't one: it isn't bundled). */
+    private val packages = HashSet<String>(20_000)
+    fun packageExists(pkg: String): Boolean { ensure(); return pkg in packages }
+
+    /** Simple names of everything public in the kit (classes, objects, top-level functions and vals). */
+    private val kit = HashSet<String>(2_000)
+    fun kitNames(): Set<String> { ensure(); return kit }
+
     @Synchronized private fun ensure() {   // parallel sdk_lookup calls share one index
         val dir = toolchain.dir ?: error("toolchain not installed")
         if (built == dir.path) return
-        where.clear(); topLevel.clear()
+        where.clear(); topLevel.clear(); packages.clear(); kit.clear()
         for (jar in listOf(toolchain.androidJar(dir)) + toolchain.kitClasspath(dir)) ZipFile(jar).use { z ->
             for (e in z.entries()) if (e.name.endsWith(".class") && !e.name.endsWith("module-info.class")) {
                 val fq = e.name.removeSuffix(".class").replace('/', '.')
@@ -91,6 +99,14 @@ class ClassIndex(private val toolchain: Toolchain) {
                         ?.forEach { topLevel += "$pkg.$it" }
                 }
             }
+        }
+        for (fq in where.keys) packages += fq.substringBeforeLast('.', "")
+        for (fq in topLevel) packages += fq.substringBeforeLast('.', "")
+        // A package's parents count too (an import of androidx.compose.material.icons.filled.X names an existing tree).
+        for (p in packages.toList()) { var q = p; while ('.' in q) { q = q.substringBeforeLast('.'); if (!packages.add(q)) break } }
+        for (fq in where.keys + topLevel) if (fq.startsWith("app.kiln.kit.") && '$' !in fq) {
+            val n = fq.substringAfterLast('.')
+            if (!n.endsWith("Kt") && n.firstOrNull()?.isLetter() == true) kit += n
         }
         built = dir.path
     }
@@ -165,6 +181,9 @@ class ClassIndex(private val toolchain: Toolchain) {
 
     /** The kit catalog's exact signature for [name] (KTextField, KHttp.get…), or null. */
     fun kitSignature(name: String): String? = kitSigs[name]
+
+    /** Members the kit catalog lists for [owner] (KFormat → money, date, …; KCollection → add, update, rows, …). */
+    fun kitMembers(owner: String): List<String> = kitSigs.keys.filter { it.startsWith("$owner.") }.map { it.substringAfter("$owner.") }.distinct()
 
     /** Kit names close to [name] (for a K… name that doesn't exist), with what each is. */
     fun similarKitNames(name: String, limit: Int = 3): List<String> {
@@ -596,8 +615,31 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 .findAll(f.readText()).map { it.groupValues[1] }
         }.toSet()
     }
+    // What the model itself declared, with signatures: errors about its own names say what exists.
+    val symbols by lazy { ProjectSymbols.of(project) }
+    fun where(s: ProjectSymbols.Symbol) = "(${s.file}${s.owner?.let { ", in $it" } ?: ""})"
     for (e in build.errors) {
         val m = e.message; val src = e.source.orEmpty()
+        // A name of its own it misspelt or never wrote (formatMony, monthTotal): the closest it did write, and the kit's.
+        Regex("unresolved reference '([a-z]\\w*)'(?! on receiver)").find(m)?.groupValues?.get(1)?.let { n ->
+            if (n in setOf("id", "value", "context", "appContext", "applicationContext", "instance")) return@let
+            // `Repo.currentMonthTotal()`: the compiler often names no receiver for an object's member — the source line does.
+            val recv = Regex("""\b([A-Z]\w*)\.${Regex.escape(n)}\b""").find(src)?.groupValues?.get(1)
+            val recvMembers = recv?.let { symbols.members(it) }.orEmpty()
+            if (recv != null && recvMembers.isNotEmpty()) {
+                val near = symbols.closest(n, recvMembers, 3)
+                out += "$recv has no `$n`." + (if (near.isNotEmpty()) " Closest:\n" + near.joinToString("\n") { "      ${it.signature}" } else "") +
+                    "\n    $recv has: " + recvMembers.joinToString { it.name } + "\n    Use one of those, or add `$n` to $recv ${where(recvMembers.first()).removePrefix("(").substringBefore(",").removeSuffix(")")}."
+                return@let
+            }
+            val own = symbols.closest(n, symbols.all.filter { it.owner == null || Regex("""\bfun\s""").containsMatchIn(it.signature) })
+            val kitFns = index?.kitNames().orEmpty().filter { it.first().isLowerCase() }
+                .map { it to NameCheck.distance(n.lowercase(), it.lowercase()) }.filter { it.second <= maxOf(2, n.length / 3) }
+                .sortedBy { it.second }.take(2).map { it.first }
+            if (own.isNotEmpty() || kitFns.isNotEmpty())
+                out += "'$n' isn't declared in this project or the kit. Did you mean:\n" +
+                    (own.map { "      ${it.signature}  ${where(it)}" } + kitFns.map { "      ${index?.kitSignature(it) ?: it}  (kit)" }).joinToString("\n")
+        }
         Regex("unresolved reference '([A-Z]\\w*)'").find(m)?.groupValues?.get(1)?.let { n ->
             outside[n]?.let { f -> out += "$n is declared in ${project.rel(f)}, which is outside src/ so it isn't compiled: move it under src/ (the package directory)." }
             // `Kiln.app.x.Foo`: a capitalised package segment. The type goes unknown and every use of it fails too.
@@ -610,9 +652,10 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 val alt = index?.similarKitNames(n).orEmpty()
                 out += "$n isn't in the kit." + (if (alt.isEmpty()) " Search for what exists: kit_search." else " Closest:\n      " + alt.joinToString("\n      "))
             }
-            if (!src.contains("Icons.") && n !in outside) {
-                val similar = declared.filter { it != n && (it.startsWith(n.take(4)) || n.startsWith(it.take(4)) || similarity(it, n) >= 0.6) }.take(3)
-                if (similar.isNotEmpty()) out += "'$n' isn't declared in this project. Did you mean ${similar.joinToString(" or ") { "'$it'" }}? Use the existing name, or declare $n."
+            if (!src.contains("Icons.") && n !in outside && n !in declared) {
+                val similar = symbols.closest(n, symbols.all.filter { it.name.first().isUpperCase() })
+                if (similar.isNotEmpty()) out += "'$n' isn't declared in this project. Did you mean:\n" +
+                    similar.joinToString("\n") { "      ${it.signature}  ${where(it)}" } + "\n    Use the existing name, or declare $n."
             }
         }
         // `it.id` on the app's own item type: the id lives on the KCollection row, not the item.
@@ -671,9 +714,28 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
         // A property the app's own data class doesn't have (settings.currency, settings.reminderHour …).
         Regex("unresolved reference '([a-z]\\w*)' on receiver of type '([A-Z]\\w*)'").find(m)?.let { r ->
             val (prop, type) = r.destructured
-            val fields = projectFields(project, type)
-            if (fields != null) out += "$type has no `$prop`." + (if (fields.isEmpty()) "" else " Its properties: ${fields.joinToString()}.") +
-                " Use one of those, or add `$prop` to $type (with a default value, so stored data still loads)."
+            val members = symbols.members(type)
+            val kitMembers = if (members.isEmpty()) index?.kitMembers(type).orEmpty() else emptyList()
+            when {
+                // The app's own type (Repo, AppSettings…): everything it has, closest first, with signatures.
+                members.isNotEmpty() -> {
+                    val near = symbols.closest(prop, members, 3)
+                    val rest = members.filter { it !in near }.take(12)
+                    out += "$type has no `$prop`." + (if (near.isNotEmpty()) " Closest:\n" + near.joinToString("\n") { "      ${it.signature}" } else "") +
+                        (if (rest.isNotEmpty()) "\n    It also has: " + rest.joinToString { it.name } else "") +
+                        "\n    Use one of those, or add `$prop` to $type" + (if (projectFields(project, type) != null) " (with a default value, so stored data still loads)." else ".")
+                }
+                // A kit type (KCollection, KFormat…): its real members from the catalog.
+                kitMembers.isNotEmpty() -> {
+                    val near = kitMembers.map { it to NameCheck.distance(prop.lowercase(), it.lowercase()) }.sortedBy { it.second }.take(3).map { it.first }
+                    out += "$type has no `$prop`. Closest:\n" + near.joinToString("\n") { "      ${index?.kitSignature("$type.$it") ?: it}" } +
+                        "\n    All of it: " + kitMembers.joinToString()
+                }
+                else -> projectFields(project, type)?.let { fields ->
+                    out += "$type has no `$prop`." + (if (fields.isEmpty()) "" else " Its properties: ${fields.joinToString()}.") +
+                        " Use one of those, or add `$prop` to $type (with a default value, so stored data still loads)."
+                }
+            }
         }
         // Number types don't convert implicitly.
         Regex("actual type is '(Int|Long|Float|Double)', but '(Int|Long|Float|Double)\\??' was expected").find(m)?.let { r ->
@@ -693,7 +755,8 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
         if ("no parameter with name" in m || "no value passed for parameter" in m) {
             val p = Regex("parameter(?: with name)? '(\\w+)'").find(m)?.groupValues?.get(1) ?: "?"
             val callee = e.file?.let { calleeAt(project, it, e.line) }
-            val sig = callee?.let { index?.kitSignature(it) }
+            // The kit's signature, or the one the model wrote for its own function.
+            val sig = callee?.let { c -> index?.kitSignature(c) ?: symbols.named(c).firstOrNull { s -> "(" in s.signature }?.let { "${it.signature}  ${where(it)}" } }
             out += if (sig != null) "$callee has no parameter '$p' — its signature is: $sig"
                    else "No parameter '$p' there${callee?.let { " ($it)" } ?: ""}: check the exact signature (kit_search for K… components, sdk_lookup for others)."
         }

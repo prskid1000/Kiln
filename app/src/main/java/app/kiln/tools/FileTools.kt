@@ -92,7 +92,7 @@ class ReadFileTool : Tool {
     }
 }
 
-class WriteFileTool : Tool {
+class WriteFileTool(private val names: NameCheck? = null) : Tool {
     override fun precheck(input: JsonObject): String? = misplacedSource(input.str("path"))
     override val name = "write_file"
     override val description = "Create a file or replace its whole content. For changes to an existing file prefer edit_file (smaller, safer)."
@@ -108,12 +108,13 @@ class WriteFileTool : Tool {
         val existed = f.exists()
         f.parentFile?.mkdirs()
         f.writeText(formatted(f, input.req("content")))
+        val note = checkNames(names, ctx, f)
         ctx.state.readStamps[ctx.project.rel(f)] = f.lastModified()
-        return ToolResult.ok("${if (existed) "replaced" else "created"} ${ctx.project.rel(f)} (${f.length()} B)")
+        return ToolResult.ok("${if (existed) "replaced" else "created"} ${ctx.project.rel(f)} (${f.length()} B)" + note)
     }
 }
 
-class EditFileTool : Tool {
+class EditFileTool(private val names: NameCheck? = null) : Tool {
     override val name = "edit_file"
     override val description = "Replace exact text in a file. old_text must appear exactly once (include surrounding lines to make it unique) unless replace_all is true. The file must have been read with read_file and not changed since."
     override val schema = schema {
@@ -144,12 +145,13 @@ class EditFileTool : Tool {
         val edited = loose ?: if (all) text.replace(old, new) else text.replaceFirst(old, new)
         val saved = formatted(f, edited)
         f.writeText(if (crlf) saved.replace("\n", "\r\n") else saved)
+        val note = checkNames(names, ctx, f)
         ctx.state.readStamps[rel] = f.lastModified()
-        return ToolResult.ok("edited $rel (${if (all) count else 1} replacement${if (all && count > 1) "s" else ""})")
+        return ToolResult.ok("edited $rel (${if (all) count else 1} replacement${if (all && count > 1) "s" else ""})" + note)
     }
 }
 
-class MultiEditTool : Tool {
+class MultiEditTool(private val names: NameCheck? = null) : Tool {
     override val name = "multi_edit"
     override val description = "Apply several exact-text edits to one file atomically, in order (each like edit_file). All succeed or none are written."
     override val schema = schema {
@@ -177,9 +179,25 @@ class MultiEditTool : Tool {
         }
         text = formatted(f, text)
         f.writeText(if (crlf) text.replace("\n", "\r\n") else text)
+        val note = checkNames(names, ctx, f)
         ctx.state.readStamps[rel] = f.lastModified()
-        return ToolResult.ok("applied ${input.a("edits")?.size ?: 0} edits to $rel")
+        return ToolResult.ok("applied ${input.a("edits")?.size ?: 0} edits to $rel" + note)
     }
+}
+
+/**
+ * After a Kotlin file is saved: [NameCheck] fixes what is certain in place and returns what the model should
+ * hear about the rest. Never fails the write (no toolchain yet, an unreadable file: no note).
+ */
+private fun checkNames(names: NameCheck?, ctx: ToolContext, f: java.io.File): String {
+    if (names == null || f.extension != "kt") return ""
+    return runCatching {
+        val raw = f.readText(); val crlf = "\r\n" in raw
+        val text = if (crlf) raw.replace("\r\n", "\n") else raw
+        val r = names.check(ctx.project, f, text) ?: return ""
+        if (r.text != text) f.writeText(if (crlf) r.text.replace("\n", "\r\n") else r.text)
+        r.report
+    }.getOrDefault("")
 }
 
 class MoveTool : Tool {

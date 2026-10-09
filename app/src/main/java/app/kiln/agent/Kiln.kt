@@ -77,13 +77,14 @@ class Kiln(
     val skills: app.kiln.tools.Skills,
 ) {
     private val classIndex = ClassIndex(toolchain)
+    private val nameCheck = app.kiln.tools.NameCheck(classIndex, toolchain)
 
     private fun builtins(): List<Tool> {
         // The agent tests on a hidden display unless the user turned that off; the user's own
         // Run button always uses the real screen.
         val device = if (settings.value.backgroundTesting) testDevice else device
         return listOf(
-        ListDirTool(), GlobTool(), GrepTool(), ReadFileTool(), WriteFileTool(), EditFileTool(), MultiEditTool(),
+        ListDirTool(), GlobTool(), GrepTool(), ReadFileTool(), WriteFileTool(nameCheck), EditFileTool(nameCheck), MultiEditTool(nameCheck),
         MoveTool(), DeleteTool(), ReadOutputTool(),
         ProjectInfoTool(), SetAppMetaTool(), CheckTool(builds, classIndex), BuildTool(builds, classIndex), CleanTool(builds),
         InstallTool(warden, device), RunAppTool(builds, warden, device, classIndex), LaunchTool(warden, device),
