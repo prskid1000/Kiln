@@ -177,9 +177,13 @@ fun BoxScope.KToastHost(toast: KToast, modifier: Modifier = Modifier) =
 @Composable
 fun KSwipeRow(modifier: Modifier = Modifier, onDelete: (() -> Boolean)? = null, onArchive: (() -> Boolean)? = null,
               content: @Composable () -> Unit) {
+    // The swipe state keeps the first lambda it gets: read the latest callbacks through rememberUpdatedState, or an
+    // edited row's swipe-delete would act on (and Undo restore) the row as first drawn.
+    val delete = androidx.compose.runtime.rememberUpdatedState(onDelete)
+    val archive = androidx.compose.runtime.rememberUpdatedState(onArchive)
     val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
-        when (v) { SwipeToDismissBoxValue.EndToStart -> onDelete?.invoke() ?: false
-            SwipeToDismissBoxValue.StartToEnd -> onArchive?.invoke() ?: false; else -> false }
+        when (v) { SwipeToDismissBoxValue.EndToStart -> delete.value?.invoke() ?: false
+            SwipeToDismissBoxValue.StartToEnd -> archive.value?.invoke() ?: false; else -> false }
     })
     SwipeToDismissBox(state, modifier = modifier, enableDismissFromStartToEnd = onArchive != null, enableDismissFromEndToStart = onDelete != null,
         backgroundContent = {

@@ -58,7 +58,8 @@ internal object KilnInspector {
             override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
             override fun onActivityDestroyed(a: Activity) { if (resumed === a) resumed = null }
         })
-        // Exported so the shell (Warden) can ask; it only reveals what is on this app's own screen.
+        // Exported so the shell (Warden) can ask — but only senders holding DUMP (the shell; no ordinary app) may: it reads
+        // this app's screen and can tap and type in it.
         ContextCompat.registerReceiver(app, object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 if (i.action == INPUT) {
@@ -71,7 +72,7 @@ internal object KilnInspector {
                 resultCode = 1
                 resultData = Base64.encodeToString(xml.toByteArray(), Base64.NO_WRAP)
             }
-        }, IntentFilter().apply { addAction(ACTION); addAction(INPUT) }, ContextCompat.RECEIVER_EXPORTED)
+        }, IntentFilter().apply { addAction(ACTION); addAction(INPUT) }, "android.permission.DUMP", null, ContextCompat.RECEIVER_EXPORTED)
     }
 
     private fun dump(): String {

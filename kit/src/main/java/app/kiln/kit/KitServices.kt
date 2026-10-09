@@ -27,6 +27,7 @@ import android.speech.tts.TextToSpeech
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -106,32 +107,40 @@ class KCollection<T>(context: Context, private val name: String, private val ser
         reload()
     }
 
-    private fun reload() {
+    // Synchronized: a slower reload can't publish an older list over a newer one.
+    @Synchronized private fun reload() {
         val out = mutableListOf<KRow<T>>()
+        var unreadable = 0
         db.readableDatabase.rawQuery("SELECT id, json, updated FROM $table ORDER BY id ${if (newestFirst) "DESC" else "ASC"}", null).use { c ->
             while (c.moveToNext()) runCatching { out += KRow(c.getLong(0), KJson.decodeFromString(serializer, c.getString(1)), c.getLong(2)) }
+                .onFailure { unreadable++ }
         }
+        // Rows that no longer decode stay in the table (nothing is lost); they're just not shown.
+        if (unreadable > 0) android.util.Log.w("KCollection", "$name: $unreadable row(s) couldn't be read with the current type")
         flow.value = out
     }
+
+    /** After a write: every open collection on this table (newest-first and oldest-first) shows it. */
+    private fun changed() { open.values.filter { (it as KCollection<*>).name == name }.forEach { it.reload() } }
 
     /** Add [value]; returns its id. */
     fun add(value: T): Long = db.writableDatabase.insert(table, null, ContentValues().apply {
         put("json", KJson.encodeToString(serializer, value)); put("updated", System.currentTimeMillis())
-    }).also { reload() }
+    }).also { changed() }
 
     /** Replace the item with [id]. */
     fun update(id: Long, value: T) {
         db.writableDatabase.update(table, ContentValues().apply {
             put("json", KJson.encodeToString(serializer, value)); put("updated", System.currentTimeMillis())
-        }, "id = ?", arrayOf(id.toString())); reload()
+        }, "id = ?", arrayOf(id.toString())); changed()
     }
 
     /** Change the item with [id] from its current value. */
     fun modify(id: Long, change: (T) -> T) { get(id)?.let { update(id, change(it)) } }
 
     fun get(id: Long): T? = flow.value.firstOrNull { it.id == id }?.value
-    fun delete(id: Long) { db.writableDatabase.delete(table, "id = ?", arrayOf(id.toString())); reload() }
-    fun clear() { db.writableDatabase.delete(table, null, null); reload() }
+    fun delete(id: Long) { db.writableDatabase.delete(table, "id = ?", arrayOf(id.toString())); changed() }
+    fun clear() { db.writableDatabase.delete(table, null, null); changed() }
     /** Items matching [predicate], as rows. */
     fun query(predicate: (T) -> Boolean): List<KRow<T>> = flow.value.filter { predicate(it.value) }
     val size: Int get() = flow.value.size
@@ -171,15 +180,17 @@ internal class KDb private constructor(context: Context) : SQLiteOpenHelper(cont
 inline fun <reified T> rememberStored(name: String, default: T): MutableState<T> {
     val context = LocalContext.current
     val store = remember(name) { KStore(context, name, default) }
-    return remember(store) { KStoredState(store) }
+    // Follows the store, so another screen (or Repo code) writing it shows up here too.
+    val current = store.state.collectAsState()
+    return remember(store) { KStoredState(store, current) }
 }
 
-/** The state behind [rememberStored]; writes go to its [KStore]. */
-class KStoredState<T>(private val store: KStore<T>) : MutableState<T> {
-    private val inner = mutableStateOf(store.value)
+/** The state behind [rememberStored]; writes go to its [KStore], reads follow it. */
+class KStoredState<T>(private val store: KStore<T>, private val current: State<T>) : MutableState<T> {
     override var value: T
-        get() = inner.value
-        set(v) { inner.value = v; store.set(v) }
+        // Read `current` to recompose on changes; return the store's value, which is fresh even right after a set.
+        get() { current.value; return store.value }
+        set(v) { store.set(v) }
     override fun component1(): T = value
     override fun component2(): (T) -> Unit = { value = it }
 }
@@ -302,7 +313,7 @@ object KMedia {
     fun loadBitmap(context: Context, uri: Uri, maxSide: Int = 2048): Bitmap? = runCatching {
         val src = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
         android.graphics.ImageDecoder.decodeBitmap(src) { d, info, _ ->
-            val s = maxOf(info.size.width, info.size.height); if (s > maxSide) d.setTargetSampleSize(s / maxSide)
+            val s = maxOf(info.size.width, info.size.height); if (s > maxSide) d.setTargetSampleSize((s + maxSide - 1) / maxSide)   // round up: at most maxSide
             d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
         }
     }.getOrNull()
@@ -576,7 +587,7 @@ object KFormat {
      * Money for display. [currency] is an ISO code ("USD", "INR") or a symbol ("$", "₹", "€") — a
      * symbol is simply put in front of the amount, so a settings field holding either never crashes.
      */
-    fun money(amount: Double, currency: String = Currency.getInstance(Locale.getDefault()).currencyCode, locale: Locale = Locale.getDefault()): String {
+    fun money(amount: Double, currency: String = runCatching { Currency.getInstance(Locale.getDefault()).currencyCode }.getOrDefault("USD"), locale: Locale = Locale.getDefault()): String {
         val code = currency.trim()
         if (Regex("^[A-Za-z]{3}$").matches(code)) runCatching {
             return NumberFormat.getCurrencyInstance(locale).apply { this.currency = Currency.getInstance(code.uppercase()) }.format(amount)

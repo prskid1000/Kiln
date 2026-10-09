@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -37,15 +38,22 @@ class KStore<T>(context: Context, name: String, private val default: T, private 
     val state: StateFlow<T> = flow.asStateFlow()
     val value: T get() = flow.value
 
-    private fun load(): T = runCatching {
-        if (file.exists()) KJson.decodeFromString(serializer, file.readText()) else default
-    }.getOrDefault(default)
+    private fun load(): T {
+        if (!file.exists()) return default
+        return runCatching { KJson.decodeFromString(serializer, file.readText()) }.getOrElse { e ->
+            // Saved data that no longer decodes (the type changed) must not be overwritten by the next save:
+            // keep it beside the store so it can be recovered.
+            runCatching { file.copyTo(File(file.path + ".unreadable-" + System.currentTimeMillis()), overwrite = false) }
+            android.util.Log.w("KStore", "${file.name} couldn't be read (${e.message}); kept a copy and started from the default")
+            default
+        }
+    }
 
     /** Apply [change] to the current value and persist it. */
     fun update(change: (T) -> T) {
-        val next = change(flow.value)
-        flow.value = next
-        scope.launch { lock.withLock { write(next) } }
+        // Atomic against other threads' updates; each save writes the latest value, so saves can't land out of order.
+        flow.update(change)
+        scope.launch { lock.withLock { write(flow.value) } }
     }
 
     fun set(value: T) = update { value }

@@ -28,14 +28,23 @@ class InspectorOnDeviceTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
     private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
 
-    /** Send [intent] the way Kiln does (an ordered broadcast to the app) and return the result data. */
+    /**
+     * Send [intent] the way Kiln does — `am broadcast` from the shell (the inspector only accepts senders holding
+     * DUMP, which the shell has) — and return the result data.
+     */
     private fun ask(intent: Intent): String {
-        val latch = CountDownLatch(1); var data = ""
-        ctx.sendOrderedBroadcast(intent.setPackage(ctx.packageName), null, object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) { data = resultData.orEmpty(); latch.countDown() }
-        }, null, Activity.RESULT_CANCELED, null, null)
-        latch.await(5, TimeUnit.SECONDS)
-        return data
+        val cmd = buildString {
+            append("am broadcast -a ").append(intent.action).append(" -p ").append(ctx.packageName)
+            intent.extras?.let { b ->
+                for (k in b.keySet()) when (val v = b.get(k)) {
+                    is Int -> append(" --ei $k $v"); is Boolean -> append(" --ez $k $v"); else -> append(" --es $k $v")
+                }
+            }
+        }
+        val pfd = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(cmd)
+        val out = android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd).bufferedReader().use { it.readText() }
+        // "Broadcast completed: result=1, data=\"…\""
+        return out.substringAfter("data=\"", "").substringBeforeLast("\"")
     }
 
     private fun tree() = String(Base64.decode(ask(Intent(KilnInspector.ACTION)), Base64.DEFAULT))

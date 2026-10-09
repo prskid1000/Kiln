@@ -113,6 +113,8 @@ fun KMap(
     androidx.compose.foundation.layout.Box(modifier.fillMaxWidth().then(if (height != null) Modifier.height(height) else Modifier).clip(RoundedCornerShape(corner))) {
     AndroidView({ map }, Modifier.matchParentSize()) { mv ->
         if (center != lastCenter) { mv.controller.animateTo(GeoPoint(center.lat, center.lng)); lastCenter = center }
+        // Each update rebuilds the overlays: switch off the old location overlay first, or every pan adds a GPS listener.
+        mv.overlays.filterIsInstance<MyLocationNewOverlay>().forEach { it.disableMyLocation(); it.onDetach(mv) }
         mv.overlays.clear()
         mv.overlays += MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint): Boolean { tap?.invoke(KLatLng(p.latitude, p.longitude)); return tap != null }

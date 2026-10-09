@@ -249,7 +249,7 @@ fun KSegmented(
         .kSurface(RoundedCornerShape(kr(12)), Nocturne.surface, Nocturne.divider).padding(3.dp)) {
         options.forEachIndexed { i, o ->
             val on = i == selected
-            Row(Modifier.then(if (fullWidth) Modifier.weight(1f) else Modifier).fillMaxWidth().clip(RoundedCornerShape(kr(9)))
+            Row(Modifier.then(if (fullWidth) Modifier.weight(1f).fillMaxWidth() else Modifier).clip(RoundedCornerShape(kr(9)))
                 .background(if (on) Nocturne.accent800 else Color.Transparent).selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { onSelect(i) }
                 .padding(horizontal = 12.dp).height(size.height), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center) {
@@ -445,7 +445,8 @@ fun KCombobox(options: List<String>, selected: String?, onSelect: (String) -> Un
     Box(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width))) {
         KTextField(query, { query = it; open = true }, label = label, placeholder = placeholder, trailingIcon = Icons.Filled.KeyboardArrowDown,
             onTrailingClick = { open = !open }, error = error, helper = helper, enabled = enabled)
-        DropdownMenu(open, { open = false }, containerColor = Nocturne.surfaceHi) {
+        // Not focusable: the combobox's text field keeps focus (and the keyboard) while suggestions show.
+        DropdownMenu(open, { open = false }, containerColor = Nocturne.surfaceHi, properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
             options.filter { it.contains(query, ignoreCase = true) || query == selected }.take(maxShown).forEach { o ->
                 DropdownMenuItem(text = { Text(o) }, onClick = { open = false; query = o; onSelect(o) })
             }
