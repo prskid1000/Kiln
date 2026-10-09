@@ -54,14 +54,15 @@ object Attention {
         runCatching { nm(ctx).notify(id(project), n) }
     }
 
-    fun question(ctx: Context, project: String, label: String, text: String) {
+    /** [answerable]: a plain question gets an inline reply; a card (several questions, the look picker) opens Kiln. */
+    fun question(ctx: Context, project: String, label: String, text: String, answerable: Boolean = true) {
         if (visible) return
         val reply = NotificationCompat.Action.Builder(0, "Answer", action(ctx, project, "answer", 3, key(text), mutable = true))
             .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Your answer").build()).build()
         val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("$label asks").setContentText(text.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setContentIntent(open(ctx)).setAutoCancel(true).addAction(reply).build()
+            .setContentIntent(open(ctx)).setAutoCancel(true).apply { if (answerable) addAction(reply) }.build()
         runCatching { nm(ctx).notify(id(project), n) }
     }
 
@@ -88,7 +89,7 @@ class AttentionReceiver : BroadcastReceiver() {
         val key = intent.getStringExtra("key")
         when (intent.action) {
             "allow", "deny" -> loop.approval.value?.takeIf { Attention.key(it.tool, it.input) == key }?.let { loop.answerApproval(intent.action == "allow") }
-            "answer" -> loop.question.value?.takeIf { Attention.key(it.text) == key }?.let { Attention.reply(intent)?.let { r -> loop.answerQuestion(r) } }
+            "answer" -> loop.question.value?.takeIf { it.kind == "text" && Attention.key(it.text) == key }?.let { Attention.reply(intent)?.let { r -> loop.answerQuestion(r) } }
         }
         Attention.clear(ctx, project)
     }

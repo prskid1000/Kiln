@@ -473,7 +473,10 @@ class AgentLoop(
                 // What a failed attempt already streamed (half a reply, a running thought) is dropped before the
                 // retry, which streams the whole reply again.
                 val mark = _feed.value.size
-                fun dropPartial() { if (_feed.value.size > mark) _feed.value = _feed.value.take(mark) }
+                // Only the model's own output (text, thinking): a message the user sent meanwhile stays in the chat.
+                fun dropPartial() {
+                    if (_feed.value.size > mark) _feed.value = _feed.value.take(mark) + _feed.value.drop(mark).filter { it.kind == Activity.Kind.USER }
+                }
                 try {
                     return stream(adapter, profile, model, cfg)
                 } catch (e: CancellationException) { throw e
@@ -714,7 +717,13 @@ class AgentLoop(
                     nudges++
                     loop.send(unfinished)
                 }
-                watcher?.cancel()
+                // Stop the watcher, then hand over the final state ourselves: it may not have seen the last update
+                // (the helper's reply was left half-streamed with a spinner).
+                watcher?.let { it.cancel(); it.join() }
+                val last = loop.feed.value
+                onFeed?.invoke(last.filter { it.kind != Activity.Kind.USER })
+                if (onStep != null) for (a in last) if (a.kind == Activity.Kind.TOOL && a.status != Activity.Status.RUNNING && reported.add(a.id))
+                    onStep(stepLine(a))
                 Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
             } finally { s.dir.deleteRecursively() }
         }

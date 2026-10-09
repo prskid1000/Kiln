@@ -54,8 +54,10 @@ class Session private constructor(val dir: File, meta: SessionMeta, messages: Li
             // Unique even when two chats start in the same millisecond (two schedules at 02:00 shared a folder).
             // mkdir() claims the folder atomically: only the call that creates it gets it.
             root.mkdirs()
-            var id: String; var n = 0
-            do { id = "s" + System.currentTimeMillis().toString(36) + (if (n++ == 0) "" else "-$n") } while (!File(root, id).mkdir())
+            var id: String; var n = 0; var claimed: Boolean
+            // Bounded: a full disk (mkdir always false) must fail, not spin forever.
+            do { id = "s" + System.currentTimeMillis().toString(36) + (if (n++ == 0) "" else "-$n"); claimed = File(root, id).mkdir() } while (!claimed && n < 100)
+            if (!claimed) throw java.io.IOException("can't create a chat folder in $root (is the storage full?)")
             val dir = File(root, id)
             val s = Session(dir, SessionMeta(id, project, System.currentTimeMillis(), systemPrompt = systemPrompt), emptyList())
             s.updateMeta { it }
@@ -64,6 +66,17 @@ class Session private constructor(val dir: File, meta: SessionMeta, messages: Li
 
         fun open(dir: File): Session? = runCatching {
             val meta = KJ.decodeFromString(SessionMeta.serializer(), File(dir, "meta.json").readText())
+            // A torn last line (killed mid-write) is cut off: the next append would otherwise land on it and be lost too.
+            File(dir, "transcript.jsonl").takeIf { it.isFile && it.length() > 0 }?.let { t ->
+                java.io.RandomAccessFile(t, "rw").use { raf ->
+                    raf.seek(raf.length() - 1)
+                    if (raf.read() != '\n'.code) {
+                        var pos = raf.length() - 1
+                        while (pos > 0) { raf.seek(pos - 1); if (raf.read() == '\n'.code) break; pos-- }
+                        raf.setLength(pos)
+                    }
+                }
+            }
             val msgs = File(dir, "transcript.jsonl").takeIf { it.isFile }?.readLines()?.filter { it.isNotBlank() }
                 // A crash mid-write can leave a partial last line: drop unreadable lines, keep the session.
                 ?.mapNotNull { runCatching { KJ.decodeFromString(Msg.serializer(), it) }.getOrNull() } ?: emptyList()

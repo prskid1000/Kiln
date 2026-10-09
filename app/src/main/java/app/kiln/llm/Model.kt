@@ -121,9 +121,12 @@ class ProviderException(message: String, val retryable: Boolean, cause: Throwabl
  */
 fun streamError(e: kotlinx.serialization.json.JsonObject, raw: String): ProviderException {
     val msg = (e["message"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: raw
-    val code = (e["code"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
+    val codeText = (e["code"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+    val code = codeText.toIntOrNull()
+    // Codes may be numbers (429, 503) or names (OpenAI's "server_error", "rate_limit_exceeded").
     val transient = code == 429 || (code != null && code >= 500) ||
-        Regex("overload|temporar|rate.?limit|capacity|try again|timeout|unavailable", RegexOption.IGNORE_CASE).containsMatchIn(msg)
+        Regex("server|rate.?limit|overload", RegexOption.IGNORE_CASE).containsMatchIn(codeText) ||
+        Regex("overload|temporar|rate.?limit|capacity|try again|retry|timeout|unavailable", RegexOption.IGNORE_CASE).containsMatchIn(msg)
     return ProviderException(msg, retryable = transient)
 }
 

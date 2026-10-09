@@ -17,8 +17,14 @@ object Turns {
     fun snapshot(session: Session, project: Project, index: Int) {
         val d = dir(session, index)
         if (d.exists()) return
-        for (f in project.files()) { val out = File(d, project.rel(f)); out.parentFile?.mkdirs(); f.copyTo(out, overwrite = true) }
-        d.mkdirs()   // an empty project still gets a (empty) snapshot
+        // Copied aside and renamed into place only when complete: a half-written snapshot (disk full) taken as whole
+        // made a rewind delete every file it missed.
+        val tmp = File(root(session), ".tmp-$index").apply { deleteRecursively() }
+        try {
+            for (f in project.files()) { val out = File(tmp, project.rel(f)); out.parentFile?.mkdirs(); f.copyTo(out, overwrite = true) }
+            tmp.mkdirs()   // an empty project still gets a (empty) snapshot
+            if (!tmp.renameTo(d)) throw java.io.IOException("couldn't save the snapshot")
+        } finally { tmp.deleteRecursively() }
     }
 
     /** Indexes of user messages that have a snapshot, oldest first. */

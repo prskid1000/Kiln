@@ -91,6 +91,10 @@ class ToolHost(private val paths: Paths, private val toolchain: Toolchain) {
             // ends the read with null → "tool server died", and the next call starts a fresh one.
             val stuck = proc
             val watchdog = scope.launch { delay(timeoutMs); stuck?.destroyForcibly() }
+            // Stop does the same at once: this child is cancelled with the call (while the read below still blocks),
+            // and killing the JVM ends that read — the build lock was otherwise held until the watchdog.
+            var finished = false
+            val onStop = launch { try { kotlinx.coroutines.awaitCancellation() } finally { if (!finished) stuck?.destroyForcibly() } }
             val id = ids.incrementAndGet().toString()
             val payload = (listOf(id, tool) + args).joinToString("\u0000")
             val w = writer!!
@@ -105,7 +109,7 @@ class ToolHost(private val paths: Paths, private val toolchain: Toolchain) {
                 val out = if (parts.size > 3) String(Base64.getDecoder().decode(parts[3])) else ""
                 result = ExecResult(parts[2].toInt(), out, "", System.currentTimeMillis() - t0)
             }
-            watchdog.cancel()
+            watchdog.cancel(); finished = true; onStop.cancel()
             if (System.currentTimeMillis() - t0 >= timeoutMs) result = ExecResult(-1, "", "$tool timed out after ${timeoutMs / 1000}s", timeoutMs, timedOut = true)
             scheduleIdleStop()
             result!!

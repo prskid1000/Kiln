@@ -132,7 +132,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                 // Kiln in the background: approvals and questions become actionable notifications.
                 val watch = launch {
                     launch { l.approval.collect { a -> if (a != null) app.kiln.agent.Attention.approval(ctx, name, s.label, a.tool, a.input) else app.kiln.agent.Attention.clear(ctx, name) } }
-                    launch { l.question.collect { q -> if (q != null) app.kiln.agent.Attention.question(ctx, name, s.label, q.text) else app.kiln.agent.Attention.clear(ctx, name) } }
+                    launch { l.question.collect { q -> if (q != null) app.kiln.agent.Attention.question(ctx, name, s.label, q.text, answerable = q.kind == "text") else app.kiln.agent.Attention.clear(ctx, name) } }
                 }
                 try { l.send(text, attachments, mode, goal) } finally {
                     // Released first: a follow-up sent as the run ends is a new run, not "still working".

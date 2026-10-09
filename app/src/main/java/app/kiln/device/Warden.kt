@@ -66,21 +66,28 @@ class Warden(private val context: Context) {
         } catch (e: Exception) { lastError = "Warden: ${e.message ?: e}"; return@withContext null }
         try {
             coroutineScope {
-                val out = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.inputStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
-                val err = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.errorStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
+                // Readers outside this scope: a background child (`logcat &`) keeps the pipes open after sh exits,
+                // and blocking reads that never end held the call — and Stop — forever.
+                val readers = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
+                val out = readers.async { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.inputStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
+                val err = readers.async { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.errorStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
                 val done = java.util.concurrent.CompletableFuture<Int>()
                 Thread({ done.complete(runCatching { p.waitFor() }.getOrDefault(-1)) }, "warden-wait").apply { isDaemon = true }.start()
                 // stdin is written alongside the wait: a child that stops reading must not block us past the timeout
                 // (destroy() ends the write). One that exits early closes its stdin: that's not our failure.
-                val feed = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).use { o -> if (stdin != null) o.write(stdin) } } }
+                val feed = readers.async { runCatching { ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).use { o -> if (stdin != null) o.write(stdin) } } }
                 // Suspending, so Stop cancels it (a blocking get held an install for up to 5 minutes).
                 // On cancel, destroy here: the scope can't finish (and the outer catch can't run) until the blocking
                 // readers end, and they end only when the child does.
                 val code = try { withTimeoutOrNull(timeoutMs) { done.await() } }
                     catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; throw e }
                 if (code == null) runCatching { p.destroy() }
-                feed.await()
-                Raw(code ?: -1, out.await(), err.await(), System.currentTimeMillis() - t0, timedOut = code == null)
+                withTimeoutOrNull(5_000) { feed.await() }
+                // After exit, a short grace for the rest of the output; a background child holding the pipe can't keep us here.
+                // 30 s: a big output (a screenshot) may still be streaming after the command exits.
+                val o = withTimeoutOrNull(30_000) { out.await() } ?: run { runCatching { p.destroy() }; ByteArray(0) }
+                val e = withTimeoutOrNull(2_000) { err.await() } ?: ByteArray(0)
+                Raw(code ?: -1, o, e, System.currentTimeMillis() - t0, timedOut = code == null)
             }
         } catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; throw e
         } catch (e: Exception) { runCatching { p.destroy() }; lastError = "Warden: ${e.message ?: e}"; null }
