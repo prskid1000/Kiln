@@ -29,7 +29,7 @@ class GlobTool : Tool {
     override val schema = schema { str("pattern", "Glob relative to the project root.") }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        val m = java.nio.file.FileSystems.getDefault().getPathMatcher("glob:" + input.req("pattern"))
+        val m = java.nio.file.FileSystems.getDefault().getPathMatcher("glob:" + ctx.project.normalize(input.req("pattern")))
         val hits = ctx.project.files().map { ctx.project.rel(it) }.filter { m.matches(java.nio.file.Paths.get(it)) }
         return ToolResult.ok(hits.joinToString("\n").ifEmpty { "(no matches)" }, plural(hits.size, "match", "matches"))
     }

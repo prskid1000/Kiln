@@ -37,8 +37,20 @@ class Project(dir: File) {
 
     fun meta(): ProjectMeta = KJ.decodeFromString(ProjectMeta.serializer(), metaFile.readText())
 
+    /**
+     * [path] as the project sees it. Models often write the project's own name first ("expense3/src/…"): when
+     * that doesn't exist as written, it means the same path from the root (five reads failed in a row on it).
+     */
+    fun normalize(path: String): String {
+        val p = path.trim().replace('\\', '/').removePrefix("./").removePrefix("/")
+        val own = dir.name + "/"
+        // Only when the project has no folder of its own name (then the prefix can't mean anything else).
+        if (File(dir, dir.name).exists()) return p
+        return if (p.startsWith(own)) p.removePrefix(own) else if (p == dir.name) "" else p
+    }
+
     fun resolve(path: String): File {
-        val p = path.trim().removePrefix("./").removePrefix("/")
+        val p = normalize(path)
         val f = File(dir, p).canonicalFile
         require(f.path == dir.path || f.path.startsWith(dir.path + File.separator)) {
             "path escapes the project: $path"
