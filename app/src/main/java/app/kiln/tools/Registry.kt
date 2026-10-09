@@ -164,7 +164,9 @@ class McpClient(private val cfg: McpServerConfig) {
 
 class McpTool(private val client: McpClient, server: String, private val remote: String, desc: String, override val schema: JsonObject) : Tool {
     override var deferred = false
-    override val name = "${server}__$remote".replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64)
+    // Cut to 64 with a short hash when long: two long names sharing a prefix would otherwise collide and one be dropped.
+    override val name = "${server}__$remote".replace(Regex("[^a-zA-Z0-9_-]"), "_").let { n ->
+        if (n.length <= 64) n else n.take(57) + "_" + Integer.toHexString(n.hashCode()).take(6) }
     override val description = "[$server] $desc"
     override val traits = setOf(Trait.NEEDS_APPROVAL)
     override suspend fun run(ctx: ToolContext, input: JsonObject) = client.call(remote, input).let { it.copy(text = ctx.spill(it.text)) }

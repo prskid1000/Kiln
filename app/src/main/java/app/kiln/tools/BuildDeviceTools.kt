@@ -343,8 +343,13 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
         if (inputTool) {
             val front = device.foregroundPackage()
             // A system dialog the app opened (permission prompt, picker) may be answered on the phone's screen.
-            if (front != pkg(ctx) && (front != null || device.testDisplay != null) && !(device.testDisplay == null && front in app.kiln.device.SYSTEM_DIALOGS))
-                return ToolResult.error("${pkg(ctx)} is not in front (${front ?: "nothing"} is) — launch it first with launch or run_app.")
+            // BACK is always allowed (it dismisses a camera or picker the app opened, whatever its package).
+            val back = name == "press_key" && input.str("key")?.uppercase()?.removePrefix("KEYCODE_") == "BACK"
+            if (!back && front != pkg(ctx) && (front != null || device.testDisplay != null) && !(device.testDisplay == null && front in app.kiln.device.SYSTEM_DIALOGS))
+                return ToolResult.error(
+                    // A permission prompt is answered with grant_permission, not by relaunching (it just comes back).
+                    if (front != null && "permissioncontroller" in front) "a permission prompt is showing over ${pkg(ctx)} — call grant_permission for it, then launch the app again"
+                    else "${pkg(ctx)} is not in front (${front ?: "nothing"} is) — launch it first with launch or run_app.")
         }
         return exec(ctx, input)
     }

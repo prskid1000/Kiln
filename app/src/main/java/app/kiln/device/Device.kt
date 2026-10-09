@@ -162,7 +162,9 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
     suspend fun isInstalled(pkg: String): Boolean =
         warden.exec(listOf("pm", "path", pkg)).out.contains("package:")
 
-    suspend fun pid(pkg: String): Int? = warden.exec(listOf("pidof", pkg)).out.trim().split(" ").firstOrNull()?.toIntOrNull()
+    /** The app's pid, or null if it isn't running. A failed Warden call isn't "not running": it reads as running (-1). */
+    suspend fun pid(pkg: String): Int? = warden.exec(listOf("pidof", pkg)).let { r ->
+        r.out.trim().split(" ").firstOrNull()?.toIntOrNull() ?: if (r.code == 1) null else -1 }
 
     /** Device clock in logcat's -T format, used as a "since" marker. */
     suspend fun logMarker(): String {
@@ -412,8 +414,8 @@ fun findNode(nodes: List<UiNode>, target: String): UiNode? {
 
 /** System windows an app opens over itself (permission prompts, pickers, share sheets): shown to the agent as its screen. */
 internal val SYSTEM_DIALOGS = setOf(
-    // Not systemui or "android": the notification shade, lock screen and crash dialogs aren't the app's screen.
-    "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+    // Shown only as the foreground activity, so the shade, lock screen and crash dialogs (not activities) never pass.
+    "com.android.permissioncontroller", "com.google.android.permissioncontroller", "android", "com.android.systemui",
     "com.android.documentsui", "com.google.android.documentsui", "com.android.intentresolver",
     "com.google.android.providers.media.module", "com.android.providers.media.module", "com.android.camera2",
 )
