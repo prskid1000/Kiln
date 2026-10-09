@@ -444,17 +444,27 @@ class AgentLoop(
             if (profile.caps.tools.not()) continue
             val adapter = providers.adapter(profile)
             // Retry only what can succeed on retry; anything else moves on to the fallback model.
-            attempts@ for (attempt in 0..cfg.maxRetries) {
+            // Provider errors and dropped connections each have their own retry budget.
+            var attempt = 0; var netTries = 0
+            attempts@ while (true) {
                 try {
                     return stream(adapter, profile, model, cfg)
                 } catch (e: CancellationException) { throw e
                 } catch (e: ProviderException) {
                     lastError = e
-                    if (!e.retryable || attempt == cfg.maxRetries) break@attempts
-                    val wait = 2_000L * (1 shl attempt)
+                    if (!e.retryable || attempt >= cfg.maxRetries) break@attempts
+                    val wait = 2_000L * (1 shl attempt++)
                     next(Activity.Kind.NOTICE, "${profile.label}: ${e.message?.take(120)} — retrying in ${wait / 1000}s")
                     delay(wait)
-                } catch (e: Throwable) { lastError = e; break@attempts }
+                } catch (e: Throwable) {
+                    lastError = e
+                    // A dropped connection (run 12: the USB link to a local model went down mid-stream) is usually
+                    // brief: keep retrying for about a minute and a half before stopping for the user.
+                    if (!isNetworkFailure(e) || netTries >= NET_RETRIES.size) break@attempts
+                    val wait = NET_RETRIES[netTries++]
+                    next(Activity.Kind.NOTICE, "${profile.label}: connection lost (${e.message?.take(80)}) — retrying in ${wait / 1000}s")
+                    delay(wait)
+                }
             }
             if (spec != chain.last()) next(Activity.Kind.NOTICE, "${profile.label} failed (${lastError?.message?.take(100)}); falling back.")
         }
@@ -696,6 +706,15 @@ class AgentLoop(
         }
     }
 }
+
+/** Waits between retries after a dropped connection: about a minute and a half in all. */
+private val NET_RETRIES = listOf(2_000L, 5_000L, 10_000L, 20_000L, 30_000L, 30_000L)
+
+/** A failure of the connection itself (refused, reset, timed out, stream cut), anywhere in the cause chain. */
+internal fun isNetworkFailure(e: Throwable): Boolean =
+    generateSequence(e) { it.cause }.take(6).any { c ->
+        c is java.io.IOException || Regex("(?i)stream (failed|was reset|closed)|connection (refused|reset|closed)|timeout|unexpected end").containsMatchIn(c.message.orEmpty())
+    }
 
 /** Marks a message the user sent while the agent was working (delivered at its next step). */
 private const val STEER_PREFIX = "[Message from the user while you were working] "

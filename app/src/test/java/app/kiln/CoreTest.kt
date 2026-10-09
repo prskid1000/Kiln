@@ -93,6 +93,13 @@ class CoreTest {
         assertTrue(bad.joinToString("\n") { "${it.file}:${it.line} ${it.message.take(60)}" }, bad.isEmpty())
     }
 
+    @Test fun `dropped connections are retried, other failures are not`() {
+        assertTrue(app.kiln.agent.isNetworkFailure(java.io.IOException("Stream failed")))
+        assertTrue(app.kiln.agent.isNetworkFailure(RuntimeException("model call", java.net.ConnectException("Connection refused"))))
+        assertTrue(app.kiln.agent.isNetworkFailure(IllegalStateException("stream was reset: CANCEL")))
+        assertFalse(app.kiln.agent.isNetworkFailure(IllegalArgumentException("bad tool schema")))
+    }
+
     @Test fun `single taps become the test_flow call the reminder shows`() {
         fun use(name: String, input: String) = app.kiln.core.obj("type" to "tool_use", "name" to name, "input" to app.kiln.core.parseJson(input))
         val steps = app.kiln.agent.AgentLoop.asFlowSteps(listOf(
