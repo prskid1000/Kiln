@@ -196,7 +196,30 @@ private fun checkNames(names: NameCheck?, ctx: ToolContext, f: java.io.File): St
         val text = if (crlf) raw.replace("\r\n", "\n") else raw
         val r = names.check(ctx.project, f, text) ?: return ""
         if (r.text != text) f.writeText(if (crlf) r.text.replace("\n", "\r\n") else r.text)
-        r.report
+        if (r.corrections.isEmpty()) return r.report
+        val out = StringBuilder(r.report)
+        // The same slip in the project's other files is fixed now too (they'd fail the next build), keeping a model's
+        // read of them valid when only these names changed.
+        val also = sortedSetOf<String>()
+        for (o in ctx.project.files().filter { it.extension == "kt" && it.canonicalFile != f.canonicalFile }) {
+            val raw2 = o.readText(); val crlf2 = "\r\n" in raw2
+            val t2 = if (crlf2) raw2.replace("\r\n", "\n") else raw2
+            val fixed2 = r.corrections.fold(t2) { acc, c -> c.applyTo(acc) }
+            if (fixed2 == t2) continue
+            val rel2 = ctx.project.rel(o)
+            val current = ctx.state.readStamps[rel2] == o.lastModified()
+            o.writeText(if (crlf2) fixed2.replace("\n", "\r\n") else fixed2)
+            if (current) ctx.state.readStamps[rel2] = o.lastModified()
+            also += rel2
+        }
+        if (also.isNotEmpty()) out.append("The same fix was made in: ${also.joinToString()}.\n")
+        // What to write from now on, so the slip isn't repeated in the next file; a repeat is called out.
+        val again = r.corrections.filter { ctx.state.nameFixes[it.from] == it.to }
+        out.append("Use these in the files you write next: ${r.corrections.joinToString("; ")}.")
+        if (again.isNotEmpty()) out.append(" Again — ${again.joinToString { it.from }} was already corrected earlier this session: write ${again.joinToString { it.to }}.")
+        out.append('\n')
+        r.corrections.forEach { ctx.state.nameFixes[it.from] = it.to }
+        out.toString()
     }.getOrDefault("")
 }
 

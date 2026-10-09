@@ -59,6 +59,8 @@ class SessionState {
     var lastApk: String? = null
         private set
     var launchMarker: Pair<String, String>? = null
+    /** Names Kiln corrected this session (wrong → right): a repeat is pointed out as one. */
+    val nameFixes: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
     /** Deferred tools tool_search has loaded into this session. */
     val loadedTools: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     data class Todo(val text: String, val status: String)

@@ -35,7 +35,7 @@ class ToolsOnDeviceTest {
     private val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
 
     private data class Case(val tool: String, val input: String, val expectError: Boolean = false, val expect: String? = null,
-                            val images: Boolean = false)
+                            val images: Boolean = false, val absent: String? = null)
 
     /** Chat attachments: images become image blocks, text inlines, binaries are noted — all saved in the project. */
     @Test fun attachmentsBecomeBlocks() {
@@ -198,18 +198,35 @@ class ToolsOnDeviceTest {
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.Bell\n\nval bell = Icons.Filled.Bell\n"}"""),
             Case("check", "{}", expectError = true, expect = "use Icons.Filled.Notifications"),
             // Import mistakes from runs 2–9, all fixed by Kiln: a library class from the wrong package, a wrong
-            // inline qualifier, and items(list) without its import (read as items(count: Int)).
-            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.Composable\nimport kotlinx.datetime.YearMonth\n\n@Composable\nfun Imports(names: List<String>) {\n    val month = YearMonth.now()\n    val kb = app.kiln.kit.KeyboardType.Number\n    LazyColumn { items(names) { Text(it.uppercase() + month + kb) } }\n}\n"}"""),
-            Case("check", "{}", expect = "import java.time.YearMonth (was kotlinx.datetime.YearMonth)"),
+            // inline qualifier, and items(list) without its import (read as items(count: Int)). The package that isn't
+            // bundled is fixed as soon as the file is written (the name check), the rest by the build.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.Composable\nimport kotlinx.datetime.YearMonth\n\n@Composable\nfun Imports(names: List<String>) {\n    val month = YearMonth.now()\n    val kb = app.kiln.kit.KeyboardType.Number\n    LazyColumn { items(names) { Text(it.uppercase() + month + kb) } }\n}\n"}""",
+                expect = "import kotlinx.datetime.YearMonth → java.time.YearMonth"),
             Case("check", "{}", expect = "BUILD OK"),
             Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import androidx.compose.foundation.lazy.items"),
             Case("grep", """{"pattern":"app.kiln.kit.KeyboardType","glob":"**/Bad.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad.kt"}"""),
             // Kotlin outside src/ is refused before it's written.
             Case("write_file", """{"path":"ui/Stray.kt","content":"package x\n"}""", expectError = true, expect = "must be under src/"),
-            // A misspelt project symbol gets a "did you mean".
+            // A misspelt project symbol gets a "did you mean" with the signature the model wrote.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nfun HomeScreen() = 1\nfun probe() = HomeScren()\n"}"""),
-            Case("check", "{}", expectError = true, expect = "Did you mean 'HomeScreen'"),
+            Case("check", "{}", expectError = true, expect = "fun HomeScreen()"),
+            // Its own object's member, misremembered: what the object really has.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nobject Repo { fun monthTotal(m: Int): Double = 0.0 }\nval t = Repo.currentMonthTotal()\n"}"""),
+            Case("check", "{}", expectError = true, expect = "fun monthTotal(m: Int): Double"),
+            // Names checked as written: a garbled package and a same-length typo of a kit name are fixed; real ones
+            // (KCardBox and KDivider have mangled JVM names) are left alone.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\nimport app.kiln.kit.Koln.kit.rememberKToast\n\n@Composable\nfun Names() { val t = rememberKToast(); KolnScreen(\"x\") { KCardBox { KDivider() } } }\n"}""",
+                expect = "KolnScreen → KilnScreen", absent = "KCardBox isn't"),
+            Case("read_file", """{"path":"$src/Bad.kt"}""", expect = "import app.kiln.kit.rememberKToast"),
+            // Told what to write from now on; the same slip in another file is fixed there too, and called a repeat.
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun Names2() { KolnScreen(\"y\") { } }\n"}""",
+                expect = "Again — KolnScreen"),
+            Case("grep", """{"pattern":"KolnScreen","glob":"**/*.kt"}""", expect = "(no matches)"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // A name a letter off another component is suggested, never swapped in (KSlide meant KSwipeRow).
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun Slide() { KSlide() }\n"}""",
+                expect = "KSlide isn't in the kit", absent = "KSlide → "),
             Case("delete", """{"path":"$src/Bad.kt"}"""),
             Case("clean", "{}"),
             Case("build", "{}", expect = "BUILD OK"),
@@ -261,7 +278,8 @@ class ToolsOnDeviceTest {
             val text = r.text
             val ok = r.isError == c.expectError &&
                 (c.expect == null || text.contains(c.expect, ignoreCase = true)) &&
-                (!c.images || r.images.isNotEmpty()) 
+                (!c.images || r.images.isNotEmpty()) &&
+                (c.absent == null || !text.contains(c.absent, ignoreCase = true))
             println("TOOLTEST ${if (ok) "PASS" else "FAIL"} ${c.tool.padEnd(16)} ${c.input.take(70)} -> ${if (r.isError) "ERR " else ""}${text.replace('\n', ' ').take(if (ok) 160 else 1500)}")
             if (!ok) failures += "${c.tool} ${c.input.take(60)} -> ${if (r.isError) "error" else "ok"}: ${text.take(200)}"
         }

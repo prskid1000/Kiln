@@ -16,7 +16,14 @@ import java.io.File
 class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain) {
 
     /** The file's text after the certain fixes, and what to tell the model (empty when all is well). */
-    data class Result(val text: String, val report: String)
+    data class Result(val text: String, val report: String, val corrections: List<Correction> = emptyList())
+
+    /** A certain fix: an import path ([import] true) or a name used in code. Applied to other files the same way. */
+    data class Correction(val from: String, val to: String, val import: Boolean) {
+        fun applyTo(text: String): String = if (import) replaceImport(text, from, to)
+            else rename(replaceImport(text, "app.kiln.kit.$from", "app.kiln.kit.$to"), from, to)
+        override fun toString() = "$to (not $from)"
+    }
 
     fun check(project: Project, file: File, original: String): Result? {
         if (file.extension != "kt") return null
@@ -27,6 +34,7 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         val own = Regex("""(?m)^package\s+([\w.]+)""").find(text)?.groupValues?.get(1).orEmpty().split('.').take(3).joinToString(".")
         val declared = declarations(project, file, text)
         val renamed = HashSet<String>()
+        val corrections = mutableListOf<Correction>()
 
         // 1. Imports.
         for (m in IMPORT.findAll(original).toList()) {
@@ -37,14 +45,16 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             if (fq.startsWith("app.kiln.kit.")) {
                 if (index.exists(fq) || index.exists(pkg) || (pkg == "app.kiln.kit" && name in kit)) continue   // a kit symbol, or a member of a kit object
                 when (val s = kitFix(name, kit, declared)) {
-                    is Fix.Exact -> { text = replaceImport(text, fq, "app.kiln.kit.$name"); fixed += "import $fq → app.kiln.kit.$name" }
+                    is Fix.Exact -> { text = replaceImport(text, fq, "app.kiln.kit.$name"); fixed += "import $fq → app.kiln.kit.$name"
+                        corrections += Correction(fq, "app.kiln.kit.$name", import = true) }
                     is Fix.Typo -> { text = rename(replaceImport(text, fq, "app.kiln.kit.${s.to}"), name, s.to); renamed += name
-                        fixed += "$name → ${s.to} (the kit's name; import and every use)" }
+                        fixed += "$name → ${s.to} (the kit's name; import and every use)"; corrections += Correction(name, s.to, import = false) }
                     is Fix.None -> problems += unknown(name, lineOf(original, m.range.first), s.closest)
                 }
             } else if (CHECKED.any { fq.startsWith(it) } && !index.exists(fq) && !index.exists(pkg) && !index.packageExists(pkg)) {
                 val alt = runCatching { index.uniqueClass(name) }.getOrNull()
-                if (alt != null && alt != fq) { text = replaceImport(text, fq, alt); fixed += "import $fq → $alt (package $pkg isn't on this classpath)" }
+                if (alt != null && alt != fq) { text = replaceImport(text, fq, alt); fixed += "import $fq → $alt (package $pkg isn't on this classpath)"
+                    corrections += Correction(fq, alt, import = true) }
                 else problems += "line ${lineOf(original, m.range.first)}: package $pkg isn't on this classpath (only the kit and the libraries in its reference exist) — " +
                     "remove `import $fq` and use a bundled alternative (kit_search \"$name\")."
             }
@@ -62,8 +72,8 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             when (val s = kitFix(n, kit, declared)) {
                 is Fix.Exact -> {}
                 is Fix.Typo -> { text = rename(text, n, s.to); renamed += n; if (!wildcard && s.to !in imported) missing += s.to
-                    fixed += "$n → ${s.to} (the kit's name; every use)" }
-                is Fix.None -> problems += unknown(n, lineOf(text, code.indexOf(n).coerceAtLeast(0)), s.closest)
+                    fixed += "$n → ${s.to} (the kit's name; every use)"; corrections += Correction(n, s.to, import = false) }
+                is Fix.None -> if (KIT_SHAPED.matches(n)) problems += unknown(n, lineOf(text, code.indexOf(n).coerceAtLeast(0)), s.closest)
             }
         }
         for (n in missing) { text = addImport(text, "app.kiln.kit.$n"); fixed += "added import app.kiln.kit.$n" }
@@ -80,7 +90,7 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             out.append("Fix only those lines with edit_file (read_file the lines first if you need them); don't rewrite the file.\n")
         }
         if (fixed.isNotEmpty()) out.append("The fixes above are already saved: edit from the file as it is now, not from what you sent.\n")
-        return Result(text, out.toString())
+        return Result(text, out.toString(), corrections)
     }
 
     /** "KSlide isn't in the kit — did you mean …" with signatures; also used for unresolved-reference build errors. */
@@ -105,8 +115,10 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         if (name in declared) return Fix.None(emptyList())
         val near = kit.map { it to distance(name.lowercase(), it.lowercase()) }.sortedBy { it.second }
         val best = near.firstOrNull() ?: return Fix.None(emptyList())
-        // A one- or two-letter slip of exactly one kit name (KolnScreen, KTextFeild): certain enough to fix.
-        if (name.length >= 5 && best.second <= (if (name.length >= 8) 2 else 1) && near.count { it.second == best.second } == 1)
+        // A one- or two-letter slip of exactly one kit name, same length (KolnScreen, KTextFeild): certain enough to fix.
+        // A name a letter longer or shorter is often another component (KSlide meant KSwipeRow, not KSlider): only suggested.
+        if (name.length >= 5 && best.first.length == name.length && best.second <= (if (name.length >= 8) 2 else 1) &&
+            near.count { it.second == best.second } == 1)
             return Fix.Typo(best.first)
         return Fix.None(closest(name, kit))
     }
@@ -144,7 +156,10 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
 
     internal companion object {
         val IMPORT = Regex("""(?m)^import\s+([\w.]+)(?:\s+as\s+(\w+))?\s*$""")
-        val USE = Regex("""(?<![\w.$])(?:K[A-Z]\w*|Kiln[A-Z]\w*)\b""")
+        // Kit-style names (KCardBox, KilnScreen), plus a garbled Kiln (KolnScreen): those are only ever typo-fixed,
+        // never reported, so ordinary names of that shape (KeyEvent) are left alone.
+        val USE = Regex("""(?<![\w.$])(?:K[A-Z]\w*|Kiln[A-Z]\w*|K[a-z]{2,4}[A-Z]\w*)\b""")
+        val KIT_SHAPED = Regex("""K[A-Z]\w*|Kiln[A-Z]\w*""")
         val DECL = Regex("""\b(?:class|object|interface|typealias|fun|val|var)\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)""")
         val WORDS = Regex("""[A-Z][a-z0-9]+|[a-z0-9]+""")
         val CHECKED = listOf("androidx.", "kotlinx.", "android.", "java.", "javax.", "com.google.")

@@ -236,7 +236,8 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     val notes = if (receiverNotes.isEmpty() || r.ok) "" else receiverNotes.joinToString("\n", postfix = "\n") { "Note: $it" }
     if (fixes.isEmpty()) return linted(r) to notes
     r = linted(r)
-    return r to "Kiln auto-fixed these (imports and small resource slips; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n" + notes
+    return r to "Kiln auto-fixed these (imports and small resource slips; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n" +
+        "Write these imports this way in the files you write next.\n" + notes
 }
 
 class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) : Tool {
