@@ -33,6 +33,12 @@ object Attention {
         get() = screen.value.second
         set(v) { screen.value = screen.value.first to v }
 
+    /** Its prompts are on screen: its own chat, or (for a best-of attempt) its parent's chat, where they show. */
+    private fun shown(project: String): Boolean {
+        val on = onScreen ?: return false
+        return visible && (project == on || Attempts.ownerOf(app.kiln.build.Project(java.io.File(app.kiln.Graph.paths.projects, project))) == on)
+    }
+
     private fun nm(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).also {
         if (it.getNotificationChannel(CHANNEL) == null)
             it.createNotificationChannel(NotificationChannel(CHANNEL, "Needs you", NotificationManager.IMPORTANCE_HIGH))
@@ -54,7 +60,7 @@ object Attention {
             if (mutable) PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     fun approval(ctx: Context, project: String, label: String, tool: String, detail: String) {
-        if (visible && onScreen == project) return
+        if (shown(project)) return
         val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground).setOnlyAlertOnce(true)
             .setContentTitle("$label: allow $tool?").setContentText(detail.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail.take(600)))
@@ -66,7 +72,7 @@ object Attention {
 
     /** [answerable]: a plain question gets an inline reply; a card (several questions, the look picker) opens Kiln. */
     fun question(ctx: Context, project: String, label: String, text: String, answerable: Boolean = true) {
-        if (visible && onScreen == project) return
+        if (shown(project)) return
         val reply = NotificationCompat.Action.Builder(0, "Answer", action(ctx, project, "answer", 3, key(text), mutable = true))
             .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Your answer").build()).build()
         val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground).setOnlyAlertOnce(true)
@@ -77,7 +83,7 @@ object Attention {
     }
 
     fun done(ctx: Context, project: String, label: String, summary: String) {
-        if (visible && onScreen == project) return
+        if (shown(project)) return
         val n = NotificationCompat.Builder(ctx, CHANNEL).setSmallIcon(R.drawable.ic_launcher_foreground).setOnlyAlertOnce(true)
             .setContentTitle("$label is ready").setContentText(summary.take(140))
             .setStyle(NotificationCompat.BigTextStyle().bigText(summary.take(800)))

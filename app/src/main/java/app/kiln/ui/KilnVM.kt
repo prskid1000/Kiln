@@ -107,8 +107,12 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                 .onFailure { active.decrementAndGet() }.isSuccess
         }
 
-        internal fun releaseService(ctx: android.content.Context) = synchronized(serviceLock) {
-            if (active.decrementAndGet() == 0) ctx.stopService(Intent(ctx, RunService::class.java))
+        internal fun releaseService(ctx: android.content.Context) {
+            val last = synchronized(serviceLock) {
+                (active.decrementAndGet() == 0).also { if (it) ctx.stopService(Intent(ctx, RunService::class.java)) }
+            }
+            // The last run is over (a held best-of round's runs never see 0 themselves): the user's crash dialogs come back.
+            if (last) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
         }
 
         init { app.kiln.agent.Attention.loops = { name -> synchronized(states) { states[name] }?.loop?.value } }

@@ -290,9 +290,14 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
     /** [text] appears whole on screen (any case): "₹500" isn't on a screen showing "₹1,500". */
     internal fun shows(nodes: List<UiNode>, text: String): Boolean {
         val t = text.trim(); if (t.isEmpty()) return false
-        // Not inside a longer word or number ("₹5" isn't on "₹5,000").
-        val whole = Regex("""(?<![\p{L}\p{N}]|\d[.,])""" + Regex.escape(t) + """(?![\p{L}\p{N}]|[.,]\d)""", RegexOption.IGNORE_CASE)
-        return nodes.any { n -> whole.containsMatchIn(n.text) || whole.containsMatchIn(n.desc) }
+        // Not inside a longer word or number ("₹5" isn't on "₹5,000"), checked only at an edge that is a letter or digit
+        // ("°F" is on "77°F"). A whole amount matches its zero cents ("₹500" is on "₹500.00", as KFormat.money prints it).
+        val before = if (t.first().isLetterOrDigit()) """(?<![\p{L}\p{N}]|\d[.,])""" else ""
+        val cents = if (t.last().isDigit() && !Regex("""[.,]\d{1,2}$""").containsMatchIn(t)) """(?:[.,]0+(?!\d))?""" else ""
+        val after = if (t.last().isLetterOrDigit()) """(?![\p{L}\p{N}]|[.,]\d)""" else ""
+        val whole = Regex(before + Regex.escape(t) + cents + after, RegexOption.IGNORE_CASE)
+        // An element's test tag counts too ("results_list"), as wait_for promises.
+        return nodes.any { n -> whole.containsMatchIn(n.text) || whole.containsMatchIn(n.desc) || n.id.substringAfter(":id/").equals(t, true) }
     }
 
     internal fun pointIn(s: String, nodes: List<app.kiln.device.UiNode>): Pair<Int, Int>? =
@@ -802,7 +807,14 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         }
         s("expect_gone")?.let { t ->
             val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(300, 20_000)   // at least one look
-            while (System.currentTimeMillis() < until) { if (!visible(t)) return true to "“$t” is gone"; delay(300) }
+            while (System.currentTimeMillis() < until) {
+                if (!visible(t)) {
+                    // Gone because the app died isn't a pass (an empty screen hid the crash).
+                    if (device.pid(pkg) == null) return false to "the app is no longer running — call last_crash"
+                    return true to "“$t” is gone"
+                }
+                delay(300)
+            }
             return false to "expected “$t” to be gone — still on screen"
         }
         st.str("wait_ms")?.toLongOrNull()?.let { ms -> delay(ms.coerceIn(0, 10_000)); return true to "waited ${ms}ms" }

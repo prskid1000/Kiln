@@ -61,13 +61,19 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
     if (!isActive || name in KilnVM.deleting) return@launch
     // Registered after that discard (which cancels the previous round's loop), so Discard and Delete can stop this one.
     bestOfJobs[name] = coroutineContext[kotlinx.coroutines.Job]!!
-    val tries = runCatching { Attempts.create(Graph.paths.projects, s.project, n, request) }
-        .getOrElse { message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
-    attempts(name).value = tries.map { it.name }
-    // One after another: they share the hidden test screen. The run service is held for the whole round: between
-    // attempts the count fell to 0 and the service stopped, and Android 12+ won't start it again from the background.
+    // Checked before anything starts: a refusal right after the service starts stopped it before it went foreground,
+    // which Android punishes with a crash.
+    if (Graph.toolchain.state.value !is app.kiln.toolchain.Toolchain.State.Ready) {
+        message.value = "The build tools are still setting up — try again in a moment"; restoreDraft(name, request, emptyList()); return@launch
+    }
+    // One after another: they share the hidden test screen. The run service is held for the whole round (held before
+    // the copies exist, so a failed hold leaves none behind): between attempts the count fell to 0 and the service
+    // stopped, and Android 12+ won't start it again from the background.
     val app = getApplication<android.app.Application>()
     if (!KilnVM.holdService(app)) { message.value = "Couldn't start the attempts in the background — open Kiln and try again"; restoreDraft(name, request, emptyList()); return@launch }
+    val tries = runCatching { Attempts.create(Graph.paths.projects, s.project, n, request) }
+        .getOrElse { KilnVM.releaseService(app); message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
+    attempts(name).value = tries.map { it.name }
     try { for ((i, t) in tries.withIndex()) {
         val prompt = request + "\n\n(This is attempt ${i + 1} of $n: separate copies of the app are each trying this " +
             "on their own and the user will keep the best one. Make your own best version, and verify it on the device.)"

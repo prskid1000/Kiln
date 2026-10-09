@@ -73,14 +73,23 @@ private suspend fun KilnVM.quickEdit(name: String, hit: SourceHit, old: String, 
     // A resource string is escaped for Android XML ("Don't", "Tom & Jerry" broke aapt2).
     val (from, to) = if ("\"$old\"" in lines[i]) "\"$old\"" to "\"${escapeKotlin(new)}\"" else ">$old<" to ">${escapeAndroidXml(new)}<"
     if (from !in lines[i]) return "The file changed — pick the element again"
-    val before = f.readText()
+    val oldLine = lines[i]
     lines[i] = lines[i].replaceFirst(from, to)
+    val newLine = lines[i]
     f.writeText(lines.joinToString(System.lineSeparator(), postfix = System.lineSeparator()))
-    val r = Graph.builds.build(s.project)
+    // A failed (or cancelled) build undoes only this line, and only if it's still what we wrote: the agent may have
+    // edited the file meanwhile, and writing the whole old file back would erase that.
+    fun undo(): Boolean = runCatching {
+        val now = f.readLines().toMutableList()
+        if (i in now.indices && now[i] == newLine) { now[i] = oldLine; f.writeText(now.joinToString(System.lineSeparator(), postfix = System.lineSeparator())); true } else false
+    }.getOrDefault(false)
+    val r = try { Graph.builds.build(s.project) } catch (e: kotlinx.coroutines.CancellationException) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { undo() }; throw e
+    }
     if (!r.ok) {
-        // Put the file back: a failed quick edit must not leave the next build broken too.
-        runCatching { f.writeText(before) }
-        return "Build failed (the edit was undone): " + r.diagnostics.firstOrNull { it.severity == "error" }?.let { "${it.file?.let(::File)?.name}:${it.line} ${it.message}" }.orEmpty()
+        val undone = undo()
+        return "Build failed (" + (if (undone) "the edit was undone" else "the file changed since, so the edit was left") + "): " +
+            r.diagnostics.firstOrNull { it.severity == "error" }?.let { "${it.file?.let(::File)?.name}:${it.line} ${it.message}" }.orEmpty()
     }
     val inst = Graph.testDevice.install(File(r.apk!!))
     if (!inst.ok) return "Install failed: " + inst.all.take(200)
