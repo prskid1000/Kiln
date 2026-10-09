@@ -110,6 +110,14 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         if (!resolve.ok) return resolve   // Warden's error, not "no launcher activity"
         val component = resolve.out.lines().lastOrNull { '/' in it }?.trim()
             ?: return ExecResult(1, "", "no launcher activity in $pkg", 0)
+        // On the hidden display, a runtime-permission prompt can't show there: Android opened it on the phone's own
+        // screen (over Kiln) and moved the app with it — every screenshot after that was blank and input was refused.
+        // The app's requested runtime permissions are granted first, so it starts as if the user had allowed them.
+        // ([pkg] is a kiln.app.* name — guard() — so it's safe in the shell line.)
+        if (testDisplay != null) runCatching {
+            warden.exec(listOf("sh", "-c", "for p in \$(dumpsys package $pkg | sed -n '/requested permissions:/,/install permissions:/p' | " +
+                "grep -o 'android\\.permission\\.[A-Z_]*' | sort -u); do pm grant $pkg \$p 2>/dev/null; done; true"))
+        }
         return warden.exec(listOf("am", "start", "-W", "-S") + displayArgs("--display") + listOf("-n", component))
     }
 
