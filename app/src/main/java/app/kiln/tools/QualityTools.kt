@@ -42,6 +42,7 @@ class LoadSkillTool(private val skills: Skills) : Tool {
     override val schema = schema {
         raw("names", app.kiln.core.obj("type" to "array", "items" to app.kiln.core.obj("type" to "string"),
             "description" to "Skill names, e.g. [\"architecture\", \"notifications\"]."), required = false)
+        str("name", "One skill name (prefer names for several).", required = false)
     }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
