@@ -620,7 +620,9 @@ internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.
             .minByOrNull { (it.right - it.left) * (it.bottom - it.top) } else null
         val focusKnown = after.any { it.focused != null }
         val focusedNow = after.firstOrNull { it.focused == true && "EditText" in it.cls }
-        if (focusedNow != null) return "The text field “${focusedNow.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
+        // Only for a tap on a text field: a field keeps focus when a button is tapped, and reporting it then read as
+        // "the tap hit the field" (run 15 decided its Save button didn't take taps).
+        if (hit != null && focusedNow != null) return "The text field “${focusedNow.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
         if (hit != null) return if (!focusKnown) "The text field “${hit.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
             // Run 11: the tap landed on a search bar drawn under the top bar; the bar took it.
             else "Tapped where the text field “${hit.label().take(40).ifBlank { "field" }}” is, but it didn't take focus — something is drawn over it " +
