@@ -94,7 +94,8 @@ class ToolHost(private val paths: Paths, private val toolchain: Toolchain) {
             // Stop does the same at once: this child is cancelled with the call (while the read below still blocks),
             // and killing the JVM ends that read — the build lock was otherwise held until the watchdog.
             var finished = false
-            val onStop = launch { try { kotlinx.coroutines.awaitCancellation() } finally { if (!finished) stuck?.destroyForcibly() } }
+            // UNDISPATCHED: it is watching before the read starts, so a Stop that comes first still runs its finally.
+            val onStop = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { try { kotlinx.coroutines.awaitCancellation() } finally { if (!finished) stuck?.destroyForcibly() } }
             val id = ids.incrementAndGet().toString()
             val payload = (listOf(id, tool) + args).joinToString("\u0000")
             val w = writer!!

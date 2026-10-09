@@ -41,6 +41,11 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
 
     /** Silent install by streaming the APK into `cmd package install -S`. */
     suspend fun install(apk: java.io.File): ExecResult {
+        // The debug APK is named after its package (build/<package>.apk). Only Kiln's own apps are installed, and a
+        // signature clash reinstalls only that same package — kiln.json is agent-editable, and naming another
+        // project's package must not uninstall that project's app and data.
+        val own = apk.nameWithoutExtension
+        if (!own.startsWith("kiln.app.")) return ExecResult(1, "", "Kiln only installs its own apps (kiln.app.*), not $own", 0)
         val bytes = apk.readBytes()
         suspend fun push() = warden.exec(listOf("cmd", "package", "install", "-r", "-t", "-S", bytes.size.toString()), stdin = bytes,
             timeoutMs = 300_000)
@@ -49,7 +54,7 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         // For Kiln's own apps the fix is a clean reinstall (the old copy's data goes with it).
         if (!r.ok && "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in r.all) {
             // "Existing package …" (older Android) or "Package … signatures do not match" (newer): either case.
-            val pkg = Regex("package (kiln\\.app\\.[a-z0-9_]+)", RegexOption.IGNORE_CASE).find(r.all)?.groupValues?.get(1) ?: return r
+            val pkg = Regex("package (kiln\\.app\\.[a-z0-9_]+)", RegexOption.IGNORE_CASE).find(r.all)?.groupValues?.get(1)?.takeIf { it == own } ?: return r
             uninstall(pkg)
             return push().let { it.copy(out = it.out + "\n(reinstalled: the signing key changed, so the old copy and its data were removed)") }
         }
@@ -69,8 +74,10 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         if (testDisplay == null || dialogsBefore != null) return
         // A value saved by an earlier run that wasn't restored yet (Kiln restarted) is the user's: reading the
         // setting now would record Kiln's own "1" instead.
+        // A failed read isn't the user's value: recording "null" would later delete their own setting. Then don't hide.
         dialogsBefore = dialogsFile?.takeIf { it.isFile }?.readText()?.trim()?.ifBlank { null }
-            ?: warden.exec(listOf("settings", "get", "global", "hide_error_dialogs")).out.trim().ifBlank { "null" }
+            ?: warden.exec(listOf("settings", "get", "global", "hide_error_dialogs")).takeIf { it.ok }?.out?.trim()?.ifBlank { "null" }
+            ?: return
         dialogsFile?.writeText(dialogsBefore!!)
         warden.exec(listOf("settings", "put", "global", "hide_error_dialogs", "1"))
     }

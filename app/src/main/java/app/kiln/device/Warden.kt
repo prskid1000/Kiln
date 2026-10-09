@@ -69,8 +69,16 @@ class Warden(private val context: Context) {
                 // Readers outside this scope: a background child (`logcat &`) keeps the pipes open after sh exits,
                 // and blocking reads that never end held the call — and Stop — forever.
                 val readers = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
-                val out = readers.async { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.inputStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
-                val err = readers.async { runCatching { ParcelFileDescriptor.AutoCloseInputStream(p.errorStream).use { it.readBytes() } }.getOrDefault(ByteArray(0)) }
+                // Read into buffers we keep: if the grace below runs out, what arrived is still returned, and closing
+                // the streams ends the blocked reads (their threads were leaked before).
+                val outStream = ParcelFileDescriptor.AutoCloseInputStream(p.inputStream)
+                val errStream = ParcelFileDescriptor.AutoCloseInputStream(p.errorStream)
+                val outBuf = java.io.ByteArrayOutputStream(); val errBuf = java.io.ByteArrayOutputStream()
+                fun pump(i: java.io.InputStream, b: java.io.ByteArrayOutputStream) = runCatching {
+                    i.use { val chunk = ByteArray(65_536); while (true) { val n = it.read(chunk); if (n < 0) break; synchronized(b) { b.write(chunk, 0, n) } } }
+                }
+                val out = readers.async { pump(outStream, outBuf) }
+                val err = readers.async { pump(errStream, errBuf) }
                 val done = java.util.concurrent.CompletableFuture<Int>()
                 Thread({ done.complete(runCatching { p.waitFor() }.getOrDefault(-1)) }, "warden-wait").apply { isDaemon = true }.start()
                 // stdin is written alongside the wait: a child that stops reading must not block us past the timeout
@@ -85,8 +93,10 @@ class Warden(private val context: Context) {
                 withTimeoutOrNull(5_000) { feed.await() }
                 // After exit, a short grace for the rest of the output; a background child holding the pipe can't keep us here.
                 // 30 s: a big output (a screenshot) may still be streaming after the command exits.
-                val o = withTimeoutOrNull(30_000) { out.await() } ?: run { runCatching { p.destroy() }; ByteArray(0) }
-                val e = withTimeoutOrNull(2_000) { err.await() } ?: ByteArray(0)
+                if (withTimeoutOrNull(30_000) { out.await() } == null) { runCatching { p.destroy() }; runCatching { outStream.close() } }
+                if (withTimeoutOrNull(2_000) { err.await() } == null) runCatching { errStream.close() }
+                val o = synchronized(outBuf) { outBuf.toByteArray() }
+                val e = synchronized(errBuf) { errBuf.toByteArray() }
                 Raw(code ?: -1, o, e, System.currentTimeMillis() - t0, timedOut = code == null)
             }
         } catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; throw e
