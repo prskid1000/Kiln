@@ -55,6 +55,10 @@ import kotlinx.coroutines.launch
 fun PreviewSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit, onAsk: (String) -> Unit) {
     val name = ps.project.name
     val scope = rememberCoroutineScope()
+    // Launching for the preview hides the phone's crash dialogs: they come back when it closes, unless a run still needs them hidden.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { if (KilnVM.idle()) KilnVM.runScope.launch { runCatching { app.kiln.Graph.testDevice.restoreCrashDialogs() } } }
+    }
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var disp by remember { mutableStateOf(0 to 0) }
     var status by remember { mutableStateOf<String?>(null) }

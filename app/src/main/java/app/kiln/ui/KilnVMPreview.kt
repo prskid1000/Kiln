@@ -49,7 +49,7 @@ private fun KilnVM.findSource(name: String, texts: List<String>): List<SourceHit
     val p = state(name).project
     val out = mutableListOf<SourceHit>()
     for (f in p.files().filter { it.extension == "kt" || it.extension == "xml" }) {
-        f.readLines().forEachIndexed { i, line ->
+        (runCatching { f.readLines() }.getOrNull() ?: continue).forEachIndexed { i, line ->   // moved/deleted meanwhile
             if (texts.any { t -> "\"$t\"" in line || ">$t<" in line }) out += SourceHit(p.rel(f), i + 1, line.trim().take(160))
         }
     }
@@ -66,8 +66,9 @@ suspend fun KilnVM.quickEditText(name: String, hit: SourceHit, old: String, new:
 private suspend fun KilnVM.quickEdit(name: String, hit: SourceHit, old: String, new: String): String? {
     val s = state(name)
     if (s.loop.value?.running?.value == true) return "Kiln is working on this app — wait for it to finish"
-    val f = runCatching { s.project.resolveWritable(hit.path) }.getOrNull() ?: return "File not found"
-    val lines = f.readLines().toMutableList()
+    // The file may have moved or gone since the pick (the agent was working): say so, don't crash.
+    val f = runCatching { s.project.resolveWritable(hit.path) }.getOrNull()?.takeIf { it.isFile } ?: return "The file changed — pick the element again"
+    val lines = runCatching { f.readLines().toMutableList() }.getOrElse { return "The file changed — pick the element again" }
     val i = hit.line - 1
     if (i !in lines.indices) return "The file changed — pick the element again"
     // A resource string is escaped for Android XML ("Don't", "Tom & Jerry" broke aapt2).
@@ -76,7 +77,8 @@ private suspend fun KilnVM.quickEdit(name: String, hit: SourceHit, old: String, 
     val oldLine = lines[i]
     lines[i] = lines[i].replaceFirst(from, to)
     val newLine = lines[i]
-    f.writeText(lines.joinToString(System.lineSeparator(), postfix = System.lineSeparator()))
+    runCatching { f.writeText(lines.joinToString(System.lineSeparator(), postfix = System.lineSeparator())) }
+        .onFailure { return "Couldn't save the change: ${it.message}" }
     // A failed (or cancelled) build undoes only this line, and only if it's still what we wrote: the agent may have
     // edited the file meanwhile, and writing the whole old file back would erase that.
     fun undo(): Boolean = runCatching {

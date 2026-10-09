@@ -49,7 +49,10 @@ private val attemptLists = java.util.concurrent.ConcurrentHashMap<String, Mutabl
 
 /** The names of a project's attempt copies (empty when there are none). */
 fun KilnVM.attempts(name: String): MutableStateFlow<List<String>> = attemptLists.getOrPut(name) {
-    MutableStateFlow(Attempts.list(Graph.paths.projects, name).map { it.name })
+    // Filled off the main thread (it lists every project folder): this is first called while composing.
+    MutableStateFlow<List<String>>(emptyList()).also { f ->
+        KilnVM.runScope.launch { val found = Attempts.list(Graph.paths.projects, name).map { it.name }; f.compareAndSet(emptyList(), found) }
+    }
 }
 
 // In the runs' scope: Back on Android 11 finishes the activity and clears the ViewModel, which stopped attempts 2..n.
@@ -66,13 +69,16 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
     if (Graph.toolchain.state.value !is app.kiln.toolchain.Toolchain.State.Ready) {
         message.value = "The build tools are still setting up — try again in a moment"; restoreDraft(name, request, emptyList()); return@launch
     }
-    // One after another: they share the hidden test screen. The run service is held for the whole round (held before
-    // the copies exist, so a failed hold leaves none behind): between attempts the count fell to 0 and the service
+    // The copies first: a failure here must come before the service starts (stopping it before it went foreground
+    // crashed the app). Then the service is held for the whole round: between attempts the count fell to 0 and it
     // stopped, and Android 12+ won't start it again from the background.
-    val app = getApplication<android.app.Application>()
-    if (!KilnVM.holdService(app)) { message.value = "Couldn't start the attempts in the background — open Kiln and try again"; restoreDraft(name, request, emptyList()); return@launch }
     val tries = runCatching { Attempts.create(Graph.paths.projects, s.project, n, request) }
-        .getOrElse { KilnVM.releaseService(app); message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
+        .getOrElse { message.value = "Couldn't start the attempts: ${it.message}"; restoreDraft(name, request, emptyList()); return@launch }
+    val app = getApplication<android.app.Application>()
+    if (!KilnVM.holdService(app)) {
+        Attempts.discard(Graph.paths.projects, name)
+        message.value = "Couldn't start the attempts in the background — open Kiln and try again"; restoreDraft(name, request, emptyList()); return@launch
+    }
     attempts(name).value = tries.map { it.name }
     try { for ((i, t) in tries.withIndex()) {
         val prompt = request + "\n\n(This is attempt ${i + 1} of $n: separate copies of the app are each trying this " +

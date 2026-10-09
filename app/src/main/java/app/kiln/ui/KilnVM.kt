@@ -97,6 +97,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         internal val runScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
         /** Agent runs in flight across all projects; the foreground service lives while > 0. */
         private val active = java.util.concurrent.atomic.AtomicInteger()
+        /** No run (or best-of round) is going. */
+        internal fun idle(): Boolean = active.get() == 0
         private val serviceLock = Any()
         private val messages = MutableStateFlow<String?>(null)
 

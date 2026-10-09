@@ -293,7 +293,14 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
         // Not inside a longer word or number ("₹5" isn't on "₹5,000"), checked only at an edge that is a letter or digit
         // ("°F" is on "77°F"). A whole amount matches its zero cents ("₹500" is on "₹500.00", as KFormat.money prints it).
         val before = if (t.first().isLetterOrDigit()) """(?<![\p{L}\p{N}]|\d[.,])""" else ""
-        val cents = if (t.last().isDigit() && !Regex("""[.,]\d{1,2}$""").containsMatchIn(t)) """(?:[.,]0+(?!\d))?""" else ""
+        // At most two zeros, so a thousands group isn't taken for cents ("₹5" must not pass on "₹5,000"); one decimal
+        // matches its two-decimal form too ("₹12.5" on "₹12.50").
+        val cents = when {
+            !t.last().isDigit() -> ""
+            Regex("""[.,]\d$""").containsMatchIn(t) -> """(?:0(?!\d))?"""
+            Regex("""[.,]\d{2}$""").containsMatchIn(t) -> ""
+            else -> """(?:[.,]0{1,2}(?!\d))?"""
+        }
         val after = if (t.last().isLetterOrDigit()) """(?![\p{L}\p{N}]|[.,]\d)""" else ""
         val whole = Regex(before + Regex.escape(t) + cents + after, RegexOption.IGNORE_CASE)
         // An element's test tag counts too ("results_list"), as wait_for promises.
@@ -808,13 +815,16 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         s("expect_gone")?.let { t ->
             val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(300, 20_000)   // at least one look
             while (System.currentTimeMillis() < until) {
-                if (!visible(t)) {
-                    // Gone because the app died isn't a pass (an empty screen hid the crash).
-                    if (device.pid(pkg) == null) return false to "the app is no longer running — call last_crash"
-                    return true to "“$t” is gone"
-                }
+                // Gone only from a screen we could read, showing this app: an unreadable screen (busy app) or another
+                // app in front isn't "gone".
+                val tree = device.uiTree(pkg)
+                val front = device.foregroundPackage()
+                if (tree.isNotEmpty() && (front == null || front == pkg) && !shows(tree, t)) return true to "“$t” is gone"
+                // Gone because the app died isn't a pass.
+                if (device.pid(pkg) == null) return false to "the app is no longer running — call last_crash"
                 delay(300)
             }
+            if (device.foregroundPackage().let { it != null && it != pkg }) return false to "the app isn't in front any more — can't tell whether “$t” is gone"
             return false to "expected “$t” to be gone — still on screen"
         }
         st.str("wait_ms")?.toLongOrNull()?.let { ms -> delay(ms.coerceIn(0, 10_000)); return true to "waited ${ms}ms" }

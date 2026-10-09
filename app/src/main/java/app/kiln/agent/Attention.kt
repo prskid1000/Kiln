@@ -48,7 +48,8 @@ object Attention {
     // Opens that project (its own request code, so each notification keeps its project).
     private fun open(ctx: Context, project: String) = PendingIntent.getActivity(ctx, id(project) * 4,
         Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(MainActivity.EXTRA_PROJECT, project),
+            // An attempt's notification opens its parent (the copy isn't somewhere to keep working: it's deleted later).
+            .putExtra(MainActivity.EXTRA_PROJECT, Attempts.ownerOf(app.kiln.build.Project(java.io.File(app.kiln.Graph.paths.projects, project))) ?: project),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     // The request code is per project: Android matches PendingIntents ignoring extras, so one shared code made
