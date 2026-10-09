@@ -75,6 +75,12 @@ class ClassIndex(private val toolchain: Toolchain) {
 
     /** Packages that have at least one class or top-level symbol (kotlinx.datetime isn't one: it isn't bundled). */
     private val packages = HashSet<String>(20_000)
+    /** A top-level function's fully-qualified name → the file classes it's compiled into (overloads may span files). */
+    private val facadeOf = HashMap<String, MutableList<String>>(40_000)
+
+    /** Top-level functions named [name] (DatePickerDialog, items…): (pkg.Name, the file class holding it). */
+    fun topLevelFunctions(name: String): List<Pair<String, String>> { ensure()
+        return facadeOf.entries.filter { it.key.substringAfterLast('.') == name }.flatMap { (fq, cs) -> cs.distinct().map { fq to it } } }
     fun packageExists(pkg: String): Boolean { ensure(); return pkg in packages }
 
     /** Simple names of everything public in the kit (classes, objects, top-level functions and vals). */
@@ -85,7 +91,7 @@ class ClassIndex(private val toolchain: Toolchain) {
     @Synchronized private fun ensure() {   // parallel sdk_lookup calls share one index
         val dir = toolchain.dir ?: error("toolchain not installed")
         if (built == dir.path) return
-        where.clear(); topLevel.clear(); packages.clear(); kit.clear()
+        where.clear(); topLevel.clear(); packages.clear(); kit.clear(); facadeOf.clear()
         for (jar in listOf(toolchain.androidJar(dir)) + toolchain.kitClasspath(dir)) ZipFile(jar).use { z ->
             for (e in z.entries()) if (e.name.endsWith(".class") && !e.name.endsWith("module-info.class")) {
                 val fq = e.name.removeSuffix(".class").replace('/', '.')
@@ -94,13 +100,15 @@ class ClassIndex(private val toolchain: Toolchain) {
                 // named after its main symbol (IconKt → Icon, filled/SettingsKt → Icons.Filled.Settings).
                 if (fq.endsWith("Kt") && '$' !in fq && (fq.startsWith("androidx.") || fq.startsWith("app.kiln.kit.")))
                     topLevel += fq.removeSuffix("Kt")
-                // The kit's files hold many functions each (Scaffolds.kt: KilnScreen, KilnTabs…): the file name named
-                // none of them, so the import fixer could never add KilnScreen or KToastHost. Its facades are read for
-                // their real public names (the kit is small; androidx keeps the cheap guess above).
-                if (fq.endsWith("Kt") && '$' !in fq && fq.startsWith("app.kiln.kit.")) {
+                // A file holds many functions (Scaffolds.kt: KilnScreen, KilnTabs…; DatePickerDialog.android.kt), so the
+                // file name missed most of them: the import fixer couldn't add them and sdk_lookup couldn't find them.
+                // The kit's and androidx's facades are read for their real public names — not the icons' (each icon is
+                // its own file, named after it, and there are tens of thousands).
+                if (fq.endsWith("Kt") && '$' !in fq && (fq.startsWith("app.kiln.kit.") ||
+                        (fq.startsWith("androidx.") && !fq.startsWith("androidx.compose.material.icons.")))) {
                     val pkg = fq.substringBeforeLast('.')
                     runCatching { z.getInputStream(e).use { classPublicStatics(it.readBytes()) } }.getOrNull()
-                        ?.forEach { topLevel += "$pkg.$it" }
+                        ?.forEach { topLevel += "$pkg.$it"; facadeOf.getOrPut("$pkg.$it") { mutableListOf() } += fq }
                 }
             }
         }
@@ -364,7 +372,17 @@ class SdkLookupTool(private val index: ClassIndex) : Tool {
         // answer from the kit's own signatures.
         val kitName = q0.removePrefix("app.kiln.kit.").substringBefore('.')
         val kitSig = if (exact == null) index.kitSignature(kitName) else null
+        // A top-level function (a composable such as DatePickerDialog, in DatePickerDialog.android.kt): its signatures from
+        // the file it's compiled into. The old android.app class of the same name was answered instead, and the model
+        // concluded the Compose one didn't exist.
+        val fnName = q0.substringAfterLast('.')
+        val fns = if (kitSig == null && fnName.firstOrNull()?.isLetter() == true)
+            index.topLevelFunctions(fnName).filter { (fq, _) -> '.' !in q0 || fq == q0 || q0.substringBeforeLast('.').let { p -> fq.startsWith("$p.") } }
+                .filter { (fq, _) -> !fq.startsWith("app.kiln.kit.") } else emptyList()
         if (kitSig != null) ToolResult.ok("$kitName is part of the Kiln kit (app.kiln.kit):\n$kitSig\n\nFor its docs and examples use kit_search \"$kitName\".", "kit $kitName")
+        else if (fns.isNotEmpty()) ToolResult.ok(ctx.spill(
+            fns.take(4).joinToString("\n\n") { (fq, facade) -> "$fq — a top-level function (import $fq):\n" + index.describe(facade, fnName) } +
+                (if (exact != null && fns.none { it.first == exact }) "\n\nAlso a class of that name: $exact (a different API)." else "")), "fun $fnName")
         else if (exact != null) ToolResult.ok(ctx.spill(index.describe(exact, member)), exact)
         else if (hits.isEmpty()) ToolResult.error("nothing matches \"$q0\" in the Android SDK" +
             (if (kitName.length > 1 && kitName[0] == 'K' && kitName[1].isUpperCase() || q0.startsWith("app.kiln")) " — Kiln kit names are looked up with kit_search." else " — try a shorter fragment of the class name"))

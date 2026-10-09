@@ -224,6 +224,8 @@ class ToolsOnDeviceTest {
                 expect = "Again — KolnScreen"),
             Case("grep", """{"pattern":"KolnScreen","glob":"**/*.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).
+            Case("sdk_lookup", """{"query":"DatePickerDialog"}""", expect = "androidx.compose.material3.DatePickerDialog — a top-level function"),
             // A name a letter off another component is suggested, never swapped in (KSlide meant KSwipeRow).
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\n\n@Composable\nfun Slide() { KSlide() }\n"}""",
                 expect = "KSlide isn't in the kit", absent = "KSlide → "),
