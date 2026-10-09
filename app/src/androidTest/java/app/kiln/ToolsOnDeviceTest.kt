@@ -275,6 +275,8 @@ class ToolsOnDeviceTest {
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
             // A member asked for by name gets the member's (Kotlin) signature from the kit catalog.
             Case("sdk_lookup", """{"query":"KFormat.money"}""", expect = "fun money(amount: Double"),
+            // Every overload is answered (date(date: LocalDate…) as well as date(iso: String…)).
+            Case("sdk_lookup", """{"query":"KFormat.date"}""", expect = "fun date(date: LocalDate"),
             // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).
             Case("sdk_lookup", """{"query":"DatePickerDialog"}""", expect = "androidx.compose.material3.DatePickerDialog — a top-level function"),
             // A name a letter off another component is suggested, never swapped in (KSlide meant KSwipeRow).

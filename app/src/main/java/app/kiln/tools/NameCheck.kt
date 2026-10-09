@@ -265,7 +265,8 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         project.files().filter { it.extension == "kt" }.firstNotNullOfOrNull { f ->
             val t = f.readText()
             // Annotations may take arguments (@Entity(tableName = "x")); `fun Expense.label()` is an extension, not Expense.
-            if (!Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+|\w+\s+)*(?:class|object|interface|typealias|fun)\s+(?:<[^>]*>\s*)?${Regex.escape(name)}\b(?!\??\.)""").containsMatchIn(t)) null
+            // (A top-level val/var too: `val LocalCurrency = staticCompositionLocalOf { … }`.)
+            if (!Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+|\w+\s+)*(?:class|object|interface|typealias|fun|val|var)\s+(?:<[^>]*>\s*)?${Regex.escape(name)}\b(?!\??\.)""").containsMatchIn(t)) null
             else Regex("""(?m)^package\s+([\w.]+)""").find(t)?.groupValues?.get(1)?.let { "$it.$name" }
         }
     }.getOrNull()

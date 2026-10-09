@@ -193,7 +193,8 @@ class ClassIndex(private val toolchain: Toolchain) {
                 val n = (o["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
                 val sig = (o["signature"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
                 n to sig
-            }.toMap()
+            // Every overload, one per line (KFormat.date has three; keeping the last showed only date(iso: String)).
+            }.groupBy({ it.first }, { it.second }).mapValues { (_, sigs) -> sigs.distinct().joinToString("\n") }
         }.getOrDefault(emptyMap())
 
     /** The kit catalog's exact signature for [name] (KTextField, KHttp.get…), or null. */

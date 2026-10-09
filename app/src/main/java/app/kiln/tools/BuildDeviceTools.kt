@@ -168,9 +168,14 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val f = File(path).let { if (it.isAbsolute) it else ctx.project.resolve(path) }
         if (!f.isFile || f.extension != "kt") continue
         val filePkg = Regex("(?m)^package\\s+([\\w.]+)").find(f.readText())?.groupValues?.get(1).orEmpty()
-        // Used as an icon on this line (Icons.Filled.Settings): the icon, never the project's Settings data class or a
-        // Screen.Settings — those were imported instead and the error stayed.
-        val asIcon = Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.${Regex.escape(name)}\b""").containsMatchIn(e.source.orEmpty())
+        // Used as an icon at this error (Icons.Filled.Settings): the icon, never the project's Settings data class or a
+        // Screen.Settings — those were imported instead and the error stayed. Decided at the error's own column (a route
+        // `Settings` and `Icons.Filled.Settings` on one line are two errors, one each); the whole line without a column.
+        val iconBefore = Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.$""")
+        val lineText = e.line?.let { l -> runCatching { f.readLines().getOrNull(l - 1) }.getOrNull() }
+        val asIcon = if (lineText != null && e.col != null && e.col in 1..lineText.length)
+            iconBefore.containsMatchIn(lineText.substring(0, e.col - 1))
+        else Regex("""Icons\.(?:AutoMirrored\.)?(?:Filled|Default|Outlined|Rounded|Sharp|TwoTone)\.${Regex.escape(name)}\b""").containsMatchIn(e.source.orEmpty())
         val own = if (asIcon) null else decls[name]?.singleOrNull()?.takeIf { it.substringBeforeLast('.') != filePkg }
         // A name the project declares somewhere (nested ones too: Repo.Location) is never a library's of the same name
         // (android.location.Location was imported over it, and the errors turned into type mismatches).
