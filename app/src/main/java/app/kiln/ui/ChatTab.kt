@@ -605,7 +605,7 @@ private fun Screenshot(png: ByteArray, modifier: Modifier = Modifier) {
 
 /** Approval and ask_user requests, inline above the composer instead of modal dialogs. */
 @Composable
-private fun Prompts(loop: AgentLoop) {
+internal fun Prompts(loop: AgentLoop) {
     val approval by loop.approval.collectAsStateWithLifecycle()
     val question by loop.question.collectAsStateWithLifecycle()
     approval?.let { a ->

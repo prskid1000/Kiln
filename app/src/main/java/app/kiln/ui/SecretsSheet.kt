@@ -58,7 +58,9 @@ fun SecretsSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
     // Keystore reads and writes are off the main thread: which names have a value, loaded when the list changes.
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val io = kotlinx.coroutines.Dispatchers.IO
-    val hasValue by androidx.compose.runtime.produceState(emptySet<String>(), names) {
+    // Bumped after each save/remove: the same names with a changed value must reload the labels.
+    var version by remember { mutableStateOf(0) }
+    val hasValue by androidx.compose.runtime.produceState(emptySet<String>(), names, version) {
         this.value = kotlinx.coroutines.withContext(io) { names.filter { vm.hasSecret(name, it) }.toSet() } }
     ModalBottomSheet(onDismiss, containerColor = N.surface) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -76,7 +78,7 @@ fun SecretsSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
                         Text(if (n in hasValue) "set" else "no value yet", style = T.label)
                     }
                     KButton("Change") { key = n; value = "" }
-                    IconBtn(Icons.Rounded.DeleteOutline, "Remove $n") { scope.launch { names = kotlinx.coroutines.withContext(io) { vm.removeSecret(name, n); vm.secretNames(name) } } }
+                    IconBtn(Icons.Rounded.DeleteOutline, "Remove $n") { scope.launch { names = kotlinx.coroutines.withContext(io) { vm.removeSecret(name, n); vm.secretNames(name) }; version++ } }
                 }
             }
             // Uppercased on save: rewriting the text while typing makes the keyboard drop characters.
@@ -87,7 +89,7 @@ fun SecretsSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit) {
                     scope.launch {
                         val (err, list) = kotlinx.coroutines.withContext(io) { vm.setSecret(name, key, value).let { it to vm.secretNames(name) } }
                         error = err
-                        if (err == null) { names = list; key = ""; value = "" }
+                        if (err == null) { names = list; key = ""; value = ""; version++ }
                     }
                 }
                 Spacer(Modifier.width(12.dp))

@@ -272,7 +272,8 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
             vm.message.value = "The file changed since you opened it (the agent wrote it) — close and reopen to see its version"
             return@launch
         }
-        if (ok) { text = out; original = out; if (o is Open.Source) readAt = stamp }
+        // What was typed while saving stays (it isn't saved yet, so the file stays dirty).
+        if (ok) { if (text == snapshot) text = out; original = out; if (o is Open.Source) readAt = stamp }
         vm.message.value = if (ok) (if (o is Open.Data) "Saved — restart the app to reload it" else "Saved") else "Save failed"
     }
     Column(Modifier.fillMaxSize()) {

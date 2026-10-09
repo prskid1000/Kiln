@@ -46,7 +46,13 @@ class ProjectState(val project: Project) {
     /** Claimed between "start a run" and the run's end: two quick sends can't both start one. */
     internal val starting = java.util.concurrent.atomic.AtomicBoolean(false)
     // Rule proposals the user saved or dismissed (activity ids).
-    val decidedRules = MutableStateFlow<Set<Int>>(emptySet())
+    /** Rule proposals already saved or dismissed, by their text (ids restart in every chat), kept in .kiln/. */
+    val decidedRules = MutableStateFlow<Set<String>>(emptySet())
+    internal fun decideRule(rule: String) {
+        decidedRules.value = decidedRules.value + rule
+        val v = decidedRules.value
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { File(project.kilnDir, "decided-rules.txt").writeText(v.joinToString("\n")) } }
+    }
     // Text to put in the composer (an element picked in the preview).
     val draft = MutableStateFlow<String?>(null)
     // Read often during composition (every build-progress update): parse kiln.json only when it changed.
@@ -92,6 +98,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                 ProjectState(Project(File(Graph.paths.projects, name))).also { s ->
                     runScope.launch {
                         s.sessions.value = Session.list(Graph.paths.sessions, name)
+                    s.decidedRules.value = runCatching { File(s.project.kilnDir, "decided-rules.txt").readLines().filter { it.isNotBlank() }.toSet() }.getOrDefault(emptySet())
                         val last = (s.sessions.value.firstOrNull { it.title.isNotBlank() } ?: s.sessions.value.firstOrNull())
                             ?.let { runCatching { Graph.kiln.openSession(s.project, it.id) }.getOrNull() }
                         // A run may have started a new chat meanwhile: never replace it with the old one.
@@ -186,10 +193,11 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     /** New project; returns its name through [then] so the UI can navigate to it. */
     fun createProject(label: String, prompt: String?, then: (String) -> Unit) = viewModelScope.launch(Dispatchers.IO) {
         runCatching {
-            // Names still being deleted are taken too: their folder and chats are going.
-            val taken = projects.value.map { it.project.name }.toSet() + deleting
+            // A name is free only if no folder has it (the list may not be loaded yet, and hides attempts) and
+            // it isn't being deleted.
+            val taken = deleting.toSet()
             val base = slug(label)
-            val name = generateSequence(1) { it + 1 }.map { if (it == 1) base else "${base}_$it" }.first { it !in taken }
+            val name = generateSequence(1) { it + 1 }.map { if (it == 1) base else "${base}_$it" }.first { it !in taken && !File(Graph.paths.projects, it).exists() }
             Project.create(Graph.paths.projects, name, label.trim(), File(Graph.toolchain.templates(), "compose"))
                 .also { File(it.kilnDir, app.kiln.tools.Looks.PENDING).writeText("") }
             projects.value = listProjects()
@@ -213,7 +221,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         s?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
         // The package the project really uses (kiln.json; the agent may have changed it), not one derived from the name.
         val pkg = runCatching { Project(File(Graph.paths.projects, name)).meta().`package` }.getOrNull() ?: Project.packageFor(name)
-        if (pkg in installed.value) Graph.device.uninstall(pkg)
+        // Always: the cached installed list can be stale (the agent installed it during this run).
+        runCatching { Graph.device.uninstall(pkg) }
         // Its secrets go with it.
         runCatching { val p = Project(File(Graph.paths.projects, name)); app.kiln.build.AppSecrets.names(p).forEach { Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, it), null) } }
         app.kiln.agent.Attempts.list(Graph.paths.projects, name).forEach { t ->

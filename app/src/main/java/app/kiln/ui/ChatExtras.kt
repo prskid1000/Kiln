@@ -82,10 +82,10 @@ fun QaVideo(path: String, modifier: Modifier = Modifier) {
 @Composable
 fun RuleProposals(vm: KilnVM, ps: ProjectState, feed: List<Activity>) {
     val decided by ps.decidedRules.collectAsState()
-    val pending = feed.filter { it.kind == Activity.Kind.TOOL && it.tool == "propose_rule" && it.status == Activity.Status.DONE && it.id !in decided }
-    val a = pending.firstOrNull() ?: return
-    val rule = runCatching { (app.kiln.core.parseJson(a.input ?: "{}") as kotlinx.serialization.json.JsonObject)["rule"]
-        ?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } }.getOrNull() ?: return
+    fun ruleOf(a: Activity) = runCatching { (app.kiln.core.parseJson(a.input ?: "{}") as kotlinx.serialization.json.JsonObject)["rule"]
+        ?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } }.getOrNull()
+    val rule = feed.asSequence().filter { it.kind == Activity.Kind.TOOL && it.tool == "propose_rule" && it.status == Activity.Status.DONE }
+        .mapNotNull { ruleOf(it)?.replace("\n", " ")?.trim() }.firstOrNull { it.isNotEmpty() && it !in decided } ?: return
     Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().vCard(N.shapeLg, N.accent.copy(alpha = 0.5f))
         .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Rounded.Lightbulb, null, tint = N.accent2, modifier = Modifier.size(18.dp))
@@ -94,8 +94,8 @@ fun RuleProposals(vm: KilnVM, ps: ProjectState, feed: List<Activity>) {
             Text("Remember for this app?", style = T.label)
             Text(rule, style = T.body)
         }
-        KButton("Dismiss") { ps.decidedRules.value = decided + a.id }
+        KButton("Dismiss") { ps.decideRule(rule) }
         Spacer(Modifier.width(6.dp))
-        KButton("Save", Tone.Accent) { ps.decidedRules.value = decided + a.id; vm.saveRule(ps.project.name, rule) }
+        KButton("Save", Tone.Accent) { ps.decideRule(rule); vm.saveRule(ps.project.name, rule) }
     }
 }

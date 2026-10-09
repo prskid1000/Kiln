@@ -188,10 +188,13 @@ private fun ModelsCard(onEdit: (Profile) -> Unit) {
             }
         }
         Text("PROVIDERS", style = T.overline)
+        // Which providers have a key: a Keystore decrypt each, so read once off the main thread, not per recomposition.
+        val withKey by androidx.compose.runtime.produceState(emptySet<String>(), profiles) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { profiles.filter { Graph.providers.key(it.id) != null }.map { it.id }.toSet() } }
         profiles.forEach { p ->
             Row(Modifier.fillMaxWidth().clip(N.shapeMd).clickable { onEdit(p) }.padding(vertical = 8.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Dot(if (Graph.providers.key(p.id) != null || p.auth == AuthStyle.NONE) N.ok else N.neutral600); Spacer(Modifier.width(10.dp))
+                Dot(if (p.id in withKey || p.auth == AuthStyle.NONE) N.ok else N.neutral600); Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(p.label, style = T.subtitle)
                     Text("${p.protocol.name.lowercase().replace('_', '-')} · ${p.baseUrl}", style = T.monoSmall)
@@ -227,6 +230,9 @@ private fun ProfileEditor(start: Profile, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     fun current() = p.copy(models = models.split(",").map { it.trim() }.filter { it.isNotEmpty() })
     val exists = Graph.providers.profiles.any { it.id == start.id }
+    // Read once, off the main thread (a Keystore decrypt ran on every keystroke).
+    val keySaved by androidx.compose.runtime.produceState(false, p.id) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Graph.providers.key(p.id) != null } }
     Column(Modifier.fillMaxSize()) {
     KTopBar(p.label.ifBlank { "Provider" }, subtitle = if (exists) "Edit provider" else "New provider", onBack = onDone) {
         IconBtn(Icons.Rounded.Check, "Save", tint = N.accent) {
@@ -241,7 +247,7 @@ private fun ProfileEditor(start: Profile, onDone: () -> Unit) {
         KField("Base URL (with or without /v1)", p.baseUrl, { p = p.copy(baseUrl = it) }, mono = true)
         Text("Auth", style = T.label)
         SegTabs(AuthStyle.entries.map { when (it) { AuthStyle.X_API_KEY -> "x-api-key"; AuthStyle.BEARER -> "Bearer"; AuthStyle.NONE -> "None" } to "" }, p.auth.ordinal) { p = p.copy(auth = AuthStyle.entries[it]) }
-        KField(if (Graph.providers.key(p.id) != null) "API key (saved — type to replace)" else "API key", key, { key = it }, mono = true, hint = "kept in the Android Keystore", secret = true)
+        KField(if (keySaved) "API key (saved — type to replace)" else "API key", key, { key = it }, mono = true, hint = "kept in the Android Keystore", secret = true)
         KField("Models (comma-separated)", models, { models = it }, mono = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             KButton("Pin certificate") {

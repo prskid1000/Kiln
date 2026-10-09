@@ -75,7 +75,8 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
     message.value = "$n attempts are ready — compare them and keep one"
 }
 
-fun KilnVM.keepAttempt(name: String, attempt: String) = viewModelScope.launch(Dispatchers.IO) {
+// Keep and discard run in the runs' scope: leaving the app mid-way left folders, apps and states behind.
+fun KilnVM.keepAttempt(name: String, attempt: String) = KilnVM.runScope.launch {
     val s = state(name)
     // Not while the project itself is working: adopting replaces its sources under the running agent.
     if (s.loop.value?.running?.value == true || s.starting.get()) { message.value = "Wait for the current run to finish"; return@launch }
@@ -88,7 +89,7 @@ fun KilnVM.keepAttempt(name: String, attempt: String) = viewModelScope.launch(Di
         .onFailure { message.value = "Couldn't keep it: ${it.message}" }
 }
 
-fun KilnVM.discardAttempts(name: String) = viewModelScope.launch(Dispatchers.IO) {
+fun KilnVM.discardAttempts(name: String) = KilnVM.runScope.launch {
     // The round's loop first: it would start the next attempt on a deleted folder.
     cancelBestOf(name)
     for (t in Attempts.list(Graph.paths.projects, name)) {
@@ -124,6 +125,11 @@ fun AttemptsBar(vm: KilnVM, ps: ProjectState) {
     val working by androidx.compose.runtime.produceState(0, names) {
         while (true) { value = names.count { vm.state(it).loop.value?.running?.value == true }; kotlinx.coroutines.delay(1000) }
     }
+    // The attempt that's running now: its approvals and questions show here (no other screen shows its loop, and
+    // a prompt nobody sees stalled the whole round).
+    val active by androidx.compose.runtime.produceState<app.kiln.agent.AgentLoop?>(null, names) {
+        while (true) { value = names.firstNotNullOfOrNull { vm.state(it).loop.value?.takeIf { l -> l.running.value } }; kotlinx.coroutines.delay(1000) }
+    }
     Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().vCard(N.shapeLg, N.accent.copy(alpha = 0.5f))
         .clickable { open = true }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Rounded.CallSplit, null, tint = N.accent2)
@@ -131,6 +137,7 @@ fun AttemptsBar(vm: KilnVM, ps: ProjectState) {
         Text("${names.size} attempts" + if (working > 0) " · working" else " · ready to compare", style = T.subtitle, modifier = Modifier.weight(1f))
         Text("Compare", style = T.label.copy(color = N.accent2))
     }
+    active?.let { Prompts(it) }
     if (open) AttemptsSheet(vm, ps, names) { open = false }
 }
 

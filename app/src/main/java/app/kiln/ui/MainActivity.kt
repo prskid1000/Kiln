@@ -413,6 +413,11 @@ private fun ProjectScreen(vm: KilnVM, name: String, back: () -> Unit) {
                 }
             }
         }
+        // This project's chat is on screen: its prompts show here, so its notifications are skipped (others' aren't).
+        androidx.compose.runtime.DisposableEffect(name, tab) {
+            app.kiln.agent.Attention.onScreen = if (tab == 0) name else null
+            onDispose { if (app.kiln.agent.Attention.onScreen == name) app.kiln.agent.Attention.onScreen = null }
+        }
         val tabStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
         PillTabs(listOf(Icons.Rounded.ChatBubbleOutline to "Chat", Icons.Rounded.Folder to "Files", Icons.AutoMirrored.Rounded.ReceiptLong to "Logs"),
             tab, Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { tab = it }

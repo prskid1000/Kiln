@@ -82,7 +82,7 @@ fun KilnVM.savePlayKey(json: String?): Result<String?> = runCatching {
 
 /** Build a bundle with the given version and release it to Play's internal testing track. */
 suspend fun KilnVM.uploadToPlay(name: String, versionName: String, versionCode: Int, notes: String, onStep: (String) -> Unit): Result<String> {
-    val json = Graph.secrets.get(PLAY_KEY) ?: return Result.failure(IllegalStateException("Add a service-account key first"))
+    val json = withContext(Dispatchers.IO) { Graph.secrets.get(PLAY_KEY) } ?: return Result.failure(IllegalStateException("Add a service-account key first"))
     val aab = buildRelease(name, BuildEngine.Kind.RELEASE_AAB, versionName, versionCode, onStep).getOrElse { return Result.failure(it) }
     return withContext(Dispatchers.IO) {
         runCatching {
