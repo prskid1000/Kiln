@@ -119,6 +119,7 @@ class ToolsOnDeviceTest {
             Case("ask_user", """{"questions":[{"question":"Which colour?","header":"Colour","options":[{"label":"Accent","description":"a"},{"label":"Ok","description":"b"}]}]}""", expect = "Accent"),
             Case("sdk_lookup", """{"query":"class KStore"}""", expect = "app.kiln.kit.KStore"),
             Case("sdk_lookup", """{"query":"KStore","member":"*"}""", expect = "getState"),
+            Case("sdk_lookup", """{"query":"app.kiln.kit.KListRow"}""", expect = "part of the Kiln kit"),   // run 14
             Case("sdk_lookup", """{"query":"KStore","member":"KStore"}""", expect = "constructor"),
             Case("sdk_lookup", """{"query":"app.kiln.kit KStore","member":"update"}""", expect = "update"),
             Case("sdk_lookup", """{"query":"KilnActivity onCreate"}""", expect = "fun onCreate"),

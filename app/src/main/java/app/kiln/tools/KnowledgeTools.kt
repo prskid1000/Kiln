@@ -278,8 +278,14 @@ class SdkLookupTool(private val index: ClassIndex) : Tool {
         var q = q0; var hits = emptyList<String>()
         for (t in tries) { hits = index.search(t); if (hits.isNotEmpty()) { q = t; break } }
         val exact = hits.firstOrNull { it == q || it.endsWith(".$q") || it.substringAfterLast('.') == q || it.substringAfterLast('.').substringAfterLast('$') == q }
-        if (exact != null) ToolResult.ok(ctx.spill(index.describe(exact, member)), exact)
-        else if (hits.isEmpty()) ToolResult.error("nothing matches \"$q0\" — try a shorter fragment of the class name")
+        // Kit names aren't in the SDK index (run 14 asked sdk_lookup for KListRow, app.kiln.kit.KilnTheme, KStore…):
+        // answer from the kit's own signatures.
+        val kitName = q0.removePrefix("app.kiln.kit.").substringBefore('.')
+        val kitSig = if (exact == null) index.kitSignature(kitName) else null
+        if (kitSig != null) ToolResult.ok("$kitName is part of the Kiln kit (app.kiln.kit):\n$kitSig\n\nFor its docs and examples use kit_search \"$kitName\".", "kit $kitName")
+        else if (exact != null) ToolResult.ok(ctx.spill(index.describe(exact, member)), exact)
+        else if (hits.isEmpty()) ToolResult.error("nothing matches \"$q0\" in the Android SDK" +
+            (if (kitName.length > 1 && kitName[0] == 'K' && kitName[1].isUpperCase() || q0.startsWith("app.kiln")) " — Kiln kit names are looked up with kit_search." else " — try a shorter fragment of the class name"))
         else ToolResult.ok("classes matching \"$q\":\n" + hits.joinToString("\n"), plural(hits.size, "class", "classes"))
     }
 }
