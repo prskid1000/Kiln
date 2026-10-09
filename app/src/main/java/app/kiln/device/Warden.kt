@@ -23,7 +23,23 @@ import kotlinx.coroutines.withTimeoutOrNull
 class Warden(private val context: Context) {
     enum class Status { NOT_INSTALLED, NOT_RUNNING, NOT_GRANTED, READY }
 
+    /**
+     * The broker provider belongs to the real Warden: package app.warden, signed with Warden's key. Otherwise an app
+     * that took the authority (or the package name, with Warden not installed) would get every command, APK and
+     * typed text, and could answer anything.
+     */
+    private fun genuine(): Boolean = runCatching {
+        val pm = context.packageManager
+        if (pm.resolveContentProvider("app.warden.broker", 0)?.packageName != "app.warden") return false
+        val signers = pm.getPackageInfo("app.warden", android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+            .signingInfo?.apkContentsSigners ?: return false
+        signers.any { s ->
+            java.security.MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) } == WARDEN_CERT_SHA256
+        }
+    }.getOrDefault(false)
+
     private fun broker(): IWarden? = runCatching {
+        if (!genuine()) return null
         val reply = context.contentResolver.call(Uri.parse("content://app.warden.broker"), "getBinder", null, null)
         val b = reply?.getBinder("binder")?.takeIf { it.isBinderAlive } ?: return null
         IWarden.Stub.asInterface(b)
@@ -107,3 +123,6 @@ class Warden(private val context: Context) {
         } catch (e: Exception) { runCatching { p.destroy() }; closeAll(); lastError = "Warden: ${e.message ?: e}"; null }
     }
 }
+
+/** SHA-256 of Warden's signing certificate (debug and release builds share it). */
+private const val WARDEN_CERT_SHA256 = "b5b3cd575546a8bfa3829a00aaaeb559e37d20362c815978fbfba1b532f4985a"
