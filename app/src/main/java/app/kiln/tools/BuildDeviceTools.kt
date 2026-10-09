@@ -742,12 +742,12 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
             "wait" to "wait_ms", "sleep" to "wait_ms", "wait_for" to "expect", "assert" to "expect", "see" to "expect",
             "expect_text" to "expect", "assert_gone" to "expect_gone", "expect_not" to "expect_gone", "click" to "tap",
             "press_button" to "tap", "direction" to "swipe")
-        val actions = listOf("tap", "type", "swipe", "key", "expect", "expect_gone", "wait_ms")
+        val actions = listOf("tap", "type", "swipe", "key", "expect", "expect_gone", "wait_ms", "select")
         val typing = st.keys.any { (alias[it] ?: it) == "type" }
         // Field and options, wherever they were written.
         val opts = LinkedHashMap<String, JsonElement>()
         fun opt(src: JsonObject) {
-            listOf("into", "field", "id", "in", "on_field").firstNotNullOfOrNull { src.str(it) }?.let { opts["into"] = JsonPrimitive(it) }
+            listOf("into", "field", "id", "in", "on_field", "at", "to", "label").firstNotNullOfOrNull { src.str(it) }?.let { opts["into"] = JsonPrimitive(it) }
             if (typing) src.str("target")?.let { opts.putIfAbsent("into", JsonPrimitive(it)) }
             src.str("on")?.let { opts["on"] = JsonPrimitive(it) }
             src["replace"]?.let { opts["replace"] = it }
@@ -777,6 +777,12 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
                 else -> listOfNotNull((v as? JsonPrimitive)?.content?.takeIf { k0 != "back" || it != "true" } ?: if (k0 == "back") "BACK" else null)
             }
             for (value in values) {
+                // {"select": "Food", "from": "Category"} (run 12): open the field, then pick the option.
+                if (k == "select") {
+                    (st.str("from") ?: (v as? JsonObject)?.str("from"))?.let { out += JsonObject(mapOf("tap" to JsonPrimitive(it))) }
+                    out += JsonObject(mapOf("tap" to JsonPrimitive(value)))
+                    continue
+                }
                 val one = LinkedHashMap<String, JsonElement>(); one[k] = JsonPrimitive(value)
                 when (k) {
                     "type" -> listOf("into", "replace").forEach { o -> opts[o]?.let { one[o] = it } }

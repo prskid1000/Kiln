@@ -116,7 +116,18 @@ class Kiln(
         val agentDevice = if (settings.value.backgroundTesting) testDevice else device
         val qa = app.kiln.tools.QaCheckTool({ criteria, ctx, onStep ->
             runAgent(project, registry, available, Agents.QA, "Done criteria:\n$criteria\n\nTest the criteria on the device now.", ctx, onStep)
-        }, agentDevice)
+        }, agentDevice, prepare = { ctx ->
+            // QA always tests the latest code: build (cached when nothing changed) and install, so the agent can go
+            // straight from a fix to qa_check without a run_app in between.
+            ctx.progress("building and installing the latest code for QA")
+            val (r, fixed) = app.kiln.tools.buildFixingImports(builds, classIndex, ctx, checkOnly = false)
+            when {
+                !r.ok -> fixed + "The project doesn't build, so QA didn't run. Fix these first:\n" +
+                    r.errors.take(8).joinToString("\n") { "  ${it.file}:${it.line} ${it.message}" }
+                !agentDevice.install(File(r.apk!!)).out.contains("Success") -> "Couldn't install the app for QA — try run_app to see why."
+                else -> null
+            }
+        })
         val deferred = tools.filter { it.deferred }
         // qa_check only with the QA agent on; both helpers obey disabledTools like every other tool.
         tools = (tools + SubagentTool(this, project, registry, available, specs) + listOfNotNull(qa.takeIf { cfg.qaAgent }) +

@@ -234,10 +234,12 @@ class QaCheckTool(
     /** Runs the QA agent (Agents.QA) on the criteria; its steps go into the chat through the ToolContext. */
     private val run: suspend (criteria: String, ctx: ToolContext, onStep: (String) -> Unit) -> Triple<String, app.kiln.llm.Usage, Double>,
     private val device: Device,
+    /** Builds and installs the latest code before QA; returns why it couldn't (QA doesn't run then), or null. */
+    private val prepare: suspend (ToolContext) -> String? = { null },
 ) : Tool {
     override val name = "qa_check"
     override val description = "Independent QA: a separate agent exercises the running app against your done criteria (taps, " +
-        "types, reads the screen), records the session, and reports PASS/FAIL per criterion. Use it before calling work done."
+        "types, reads the screen), records the session, and reports PASS/FAIL per criterion. It builds and installs your latest code itself — after a fix, call it directly (no build or run_app first). Use it before calling work done."
     override val schema = schema { str("criteria", "Done criteria, one per line, each observable on the device.") }
     override val traits = setOf(Trait.NEEDS_BROKER, Trait.LONG_RUNNING)
     override val timeoutMs = 900_000L
@@ -247,6 +249,7 @@ class QaCheckTool(
         val memoryFile = File(ctx.project.dir, ".kiln/qa-last.json")
         val last = runCatching { app.kiln.core.KJ.decodeFromString(QaMemory.serializer(), memoryFile.readText()) }.getOrNull()
         val snapshot = sourceSnapshot(ctx.project)
+        prepare(ctx)?.let { return ToolResult.error(it) }
         val criteria = input.req("criteria") + qaFocus(last, snapshot, System.currentTimeMillis())
         ctx.progress(if (last == null) "QA agent testing the app" else "QA agent re-checking (focused on failures and changes)")
         val video = File(ctx.spillDir, "qa-${System.currentTimeMillis()}.mp4")

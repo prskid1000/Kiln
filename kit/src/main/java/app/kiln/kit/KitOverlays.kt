@@ -94,12 +94,17 @@ fun KDialog(open: Boolean, title: String, onDismiss: () -> Unit, confirmLabel: S
         dismissButton = { TextButton(onDismiss) { Text(dismissLabel, color = Nocturne.textLabel) } })
 }
 
-/** Bottom sheet (actions, filters, details). Shown while [open]. Also the "drawer" / "sheet". */
+/**
+ * Bottom sheet (forms, actions, filters, details). Shown while [open]. Also the "drawer" / "sheet".
+ * Opens to its full content height, so a form's Save button is on screen; [peek] opens it half way
+ * first (for a long list the user drags up).
+ */
 @Composable
-fun KBottomSheet(open: Boolean, onDismiss: () -> Unit, title: String? = null, fullHeight: Boolean = false,
+fun KBottomSheet(open: Boolean, onDismiss: () -> Unit, title: String? = null, peek: Boolean = false,
                  content: @Composable ColumnScope.() -> Unit) {
     if (!open) return
-    ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = fullHeight), containerColor = Nocturne.surface) {
+    // Half-open by default left forms' buttons below the screen edge (runs 9 and 12).
+    ModalBottomSheet(onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = !peek), containerColor = Nocturne.surface) {
         // imePadding: the keyboard pushes the sheet's content (and its Save button) up instead of covering it.
         Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)

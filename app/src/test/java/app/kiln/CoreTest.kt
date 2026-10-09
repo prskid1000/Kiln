@@ -45,6 +45,9 @@ class CoreTest {
         assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+        // Run 12: the field given as "at", and a dropdown choice.
+        assertEquals(listOf("""{"type":"500","into":"Amount"}"""), steps("""{"type_text":"500","at":"Amount"}"""))
+        assertEquals(listOf("""{"tap":"Category"}""", """{"tap":"Food"}"""), steps("""{"select":"Food","from":"Category"}"""))
         // Coordinates (run 10).
         assertEquals(listOf("""{"tap":"250,289"}"""), steps("""{"tap":{"x":250,"y":289}}"""))
         assertEquals(listOf("""{"swipe_by":"800,300,-300,0"}"""), steps("""{"swipe":{"x":800,"y":300,"dx":-300,"dy":0}}"""))

@@ -298,8 +298,8 @@ class AgentLoop(
                     qaGuards++
                     next(Activity.Kind.NOTICE, "The last QA check failed — asking the agent to fix it or say what still doesn't work.")
                     session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
-                        "<system-reminder>Your last qa_check did not pass:\n$qaFails\nFix these and run qa_check again (it re-tests only " +
-                        "what failed or changed). If one truly can't be fixed, tell the user plainly which criterion still fails and why. " +
+                        "<system-reminder>Your last qa_check did not pass:\n$qaFails\nFix these, then call qa_check again straight away — it builds and installs your code itself and re-tests only " +
+                        "what failed or changed. If one truly can't be fixed, tell the user plainly which criterion still fails and why. " +
                         "Don't call the work done while QA fails.</system-reminder>")))))
                     continue
                 }

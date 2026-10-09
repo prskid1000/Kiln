@@ -141,7 +141,7 @@ fun <T> KCrudList(
         // Closing the form also puts the keyboard away.
         fun close() { focus.clearFocus(); keyboard?.hide(); state.adding = false; state.editing = null }
         // Fully expanded: a half-open sheet left Save below the screen edge (run 9).
-        KBottomSheet(true, { close() }, title = if (editing == null) "New $itemName" else "Edit $itemName", fullHeight = true) {
+        KBottomSheet(true, { close() }, title = if (editing == null) "New $itemName" else "Edit $itemName") {
             form(draft) { draft = it; error = null }
             error?.let { KAlert(it, tone = KTone.Danger) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
