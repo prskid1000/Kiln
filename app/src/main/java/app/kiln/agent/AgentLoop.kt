@@ -94,10 +94,20 @@ class AgentLoop(
     val session: Session,
     private val providers: Providers,
     private val registry: ToolRegistry,
-    private val tools: List<Tool>,
+    tools: List<Tool>,
     private val settings: SettingsStore,
     private val role: String = "agent",
 ) {
+    /** The tools of this session: refreshed before each run by [environment] (Warden may connect after it opened). */
+    @Volatile private var tools: List<Tool> = tools
+
+    /**
+     * The instructions and tools as they are now, read before each run. A session is opened once; when Warden wasn't
+     * connected yet (Kiln just started), it was told for good that device tools were unavailable — and a run that
+     * couldn't install or test its app invented tool calls in its text instead.
+     */
+    var environment: (suspend () -> Pair<String, List<Tool>>)? = null
+
     private val ids = AtomicInteger()
     private val _feed = MutableStateFlow<List<Activity>>(emptyList())
     val feed: StateFlow<List<Activity>> = _feed
@@ -234,6 +244,18 @@ class AgentLoop(
             if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }
             // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
             closeDanglingToolUses()
+            // The device may have come (or gone) since the session opened: this run gets the instructions and tools of now.
+            var deviceNote: String? = null
+            if (role == "agent") environment?.let { env -> runCatching { env() }.getOrNull()?.let { (prompt, now) ->
+                val had = tools.any { it.name == "run_app" }; val has = now.any { it.name == "run_app" }
+                if (prompt != session.meta.systemPrompt) session.updateMeta { it.copy(systemPrompt = prompt) }
+                tools = now
+                deviceNote = when {
+                    has && !had -> "<system-reminder>The device tools are available now (Warden is connected): install and run the app with run_app, then test it with screenshot, tap and test_flow. Earlier in this chat they weren't.</system-reminder>"
+                    had && !has -> "<system-reminder>The device tools are unavailable now (Warden isn't connected): verify with build and careful review, and say you couldn't run the app.</system-reminder>"
+                    else -> null
+                }
+            } }
             // Snapshot the sources before this turn: rewind and change review are keyed to it. A helper's loop
             // doesn't: it changes nothing worth rewinding, and each snapshot copied the whole project.
             if (!headless) runCatching { Turns.snapshot(session, project, session.messages.size) }
@@ -258,6 +280,7 @@ class AgentLoop(
             val earlier = generateSequence { steering.poll() }.toList()
             val modelText = if (earlier.isEmpty()) userText else "[Sent while your last run was ending] " + earlier.joinToString("\n") + "\n\n" + userText
             val blocks = listOfNotNull(modelText.takeIf { it.isNotBlank() }?.let { obj("type" to "text", "text" to it) }) + extra + listOfNotNull(look) +
+                listOfNotNull(deviceNote?.let { obj("type" to "text", "text" to it) }) +
                 listOfNotNull(if (mode == Mode.PLAN) obj("type" to "text", "text" to PLAN_REMINDER) else null) +
                 listOfNotNull(this.goal?.let { obj("type" to "text", "text" to "<system-reminder>This is a goal run. The turn ends only " +
                     "when these done criteria are verified on the device:\n$it</system-reminder>") })

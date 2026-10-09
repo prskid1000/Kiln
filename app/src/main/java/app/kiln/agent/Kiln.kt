@@ -146,15 +146,28 @@ class Kiln(
             qaAgent = settings.value.merged(project.dir).qaAgent && warden.status() == Warden.Status.READY)
 
     suspend fun newSession(project: Project): AgentLoop {
+        awaitWarden()
         val s = Session.create(paths.sessions, project.name, systemPrompt(project))
         val (reg, tools) = tools(project)
-        return AgentLoop(project, s, providers, reg, tools, settings)
+        return AgentLoop(project, s, providers, reg, tools, settings).also { it.environment = { systemPrompt(project) to tools(project).second } }
     }
 
     suspend fun openSession(project: Project, id: String): AgentLoop? {
+        awaitWarden()
         val s = Session.open(File(paths.sessions, id)) ?: return null
         val (reg, tools) = tools(project)
-        return AgentLoop(project, s, providers, reg, tools, settings)
+        return AgentLoop(project, s, providers, reg, tools, settings).also { it.environment = { systemPrompt(project) to tools(project).second } }
+    }
+
+    /**
+     * Right after Kiln starts, Warden's binder can take a moment to arrive: a session opened then was told the device
+     * was unavailable. A few seconds' grace when Warden is installed; each run re-checks anyway ([AgentLoop.environment]).
+     */
+    private suspend fun awaitWarden() {
+        if (warden.status() == Warden.Status.NOT_INSTALLED) return
+        kotlinx.coroutines.withTimeoutOrNull(5_000) {
+            while (warden.status() != Warden.Status.READY) kotlinx.coroutines.delay(250)
+        }
     }
 
     /**
