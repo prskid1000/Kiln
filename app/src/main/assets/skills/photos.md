@@ -4,7 +4,7 @@
   `AsyncImage(model = uri, …)`. To keep it, copy the bytes into `filesDir` (picker URIs expire).
 - A quick camera shot: `rememberCameraShot { bitmap -> }` returns a small Bitmap, no FileProvider needed. No permission
   either — unless the app declares CAMERA, which must then be granted first. `shoot()` is false if the camera couldn't
-  open; say so.
+  open; say so. Call it in a lambda (`onClick = { noCamera = !shoot() }`), not `onClick = shoot`.
 
 ```kotlin
 import android.graphics.Bitmap

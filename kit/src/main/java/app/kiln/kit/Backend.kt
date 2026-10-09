@@ -41,8 +41,13 @@ internal val updateJson = kotlinx.serialization.json.Json(KJson) { explicitNulls
 /** A row for insert: placeholder server columns (id 0, created_at "") are left out so the server fills them. */
 private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row: T, with: kotlinx.serialization.json.Json = insertJson): String {
     val o = with.encodeToJsonElement(serializer, row) as? JsonObject ?: return with.encodeToString(serializer, row)
-    fun placeholder(k: String, v: kotlinx.serialization.json.JsonElement) = (v as? kotlinx.serialization.json.JsonPrimitive)?.content.let { c ->
-        (k == "id" && (c == "0" || c == "")) || (k in setOf("created_at", "updated_at") && c == "") }
+    // Server-filled columns left empty or null are never sent: an update's explicit nulls would otherwise wipe the
+    // row's id, owner or creation time (or fail on NOT NULL). Other fields' nulls go through, so clearing works.
+    val serverFilled = setOf("id", "created_at", "updated_at", "user_id")
+    fun placeholder(k: String, v: kotlinx.serialization.json.JsonElement) =
+        (k in serverFilled && v is kotlinx.serialization.json.JsonNull) ||
+        (v as? kotlinx.serialization.json.JsonPrimitive)?.content.let { c ->
+            (k == "id" && (c == "0" || c == "")) || (k in setOf("created_at", "updated_at") && c == "") }
     return JsonObject(o.filterNot { (k, v) -> placeholder(k, v) }).toString()
 }
 

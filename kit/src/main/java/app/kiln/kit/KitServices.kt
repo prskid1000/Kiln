@@ -300,7 +300,8 @@ fun rememberImagePicker(max: Int = 1, onPicked: (List<Uri>) -> Unit): () -> Unit
 /**
  * Take a quick photo with the camera app: `val shoot = rememberCameraShot { bitmap -> }; shoot()`. No permission is
  * needed — unless the app declares CAMERA, which must then be granted first. `shoot()` is false if the camera
- * couldn't open (no camera app, CAMERA not granted): tell the user.
+ * couldn't open (no camera app, CAMERA not granted): tell the user. Call it inside a lambda —
+ * `onClick = { noCamera = !shoot() }` — not as `onClick = shoot` (it returns a Boolean).
  */
 @Composable
 fun rememberCameraShot(onPhoto: (Bitmap) -> Unit): () -> Boolean {
