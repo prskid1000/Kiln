@@ -558,7 +558,9 @@ class AgentLoop(
             if (!force && !done && now - s.shown < 300) return
             s.shown = now
             if (s.path == null) PATH_ARG.find(s.args.take(600))?.let { m -> s.path = m.groupValues[1].replace("\\/", "/") }
+            // Some models send the content before the path: until it arrives, name the file by what it declares.
             val file = s.path?.substringAfterLast('/')
+                ?: DECLARES.find(s.args.take(4000))?.groupValues?.get(1)?.let { "a file ($it…)" }
             val verb = when (s.name) { "write_file" -> if (done) "Written:" else "Writing"; "edit_file", "multi_edit" -> if (done) "Edit ready:" else "Editing"; else -> null }
             val size = if (s.args.length >= 1024) "%.1f KB".format(s.args.length / 1024.0) else "${s.args.length} B"
             val text = if (done) (if (verb != null) "$verb ${file ?: "a file"} · $size — saved when this reply ends" else "${s.name} ready — runs when this reply ends")
@@ -869,6 +871,8 @@ private const val STEER_PREFIX = "[Message from the user while you were working]
 /** A reply that ends by announcing a next step ("Let me fix the dialogs…") instead of taking it. */
 /** The "path" of a tool call still being streamed (its JSON isn't complete yet). */
 private val PATH_ARG = Regex(""""path"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+/** The first thing a file being streamed declares (data class Expense, object Repo, fun HomeScreen). */
+private val DECLARES = Regex("""\b(?:class|object|interface|fun)\s+([A-Z]\w*)""")
 private val ANNOUNCES = Regex("""(?i)(\blet me\b(?!\s+know)|\bi'll\b|\bi will\b|\bnow i\b|\bnext,? i\b|\bi'm going to\b)[^\n]{0,160}[.…:]?\s*$""")
 
 /** A closing courtesy ("Let me know if…", "I'll be here if…") ends a reply; it isn't an announced next step. */
