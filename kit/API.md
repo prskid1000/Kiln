@@ -193,7 +193,7 @@ Coroutines: `rememberCoroutineScope()`, `LaunchedEffect`, `viewModelScope`.
 |---|---|
 | `KSupabase(context, url, anonKey)` | Supabase: `signUp/signIn(email, password)`, `signOut()`, `userId: StateFlow<String?>` |
 | `db.table("t").select<T>("select=*&order=id.desc")` | rows (PostgREST query); also `insert(row)`, `update("id=eq.1", json)`, `delete("id=eq.1")` |
-| `KBilling(context, consumable = setOf(...))` | Play in-app purchases: `load(ids)`, `product(id)` (price), `buy(activity, id)`, `owned: StateFlow<Set<String>>`, `refresh()` |
+| `rememberBilling(consumable = setOf(...))` | Play in-app purchases (disconnects when the screen goes away): `load(ids)`, `product(id)` (price), `buy(activity, id)`, `owned: StateFlow<Set<String>>`, `refresh()` |
 
 - Keys come from the app's Secrets (`AppSecrets.SUPABASE_ANON_KEY`), never from source. Only Supabase's anon
   key belongs in an app; protect tables with Row Level Security.

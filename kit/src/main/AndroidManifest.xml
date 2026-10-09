@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- KHaptics. A normal permission: granted at install, never asked. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Android 11+ hides the speech services from apps that don't declare them (rememberSpeaker, KSpeechToText). -->
+    <queries>
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+        <intent><action android:name="android.speech.RecognitionService" /></intent>
+    </queries>
     <application>
         <!-- Gives KApp.context from process start, so stores need no Context. -->
         <provider

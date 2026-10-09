@@ -24,7 +24,7 @@ import app.kiln.kit.KBilling
 @Composable
 fun ProUpgrade(productId: String = "pro_upgrade") {
     val context = LocalContext.current
-    val billing = remember { KBilling(context) }
+    val billing = rememberBilling()          // ends the Play connection when the screen goes away
     val owned by billing.owned.collectAsState()
     var price by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {

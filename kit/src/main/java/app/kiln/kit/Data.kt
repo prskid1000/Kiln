@@ -19,6 +19,8 @@ import java.io.File
 /** The JSON settings every Kiln app uses (lenient reads, defaults kept). */
 val KJson: Json = Json {
     ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = false; isLenient = true
+    // A null where the type has a default (a nullable server column) takes the default instead of failing the read.
+    coerceInputValues = true
     // An average over zero items is NaN: saving it must not crash the app.
     allowSpecialFloatingPointValues = true
     // Dates on their own (KStore("last", LocalDate.now()), KCollection<KDate>) — the typealias annotation only

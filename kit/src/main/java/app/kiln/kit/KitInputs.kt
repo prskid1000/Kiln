@@ -403,9 +403,10 @@ fun KStepper(value: Int, onValueChange: (Int) -> Unit, modifier: Modifier = Modi
              label: String? = null, size: KSize = KSize.Medium) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (label != null) Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        KIconButton(Icons.Filled.Remove, "Decrease", variant = KVariant.Tonal, size = size, enabled = value - step >= min) { onValueChange((value - step).coerceAtLeast(min)) }
+        // Named by the field, so several steppers on one screen can be told apart (TalkBack, UI tests).
+        KIconButton(Icons.Filled.Remove, label?.let { "Decrease $it" } ?: "Decrease", variant = KVariant.Tonal, size = size, enabled = value - step >= min) { onValueChange((value - step).coerceAtLeast(min)) }
         Text("$value", fontSize = (size.text + 3).sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.width(size.height))
-        KIconButton(Icons.Filled.Add, "Increase", variant = KVariant.Tonal, size = size, enabled = value + step <= max) { onValueChange((value + step).coerceAtMost(max)) }
+        KIconButton(Icons.Filled.Add, label?.let { "Increase $it" } ?: "Increase", variant = KVariant.Tonal, size = size, enabled = value + step <= max) { onValueChange((value + step).coerceAtMost(max)) }
     }
 }
 
@@ -421,7 +422,10 @@ fun KSelect(options: List<String>, selected: Int?, onSelect: (Int) -> Unit, modi
         Column {
             if (label != null) Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
             Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), colors?.container ?: Nocturne.surface, colors?.border ?: if (open) Nocturne.accent else Nocturne.neutral700)
-                .clickable(enabled = enabled) { open = true }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                .clickable(enabled = enabled) { open = true }
+                // The tappable box carries the field's name: tapping "Category" by label must open it.
+                .semantics { label?.let { contentDescription = "$it: " + (selected?.let { i -> options.getOrNull(i) } ?: placeholder) } }
+                .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(selected?.let { options.getOrNull(it) } ?: placeholder, color = if (selected == null) Nocturne.textMuted else Nocturne.text,
                     fontSize = kt(15), modifier = Modifier.weight(1f), maxLines = 1)
                 Icon(Icons.Filled.KeyboardArrowDown, null, tint = Nocturne.textMuted)
@@ -518,6 +522,7 @@ fun KSlider(value: Float, onValueChange: (Float) -> Unit, modifier: Modifier = M
             Text(format(value), style = MaterialTheme.typography.bodyMedium, color = Nocturne.accent2)
         }
         Slider(value, onValueChange, valueRange = range, steps = steps,
+            modifier = Modifier.semantics { label?.let { contentDescription = it } },
             colors = SliderDefaults.colors(thumbColor = Nocturne.accent, activeTrackColor = Nocturne.accent, inactiveTrackColor = Nocturne.surfaceHi))
     }
 }
@@ -541,10 +546,12 @@ fun KRangeSlider(value: ClosedFloatingPointRange<Float>, onValueChange: (ClosedF
 @Composable
 fun KRating(value: Int, onValueChange: ((Int) -> Unit)? = null, modifier: Modifier = Modifier, max: Int = 5, starSize: Dp = ks(28),
             tone: KTone = KTone.Warn) {
-    Row(modifier) {
-        for (i in 1..max) Icon(if (i <= value) Icons.Filled.Star else Icons.Filled.StarBorder, "$i of $max",
+    // Display-only: one node that says the value. Interactive: each star says whether it's on.
+    Row(if (onValueChange == null) modifier.semantics(mergeDescendants = true) { contentDescription = "$value of $max stars" } else modifier) {
+        for (i in 1..max) Icon(if (i <= value) Icons.Filled.Star else Icons.Filled.StarBorder, if (onValueChange == null) null else "$i of $max",
             tint = if (i <= value) tone.color() else Nocturne.neutral600,
-            modifier = Modifier.size(starSize).then(if (onValueChange != null) Modifier.clickable { onValueChange(if (i == value) 0 else i) } else Modifier))
+            modifier = Modifier.size(starSize).then(if (onValueChange != null)
+                Modifier.semantics { selected = i <= value }.clickable { onValueChange(if (i == value) 0 else i) } else Modifier))
     }
 }
 
@@ -583,7 +590,10 @@ private fun KPickerBox(label: String, text: String, empty: Boolean, modifier: Mo
     Column(modifier.then(if (width == null) Modifier.fillMaxWidth() else Modifier.width(width)).alpha(if (enabled) 1f else 0.5f)) {
         Text(label, color = Nocturne.textLabel, fontSize = kt(12), modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
         Row(Modifier.fillMaxWidth().height(ks(52)).kSurface(RoundedCornerShape(kr(12)), Nocturne.surface, if (error != null) Nocturne.danger else Nocturne.neutral700)
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp),
+            .clickable(enabled = enabled, onClick = onClick)
+            // The tappable box carries the field's name ("Due date: Pick a date"), not just its value.
+            .semantics { contentDescription = "$label: $text" }
+            .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = if (empty) Nocturne.textMuted else Nocturne.text, fontSize = kt(15), modifier = Modifier.weight(1f))
             Icon(Icons.Filled.KeyboardArrowDown, null, tint = Nocturne.textMuted)

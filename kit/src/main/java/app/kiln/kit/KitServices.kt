@@ -354,6 +354,8 @@ object KHttp {
                 client.newCall(req).execute().use { r ->
                     val text = r.body.string()
                     if (r.code >= 500 && attempt < retries) throw IOException("HTTP ${r.code}")
+                    // A retried DELETE that finds nothing: the first attempt did it (its reply was lost).
+                    if (method == "DELETE" && attempt > 0 && r.code == 404) return@withContext text
                     if (!r.isSuccessful) throw KHttpException(r.code, text.take(300))
                     return@withContext text
                 }
@@ -474,9 +476,17 @@ object KDevice {
 fun rememberSpeaker(locale: Locale = Locale.getDefault()): (String) -> Unit {
     val context = LocalContext.current
     var ready by remember { mutableStateOf(false) }
-    val tts = remember { TextToSpeech(context.applicationContext) { ready = it == TextToSpeech.SUCCESS } }
+    // Text asked for while the engine starts (a screen that speaks on open) is spoken once it's ready, not dropped.
+    val pending = remember { java.util.concurrent.atomic.AtomicReference<String?>(null) }
+    lateinit var engine: TextToSpeech
+    val tts = remember {
+        TextToSpeech(context.applicationContext) { status ->
+            ready = status == TextToSpeech.SUCCESS
+            if (ready) pending.getAndSet(null)?.let { engine.language = locale; engine.speak(it, TextToSpeech.QUEUE_FLUSH, null, it.hashCode().toString()) }
+        }.also { engine = it }
+    }
     DisposableEffect(tts) { onDispose { tts.shutdown() } }
-    return { text -> if (ready) { tts.language = locale; tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, text.hashCode().toString()) } }
+    return { text -> if (ready) { tts.language = locale; tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, text.hashCode().toString()) } else pending.set(text) }
 }
 
 /** Speech to text through the system recogniser: `val listen = rememberDictation { text -> }; listen()`. */

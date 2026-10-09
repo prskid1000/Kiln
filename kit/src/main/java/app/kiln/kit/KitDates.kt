@@ -54,5 +54,7 @@ object KTimeSerializer : KSerializer<LocalTime> {
 object KDateTimeSerializer : KSerializer<LocalDateTime> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("app.kiln.kit.KDateTime", PrimitiveKind.STRING)
     override fun serialize(encoder: Encoder, value: LocalDateTime) = encoder.encodeString(value.toString())
-    override fun deserialize(decoder: Decoder): LocalDateTime = LocalDateTime.parse(decoder.decodeString())
+    // Server timestamps carry an offset ("…+00:00", "…Z", Supabase's timestamptz): read them in local time.
+    override fun deserialize(decoder: Decoder): LocalDateTime = decoder.decodeString().let { s ->
+        runCatching { LocalDateTime.parse(s) }.getOrElse { java.time.OffsetDateTime.parse(s).atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDateTime() } }
 }
