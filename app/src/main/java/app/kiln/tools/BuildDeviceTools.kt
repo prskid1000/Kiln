@@ -637,11 +637,16 @@ internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.
         val focusedNow = after.firstOrNull { it.focused == true && "EditText" in it.cls }
         // Only for a tap on a text field: a field keeps focus when a button is tapped, and reporting it then read as
         // "the tap hit the field" (run 15 decided its Save button didn't take taps).
-        if (hit != null && focusedNow != null) return "The text field “${focusedNow.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
+        // And only when the focused field is the one tapped: another field keeping focus means the tap didn't reach it.
+        val tappedFocused = if (hit == null) null else focusedNow?.takeIf { f ->
+            (x!! in f.left..f.right && y!! in f.top..f.bottom) || (f.label().isNotBlank() && f.label() == hit.label())
+        }
+        if (tappedFocused != null) return "The text field “${tappedFocused.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
         if (hit != null) return if (!focusKnown) "The text field “${hit.label().take(40).ifBlank { "field" }}” has focus: type_text next (replace: true to overwrite)."
             // Run 11: the tap landed on a search bar drawn under the top bar; the bar took it.
             else "Tapped where the text field “${hit.label().take(40).ifBlank { "field" }}” is, but it didn't take focus — something is drawn over it " +
-                "(often the top bar: is KilnScreen's padding applied to the content?). Take a screenshot to see."
+                "(often the top bar: is KilnScreen's padding applied to the content?)" +
+                (focusedNow?.let { " The focused field is still “${it.label().take(40)}”." } ?: "") + " Take a screenshot to see."
         val moved = before.map { it.label() to it.top } != after.map { it.label() to it.top }
         return if (moved) "The screen scrolled or moved; same items." else "No change on screen."
     }

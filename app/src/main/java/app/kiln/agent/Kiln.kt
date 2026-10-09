@@ -121,6 +121,8 @@ class Kiln(
             // straight from a fix to qa_check without a run_app in between.
             ctx.progress("building and installing the latest code for QA")
             val (r, fixed) = app.kiln.tools.buildFixingImports(builds, classIndex, ctx, checkOnly = false)
+            // QA's build is the latest one: the stop guard and `install` must see it, not an older failure or APK.
+            ctx.state.lastBuild = r
             when {
                 !r.ok -> fixed + "The project doesn't build, so QA didn't run. Fix these first:\n" +
                     r.errors.take(8).joinToString("\n") { "  ${it.file}:${it.line} ${it.message}" }

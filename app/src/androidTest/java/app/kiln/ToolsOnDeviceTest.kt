@@ -188,6 +188,10 @@ class ToolsOnDeviceTest {
             Case("write_file", """{"path":"res/drawable/ic_none.xml","content":"<vector xmlns:android=\"http://schemas.android.com/apk/res/android\" android:width=\"24dp\" android:height=\"24dp\" android:viewportWidth=\"24\" android:viewportHeight=\"24\"><path android:fillColor=\"none\" android:strokeColor=\"#FFFFFF\" android:strokeWidth=\"2\" android:pathData=\"M4,12h16\"/></vector>"}"""),
             Case("check", "{}", expect = "#00000000"),
             Case("delete", """{"path":"res/drawable/ic_none.xml"}"""),
+            // Review: a kit parameter by its old name gets the new one.
+            Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.runtime.Composable\nimport app.kiln.kit.KTextField\n\n@Composable\nfun Old() { KTextField(\"\", onChange = { }) }\n"}"""),
+            Case("check", "{}", expectError = true, expect = "onValueChange"),
+            Case("load_skill", """{"names":"timers, persistence"}""", expect = "LaunchedEffect"),
             // Run 15: an icon name from another icon set.
             Case("write_file", """{"path":"$src/Bad.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.Bell\n\nval bell = Icons.Filled.Bell\n"}"""),
             Case("check", "{}", expectError = true, expect = "use Icons.Filled.Notifications"),

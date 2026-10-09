@@ -81,6 +81,9 @@ class CoreTest {
         assertEquals(0, errors("fun E() { KilnScreen(title = \"T\", actions = { Icon() }) { pad -> Column(Modifier.screenPadding(pad)) { Text(\"x\") } } }").size)
         assertEquals(0, errors("fun E() { KilnScreen(\"T\") { LazyColumn(contentPadding = it) { } } }").size)
         assertEquals(0, errors("fun E() { KilnScreen(\"T\", content = { p -> Box(Modifier.padding(p)) }) }").size)
+        // A typed parameter is a parameter too (review: it was flagged).
+        assertEquals(0, errors("fun E() { KilnScreen(\"Home\") { pad: PaddingValues -> Column(Modifier.padding(pad)) { } } }").size)
+        assertEquals(1, errors("fun E() { KilnScreen(\"Home\") { pad: PaddingValues -> Text(\"x\") } }").size)
     }
 
     @Test fun `a list key made from hashCode is flagged`() {
@@ -120,6 +123,9 @@ class CoreTest {
         assertTrue(app.kiln.agent.isNetworkFailure(RuntimeException("model call", java.net.ConnectException("Connection refused"))))
         assertTrue(app.kiln.agent.isNetworkFailure(IllegalStateException("stream was reset: CANCEL")))
         assertFalse(app.kiln.agent.isNetworkFailure(IllegalArgumentException("bad tool schema")))
+        // Permanent network errors go to the fallback model at once.
+        assertFalse(app.kiln.agent.isNetworkFailure(java.net.UnknownHostException("api.exmaple.com")))
+        assertFalse(app.kiln.agent.isNetworkFailure(RuntimeException("call", javax.net.ssl.SSLHandshakeException("bad cert"))))
     }
 
     @Test fun `single taps become the test_flow call the reminder shows`() {
@@ -181,6 +187,10 @@ class CoreTest {
         // Run 13's criteria, numbered on one line.
         val criteria = app.kiln.tools.criteriaLines("1. Home tab shows monthly total and donut chart 2. Expenses tab: search and swipe to delete 3. Settings: monthly budget and reminder 4. Data survives restarts")
         assertEquals(4, criteria.size)
+        // A number ending a sentence isn't a list marker (review).
+        assertEquals(listOf("Adding an expense of 250. It appears at the top of the list"),
+            app.kiln.tools.criteriaLines("Adding an expense of 250. It appears at the top of the list"))
+        assertEquals(2, app.kiln.tools.criteriaLines("1. Add 250. It shows 2. Delete works").size)
         val last = app.kiln.tools.QaMemory(listOf(
             "FAIL — Home tab shows monthly total and donut chart — crashed on launch",
             "PASS — Expenses tab: search and swipe to delete — worked",
@@ -189,6 +199,10 @@ class CoreTest {
         // Home failed → tested; restarts is new → tested; Expenses and Settings passed → carried.
         assertEquals(listOf("Home tab shows monthly total and donut chart", "Data survives restarts"), plan.test)
         assertEquals(listOf("Expenses tab: search and swipe to delete", "Settings: monthly budget and reminder"), plan.carried.map { it.first })
+        // A pass that was itself carried over last time is tested again (review: carried forever otherwise).
+        val again = app.kiln.tools.qaPlan(criteria, last.copy(results = last.results.map {
+            if (it.startsWith("PASS — Expenses")) "PASS — Expenses tab: search and swipe to delete — carried over from the last QA run" else it }))
+        assertTrue(again.test.toString(), "Expenses tab: search and swipe to delete" in again.test)
         // No earlier run, or nothing failed: everything is tested.
         assertEquals(criteria, app.kiln.tools.qaPlan(criteria, null).test)
         assertEquals(criteria, app.kiln.tools.qaPlan(criteria, last.copy(results = last.results.map { it.replace("FAIL", "PASS") })).test)

@@ -40,14 +40,18 @@ class LoadSkillTool(private val skills: Skills) : Tool {
     override val description = "Load kit recipes (tested code + rules) before building the features they cover — load every skill you'll " +
         "need in ONE call, e.g. names: [\"architecture\", \"persistence\", \"charts\"]. The list is in your instructions under Skills."
     override val schema = schema {
-        raw("names", app.kiln.core.obj("type" to "array", "items" to app.kiln.core.obj("type" to "string"),
+        // Array or string: models also send "architecture, persistence" (review).
+        raw("names", app.kiln.core.obj("type" to app.kiln.core.arrOf(listOf("array", "string")), "items" to app.kiln.core.obj("type" to "string"),
             "description" to "Skill names, e.g. [\"architecture\", \"notifications\"]."), required = false)
         str("name", "One skill name (prefer names for several).", required = false)
     }
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         // Runs spent ~7 steps loading skills one by one; a list loads them in one.
-        val names = (input.a("names")?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: listOfNotNull(input.str("name")))
+        // names as an array, or as a string ("architecture, persistence" / "[\"a\",\"b\"]"), or a single name.
+        val names = (input.a("names")?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+            ?: input.str("names")?.split(Regex("""[,\s\[\]"']+"""))
+            ?: input.str("name")?.split(Regex("""[,\s\[\]"']+""")) ?: emptyList())
             .map { it.trim().lowercase().removeSuffix(".md") }.filter { it.isNotEmpty() }.distinct()
         if (names.isEmpty()) return ToolResult.error("give names: [\"architecture\", …]; available: ${skills.names().joinToString()}")
         val found = names.mapNotNull { n -> skills.read(n)?.let { n to it } }
@@ -315,9 +319,20 @@ internal fun sourceSnapshot(project: app.kiln.build.Project): Map<String, Int> =
         .associate { project.rel(it) to it.readBytes().contentHashCode() }
 
 /** The criteria in a qa_check input, one per item: lines, or "1. … 2. …" run together on one line. */
-internal fun criteriaLines(text: String): List<String> =
-    text.replace(Regex("""\s+(?=\d+[.)]\s)"""), "\n").lines()
-        .map { it.trim().replace(Regex("""^(?:[-*•]\s+|\d+[.)]\s*)+"""), "").trim() }.filter { it.length > 3 }
+internal fun criteriaLines(text: String): List<String> {
+    // "1. … 2. … 3. …" on one line: split only at the list's own numbers, in order — "an expense of 250. It shows"
+    // must stay one criterion.
+    var t = text
+    if (Regex("""^\s*1[.)]\s""").containsMatchIn(t)) {
+        var n = 2
+        while (true) {
+            val m = Regex("""\s+$n[.)]\s""").find(t) ?: break
+            t = t.replaceRange(m.range, "\n$n. ")
+            n++
+        }
+    }
+    return t.lines().map { it.trim().replace(Regex("""^(?:[-*•]\s+|\d+[.)]\s*)+"""), "").trim() }.filter { it.length > 3 }
+}
 
 /** What a QA run tests fully, and which criteria it carries over as passes from [QaMemory] (with the old line). */
 internal data class QaPlan(val test: List<String>, val carried: List<Pair<String, String>>)
@@ -335,7 +350,8 @@ internal fun qaPlan(criteria: List<String>, last: QaMemory?): QaPlan {
         val w = words(c)
         val best = last.results.maxByOrNull { (words(it) intersect w).size }
         val overlap = best?.let { if (w.isEmpty()) 0.0 else (words(it) intersect w).size.toDouble() / w.size } ?: 0.0
-        if (best != null && overlap >= 0.6 && verdict(best) == "PASS") carried += c to best else test += c
+        // A pass is carried at most once in a row: one carried last time is tested now, so a fix that broke it is caught.
+        if (best != null && overlap >= 0.6 && verdict(best) == "PASS" && "carried over" !in best) carried += c to best else test += c
     }
     return if (test.isEmpty()) QaPlan(criteria, emptyList()) else QaPlan(test, carried)
 }

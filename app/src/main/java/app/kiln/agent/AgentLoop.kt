@@ -202,6 +202,8 @@ class AgentLoop(
         if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }
         startedAt = System.currentTimeMillis()
         stopGuards = 0; unfinishedGuards = 0; goalChecks = 0; qaGuards = 0
+        // A failed QA from an earlier request doesn't bind this one (the user may have moved on).
+        lastQaFailures = null
         this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
         // A process killed mid-tool leaves tool_use without tool_result, which every provider rejects.
         closeDanglingToolUses()
@@ -294,7 +296,7 @@ class AgentLoop(
                 val announces = ANNOUNCES.containsMatchIn(said.takeLast(300))
                 // Failed QA guard: run 11 ended with its only qa_check failing (search), unfixed and unmentioned.
                 val qaFails = lastQaFailures
-                if (mode == Mode.BUILD && qaFails != null && qaGuards < 2 && !said.trimEnd().endsWith("?")) {
+                if (mode == Mode.BUILD && qaFails != null && qaGuards < 2 && tools.any { it.name == "qa_check" } && !said.trimEnd().endsWith("?")) {
                     qaGuards++
                     next(Activity.Kind.NOTICE, "The last QA check failed — asking the agent to fix it or say what still doesn't work.")
                     session.append(Msg("user", arrOf(listOf(obj("type" to "text", "text" to
@@ -449,16 +451,22 @@ class AgentLoop(
             // Provider errors and dropped connections each have their own retry budget.
             var attempt = 0; var netTries = 0
             attempts@ while (true) {
+                // What a failed attempt already streamed (half a reply, a running thought) is dropped before the
+                // retry, which streams the whole reply again.
+                val mark = _feed.value.size
+                fun dropPartial() { if (_feed.value.size > mark) _feed.value = _feed.value.take(mark) }
                 try {
                     return stream(adapter, profile, model, cfg)
                 } catch (e: CancellationException) { throw e
                 } catch (e: ProviderException) {
+                    dropPartial()
                     lastError = e
                     if (!e.retryable || attempt >= cfg.maxRetries) break@attempts
                     val wait = 2_000L * (1 shl attempt++)
                     next(Activity.Kind.NOTICE, "${profile.label}: ${e.message?.take(120)} — retrying in ${wait / 1000}s")
                     delay(wait)
                 } catch (e: Throwable) {
+                    dropPartial()
                     lastError = e
                     // A dropped connection (run 12: the USB link to a local model went down mid-stream) is usually
                     // brief: keep retrying for about a minute and a half before stopping for the user.
@@ -721,10 +729,15 @@ internal fun withNote(results: List<JsonObject>, note: String): List<JsonObject>
 private val NET_RETRIES = listOf(2_000L, 5_000L, 10_000L, 20_000L, 30_000L, 30_000L)
 
 /** A failure of the connection itself (refused, reset, timed out, stream cut), anywhere in the cause chain. */
-internal fun isNetworkFailure(e: Throwable): Boolean =
-    generateSequence(e) { it.cause }.take(6).any { c ->
+internal fun isNetworkFailure(e: Throwable): Boolean {
+    val chain = generateSequence(e) { it.cause }.take(6).toList()
+    // Permanent: a wrong host name, a TLS problem, a malformed URL — retrying won't help, the fallback model might.
+    if (chain.any { it is java.net.UnknownHostException || it is javax.net.ssl.SSLException || it is java.net.MalformedURLException })
+        return false
+    return chain.any { c ->
         c is java.io.IOException || Regex("(?i)stream (failed|was reset|closed)|connection (refused|reset|closed)|timeout|unexpected end").containsMatchIn(c.message.orEmpty())
     }
+}
 
 /** Marks a message the user sent while the agent was working (delivered at its next step). */
 private const val STEER_PREFIX = "[Message from the user while you were working] "

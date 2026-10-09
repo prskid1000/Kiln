@@ -556,6 +556,17 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                 MATERIAL_ICON_NAMES[n.lowercase()]?.let { out += "There's no icon $n in Material Icons — use Icons.Filled.$it." }
             }
         }
+        // The kit moved to Material's parameter names: projects written before say the old ones.
+        Regex("no parameter with name '(onChange|onDismiss|fullHeight)'").find(m)?.groupValues?.get(1)?.let { old ->
+            val call = Regex("""\b(K\w+)\s*\(""").findAll(src).map { it.groupValues[1] }.lastOrNull().orEmpty()
+            out += when {
+                old == "fullHeight" -> "KBottomSheet opens fully by default now: drop fullHeight (use peek = true for a half-open start)."
+                old == "onDismiss" && call in setOf("KDialog", "KConfirm", "KBottomSheet") -> "$call's callback is onDismissRequest (Material's name)."
+                old == "onChange" && call in setOf("KCheckbox", "KSwitch", "KSwitchRow") -> "$call's callback is onCheckedChange (Material's name)."
+                old == "onChange" -> "${call.ifEmpty { "This field" }}'s callback is onValueChange (Material's name; text, slider, stepper, rating, date and time fields)."
+                else -> return@let
+            }
+        }
         // Run 16: KeyboardOptions passed to the kit's `keyboard` (a KeyboardType).
         if ("actual type is 'KeyboardOptions', but 'KeyboardType" in m)
             out += "`keyboard` takes a KeyboardType (`keyboard = KeyboardType.Decimal`); for full options use `keyboardOptions = KeyboardOptions(…)`."
