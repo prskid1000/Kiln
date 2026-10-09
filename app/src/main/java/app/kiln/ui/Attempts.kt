@@ -115,7 +115,14 @@ fun KilnVM.discardAttempts(name: String) = KilnVM.runScope.launch {
     for (t in Attempts.list(Graph.paths.projects, name)) {
         // Wait for its run to stop: it would keep writing into the folder being deleted. Its state goes too
         // (the next round reuses the names, and showed this round's screenshot as "Done").
-        KilnVM.forgetState(t.name)?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
+        // Marked as going until its run has really ended, so that run can't post "is ready" for a deleted copy.
+        KilnVM.deleting += t.name
+        val job = KilnVM.forgetState(t.name)?.job
+        if (job == null) KilnVM.deleting -= t.name else {
+            job.invokeOnCompletion { KilnVM.deleting -= t.name }
+            job.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { job.join() }
+        }
+        app.kiln.agent.Attention.clear(Graph.app, t.name)
         // Its chats too: the next round reuses the name and would reopen this round's session.
         Session.list(Graph.paths.sessions, t.name).forEach { java.io.File(Graph.paths.sessions, it.id).deleteRecursively() }
         runCatching { Graph.device.uninstall(t.meta().`package`) }

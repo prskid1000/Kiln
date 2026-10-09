@@ -216,6 +216,7 @@ class AgentLoop(
         lastQaFailures = null
         todosAtStart = state.todos
         this.mode = mode; this.goal = goal?.takeIf { it.isNotBlank() }
+        if (mode == Mode.BUILD) plan.value = null   // a build started: the plan card has done its job
         // Disk writes go inside the try: an error here left `running` true for good (the chat could never send again).
         try {
             if (session.meta.stopNotice.isNotEmpty()) session.updateMeta { it.copy(stopNotice = "", stopIsError = false) }

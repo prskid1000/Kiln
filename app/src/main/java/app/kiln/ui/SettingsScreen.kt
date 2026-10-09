@@ -400,6 +400,7 @@ private fun EvalsCard() {
         KButton(if (state.running) "Running ${state.done}/${state.total}…" else "Run evals", Tone.Accent, enabled = !state.running) {
             // In the runs' scope (leaving Settings cancelled it), with the run service held so it isn't killed in the background.
             val app = ctx.applicationContext
+            if (Graph.toolchain.state.value !is app.kiln.toolchain.Toolchain.State.Ready) { KilnVM.messages.value = "The build tools are still setting up — try again in a moment"; return@KButton }
             KilnVM.runScope.launch { if (KilnVM.holdService(app)) try { Evals.run() } finally { KilnVM.releaseService(app) } }
         }
         if (state.report.isNotBlank()) Text(state.report, style = T.mono)

@@ -245,7 +245,7 @@ private fun Editor(vm: KilnVM, ps: ProjectState, b: EditorBuffer, close: () -> U
             when (o) {
                 is Open.Source -> runCatching { readAt = o.file.lastModified(); if (o.file.length() > MAX_EDIT) ByteArray(0).also { tooBig = true } else o.file.readBytes() }.getOrNull()
                 is Open.Data -> if (o.size > MAX_EDIT) ByteArray(0).also { tooBig = true }
-                    else Graph.device.readData(ps.pkg, o.path)?.also { if (it.size > MAX_EDIT) tooBig = true }
+                    else Graph.device.readData(ps.pkg, o.path, MAX_EDIT + 1)?.also { if (it.size > MAX_EDIT) tooBig = true }
             }
         }
         // A read that failed isn't an empty file: shown as unreadable, so saving can't replace the real file.

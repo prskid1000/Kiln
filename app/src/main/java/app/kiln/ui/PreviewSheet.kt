@@ -63,10 +63,12 @@ fun PreviewSheet(vm: KilnVM, ps: ProjectState, onDismiss: () -> Unit, onAsk: (St
         // The sheet covers the chat's approval and question cards: their notifications must post meanwhile.
         // Put back only what we took (opened from Files or Logs, the chat wasn't on screen to begin with).
         KilnVM.previewsOpen.incrementAndGet()
-        val hid = app.kiln.agent.Attention.onScreen == name
+        // An attempt's prompts show in its parent's chat: that's the name on screen.
+        val shownAs = app.kiln.agent.Attempts.ownerOf(ps.project) ?: name
+        val hid = app.kiln.agent.Attention.onScreen == shownAs
         if (hid) app.kiln.agent.Attention.onScreen = null
         onDispose {
-            if (hid && app.kiln.agent.Attention.onScreen == null) app.kiln.agent.Attention.onScreen = name
+            if (hid && app.kiln.agent.Attention.onScreen == null) app.kiln.agent.Attention.onScreen = shownAs
             KilnVM.previewsOpen.decrementAndGet()
             if (KilnVM.idle() && KilnVM.previewsOpen.get() == 0) KilnVM.runScope.launch { runCatching { app.kiln.Graph.testDevice.restoreCrashDialogs() } }
         }

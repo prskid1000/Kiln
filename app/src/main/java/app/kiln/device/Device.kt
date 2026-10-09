@@ -141,9 +141,12 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
         }.sortedBy { it.path })
     }
 
-    suspend fun readData(pkg: String, path: String): ByteArray? {
+    /** The file's bytes, or at most [limit] of them (a file that grew since it was listed must not run Kiln out of memory). */
+    suspend fun readData(pkg: String, path: String, limit: Long = Long.MAX_VALUE): ByteArray? {
         guard(pkg)
-        val (code, bytes) = warden.execBytes(listOf("run-as", pkg, "cat", dataPath(path)))
+        val cmd = if (limit == Long.MAX_VALUE) listOf("run-as", pkg, "cat", dataPath(path))
+            else listOf("run-as", pkg, "head", "-c", limit.toString(), dataPath(path))
+        val (code, bytes) = warden.execBytes(cmd)
         return if (code == 0) bytes else null
     }
 

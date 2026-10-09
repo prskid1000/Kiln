@@ -706,7 +706,8 @@ private fun PlanReady(loop: AgentLoop, onBuild: (String) -> Unit) {
             Text("Plan ready", style = T.subtitle)
             Text("Build it and keep going until each done criterion is verified, or reply to change it.", style = T.label)
         }
-        KButton("Build this plan", Tone.Accent) { loop.plan.value = null; onBuild(criteria) }
+        // The plan card goes when the build actually starts (a refused send kept the text but lost the card).
+        KButton("Build this plan", Tone.Accent) { onBuild(criteria) }
     }
 }
 

@@ -102,7 +102,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         /** Preview sheets open: they need crash dialogs hidden, so a run ending meanwhile leaves them hidden. */
         internal val previewsOpen = java.util.concurrent.atomic.AtomicInteger()
         private val serviceLock = Any()
-        private val messages = MutableStateFlow<String?>(null)
+        internal val messages = MutableStateFlow<String?>(null)
 
         /** Keep the run service up across several runs (a best-of round); false if it couldn't start. */
         internal fun holdService(ctx: android.content.Context): Boolean = synchronized(serviceLock) {
@@ -111,9 +111,20 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                 .onFailure { active.decrementAndGet() }.isSuccess
         }
 
+        /**
+         * Stop the run service once it has gone foreground: stopped before that (a run that ended at once — evals with
+         * no toolchain, a chat over its cap), Android crashes the app. Only if nothing is running by then.
+         */
+        private fun stopWhenForeground(ctx: android.content.Context) {
+            runScope.launch {
+                kotlinx.coroutines.withTimeoutOrNull(5_000) { while (!app.kiln.agent.RunService.inForeground) kotlinx.coroutines.delay(50) }
+                synchronized(serviceLock) { if (active.get() == 0) ctx.stopService(Intent(ctx, RunService::class.java)) }
+            }
+        }
+
         internal fun releaseService(ctx: android.content.Context) {
             val last = synchronized(serviceLock) {
-                (active.decrementAndGet() == 0).also { if (it) ctx.stopService(Intent(ctx, RunService::class.java)) }
+                (active.decrementAndGet() == 0).also { if (it) stopWhenForeground(ctx) }
             }
             // The last run is over (a held best-of round's runs never see 0 themselves): the user's crash dialogs come back.
             if (last) if (previewsOpen.get() == 0) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
@@ -192,7 +203,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
                     if (name !in deleting) app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
                     s.stopping.value = false
-                    if (synchronized(serviceLock) { (active.decrementAndGet() == 0).also { if (it) ctx.stopService(Intent(ctx, RunService::class.java)) } }) {
+                    if (synchronized(serviceLock) { (active.decrementAndGet() == 0).also { if (it) stopWhenForeground(ctx) } }) {
                         // The last run is over: the user's crash dialogs come back.
                         if (previewsOpen.get() == 0) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
                     }
@@ -209,7 +220,9 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     init { refresh() }
 
     private fun listProjects(): List<ProjectInfo> = Graph.paths.projects.listFiles()
-        ?.filter { File(it, "kiln.json").isFile && !app.kiln.agent.Attempts.isAttempt(it) && it.name !in deleting }
+        ?.filter { File(it, "kiln.json").isFile && !app.kiln.agent.Attempts.isAttempt(it) && it.name !in deleting &&
+            // An eval's project is in use by its unattended run: opening it would start a second agent on its chat.
+            !(it.name.startsWith("eval_") && app.kiln.agent.Evals.state.value.running) }
         ?.map { d ->
             val p = Project(d)
             val meta = runCatching { p.meta() }.getOrNull()
@@ -270,9 +283,14 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         runCatching { val p = Project(File(Graph.paths.projects, name)); app.kiln.build.AppSecrets.names(p).forEach { Graph.secrets.put(app.kiln.build.AppSecrets.storeId(p, it), null) } }
         app.kiln.agent.Attempts.list(Graph.paths.projects, name).forEach { t ->
             // Its attempts' runs stop first (they wrote into the deleted folders), and their state goes with them.
-            deleting += t.name   // its run's end must not post "is ready" for a project that's going
-            synchronized(states) { states.remove(t.name) }?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
-            app.kiln.agent.Attention.clear(Graph.app, t.name); deleting -= t.name
+            // Its run's end must not post "is ready" for a project that's going: marked until that run has really ended.
+            deleting += t.name
+            val job = synchronized(states) { states.remove(t.name) }?.job
+            if (job == null) deleting -= t.name else {
+                job.invokeOnCompletion { deleting -= t.name }
+                job.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { job.join() }
+            }
+            app.kiln.agent.Attention.clear(Graph.app, t.name)
             runCatching { Graph.device.uninstall(t.meta().`package`) }; t.dir.deleteRecursively()
             Session.list(Graph.paths.sessions, t.name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
         }
@@ -349,7 +367,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             val i = Graph.device.install(File(b.apk!!))
             if (!i.ok) { message.value = "Install failed: ${i.all.trim().take(160)}"; return@launch }
             s.runStep.value = "Launching…"
-            Graph.device.launch(s.pkg)
+            // Said, not left as "nothing appeared" (no launcher activity after a manifest change).
+            Graph.device.launch(s.pkg).let { l -> if (!l.ok) message.value = "Launch failed: ${l.all.trim().take(160)}" }
             refresh()
         } finally { s.runStep.value = null; IconCache.version.value++ }
     }
