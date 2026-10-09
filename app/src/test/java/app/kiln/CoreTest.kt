@@ -61,6 +61,14 @@ class CoreTest {
         assertEquals(hint, app.kiln.device.findNode(listOf(hint), "+"))            // no such button: fall back to text
     }
 
+    @Test fun `single taps become the test_flow call the reminder shows`() {
+        fun use(name: String, input: String) = app.kiln.core.obj("type" to "tool_use", "name" to name, "input" to app.kiln.core.parseJson(input))
+        val steps = app.kiln.agent.AgentLoop.asFlowSteps(listOf(
+            use("tap", """{"target":"Add"}"""), use("type_text", """{"text":"500","replace":true}"""),
+            use("tap", """{"target":"","x":1180,"y":96}"""), use("swipe", """{"direction":"left","target":"Lunch"}"""), use("press_key", """{"key":"BACK"}""")))
+        assertEquals("""[{"tap":"Add"},{"type":"500","replace":true},{"tap":"1180,96"},{"swipe":"left","on":"Lunch"},{"key":"BACK"}]""", steps)
+    }
+
     @Test fun `a helper agent's steps read as one line each`() {
         fun line(tool: String, input: String, summary: String, failed: Boolean = false) = app.kiln.agent.AgentLoop.stepLine(
             app.kiln.agent.Activity(1, app.kiln.agent.Activity.Kind.TOOL, tool = tool, input = input, summary = summary,

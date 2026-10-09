@@ -251,6 +251,7 @@ class AgentLoop(
         var steps = 0
         var lastTodoStep = 0
         var singleStreak = 0
+        val recentSingles = mutableListOf<JsonObject>()
         while (true) {
             if (++steps > cfg.maxSteps) { stoppedWith("Stopped after ${cfg.maxSteps} steps (limit in Settings)."); return }
             if (cost.value >= cfg.sessionUsd) { next(Activity.Kind.NOTICE, "Session spending cap reached (\$${"%.2f".format(cfg.sessionUsd)})."); return }
@@ -344,13 +345,15 @@ class AgentLoop(
             // Single taps add up: runs 7–10 used 30–47 of them where a few test_flow calls would do.
             // After 8 single interactions in a row, suggest batching.
             val single = setOf("tap", "type_text", "swipe", "press_key")
-            singleStreak = if (uses.isNotEmpty() && uses.all { it.str("name") in single }) singleStreak + uses.size
-                else if (uses.any { it.str("name") == "test_flow" }) 0 else singleStreak
+            if (uses.isNotEmpty() && uses.all { it.str("name") in single }) { singleStreak += uses.size; recentSingles += uses }
+            else if (uses.any { it.str("name") == "test_flow" }) { singleStreak = 0; recentSingles.clear() }
+            // A plain "use test_flow" was ignored (run 11): show the model its own last taps as the call to send.
             val flowNudge = if (singleStreak >= 8 && "test_flow" in tools.map { it.name }) {
                 singleStreak = 0
-                obj("type" to "text", "text" to "<system-reminder>That's 8+ single taps/types in a row. Put the rest of this journey in ONE " +
-                    "test_flow call (steps: tap / type + into / swipe + on / key / expect) — it runs them all and reports each step. " +
-                    "Don't mention this reminder.</system-reminder>")
+                val example = asFlowSteps(recentSingles.takeLast(8)); recentSingles.clear()
+                obj("type" to "text", "text" to "<system-reminder>That's 8+ single taps/types in a row — each one costs a full step. " +
+                    "Your last ones as a single call would have been:\n  test_flow {\"steps\": $example}\n" +
+                    "Test the rest of this journey that way: one test_flow with its taps, typing and an expect at the end.</system-reminder>")
             } else null
             // Queued user messages ride along with the tool results: the model sees them at its next step.
             session.append(Msg("user", JsonArray(results + listOfNotNull(budget, finish, todoNudge, flowNudge) + (drainSteering() ?: emptyList()))))
@@ -648,6 +651,19 @@ class AgentLoop(
             watcher?.cancel()
             Triple(answer() ?: "(no answer)", loop.usage.value, loop.cost.value)
         }
+
+        /** Single tap / type_text / swipe / press_key calls as test_flow steps (JSON), for the batching reminder. */
+        internal fun asFlowSteps(calls: List<JsonObject>): String = app.kiln.core.arrOf(calls.mapNotNull { u ->
+            val i = u["input"] as? JsonObject ?: return@mapNotNull null
+            fun target() = i.str("target")?.takeIf { it.isNotBlank() } ?: listOfNotNull(i.str("x"), i.str("y")).takeIf { it.size == 2 }?.joinToString(",")
+            when (u.str("name")) {
+                "tap" -> target()?.let { app.kiln.core.obj("tap" to it) }
+                "type_text" -> app.kiln.core.obj("type" to (i.str("text") ?: ""), "replace" to (i.str("replace") == "true").takeIf { it })
+                "swipe" -> app.kiln.core.obj("swipe" to (i.str("direction") ?: "up"), "on" to i.str("target")?.takeIf { it.isNotBlank() })
+                "press_key" -> app.kiln.core.obj("key" to (i.str("key") ?: "BACK"))
+                else -> null
+            }
+        }).toString()
 
         /** One readable line for a finished tool call: `tap “Save” → Appeared: …` or `✗ type_text: no field has focus`. */
         internal fun stepLine(a: Activity): String {
