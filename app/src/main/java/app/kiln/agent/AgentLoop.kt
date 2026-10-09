@@ -186,11 +186,17 @@ class AgentLoop(
                     val err = r?.get("is_error")?.toString() == "true"
                     val text = r?.get("content").let { c -> (c as? JsonPrimitive)?.content
                         ?: (c as? JsonArray)?.firstOrNull()?.let { (it as? JsonObject)?.str("text") } } ?: ""
+                    // The checklist lives in memory: rebuild it from the last todo call that went through (reopened after
+                    // Kiln was closed or updated, the chat lost its plan though the agent still had it).
+                    if (o.str("name") == "todo" && r != null && !err) (o["input"] as? JsonObject)?.a("items")?.let { items ->
+                        state.todos = items.mapNotNull { (it as? JsonObject)?.let { t -> t.str("text")?.let { x -> SessionState.Todo(x, t.str("status") ?: "pending") } } }
+                    }
                     add(Activity(ids.incrementAndGet(), Activity.Kind.TOOL, tool = o.str("name"), input = o["input"]?.compact(),
                         status = if (text == "interrupted by the user") Activity.Status.STOPPED else if (err) Activity.Status.FAILED else Activity.Status.DONE, summary = text.lineSequence().firstOrNull()?.take(140) ?: ""))
                 }
             }
         }
+        todos.value = state.todos
         val notice = session.meta.stopNotice
         if (notice.isNotEmpty()) next(if (session.meta.stopIsError) Activity.Kind.ERROR else Activity.Kind.NOTICE, notice)
         // A transcript that ends on the user's side (tool results, a message) was cut off mid-run:
