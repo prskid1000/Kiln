@@ -657,6 +657,12 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
                     "\n    $recv has: " + recvMembers.joinToString { it.name } + "\n    Use one of those, or add `$n` to $recv ${where(recvMembers.first()).removePrefix("(").substringBefore(",").removeSuffix(")")}."
                 return@let
             }
+            // A kit function that's only missing its import: say exactly that ("isn't in the kit — did you mean <itself>"
+            // contradicted itself).
+            if (index?.kitNames()?.contains(n) == true) {
+                out += "$n is the kit's (${index.kitSignature(n) ?: "app.kiln.kit.$n"}): add `import app.kiln.kit.$n`."
+                return@let
+            }
             val own = symbols.closest(n, symbols.all.filter { it.owner == null || Regex("""\bfun\s""").containsMatchIn(it.signature) })
             val kitFns = index?.kitNames().orEmpty().filter { it.first().isLowerCase() }
                 .map { it to NameCheck.distance(n.lowercase(), it.lowercase()) }.filter { it.second <= maxOf(2, n.length / 3) }
@@ -785,7 +791,7 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             out += "Inside a lambda, `return` can't leave the composable: use `return@onClick` (the lambda's label) or restructure with if/else."
         if ("no parameter with name" in m || "no value passed for parameter" in m) {
             val p = Regex("parameter(?: with name)? '(\\w+)'").find(m)?.groupValues?.get(1) ?: "?"
-            val callee = e.file?.let { calleeAt(project, it, e.line) }
+            val callee = e.file?.let { calleeAt(project, it, e.line, e.col) }
             // The kit's signature, or the one the model wrote for its own function.
             val sig = callee?.let { c -> index?.kitSignature(c) ?: symbols.named(c).firstOrNull { s -> "(" in s.signature }?.let { "${it.signature}  ${where(it)}" } }
             out += if (sig != null) "$callee has no parameter '$p' — its signature is: $sig"
@@ -814,15 +820,22 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
     return if (out.isEmpty()) "" else "\nHints:\n" + out.joinToString("\n") { "  • $it" } + "\n"
 }
 
-/** The function whose call encloses [line] of [path] (the nearest unclosed `Name(` above it), or null. */
-private fun calleeAt(project: app.kiln.build.Project, path: String, line: Int?): String? {
+/**
+ * The function whose call the error at [line]:[col] of [path] is about: the call named at the column itself ("no value
+ * passed" points at the call), else the nearest unclosed `Name(` before the column. From the line's end instead, an
+ * argument of an inner call (KeyboardOptions(keyboard = …) inside KTextField(…)) was blamed on the outer one.
+ */
+private fun calleeAt(project: app.kiln.build.Project, path: String, line: Int?, col: Int? = null): String? {
     val f = java.io.File(path).let { if (it.isAbsolute) it else java.io.File(project.dir, path) }
     if (!f.isFile || line == null) return null
     val lines = f.readLines()
+    if (line - 1 !in lines.indices) return null
+    val start = col?.let { (it - 1).coerceIn(0, lines[line - 1].length) }
+    if (start != null) Regex("""^([A-Za-z_][\w.]*)\s*\(""").find(lines[line - 1].substring(start))?.let { return it.groupValues[1].substringAfterLast('.') }
     var depth = 0
     for (i in (line - 1).coerceAtMost(lines.lastIndex) downTo maxOf(0, line - 30)) {
         val l = lines[i]
-        for (j in l.indices.reversed()) {
+        for (j in (if (i == line - 1 && start != null) (0 until start) else l.indices).reversed()) {
             when (l[j]) {
                 ')' -> depth++
                 '(' -> if (depth == 0) {

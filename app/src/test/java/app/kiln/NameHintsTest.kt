@@ -71,6 +71,18 @@ class NameHintsTest {
         assertTrue(h, "Settings has no `monthlyBudget`" in h && "budget" in h)
     }
 
+    @Test fun argumentOfInnerCallIsBlamedOnTheInnerCall() {
+        val p = project()
+        val src = "        keyboard = KeyboardOptions(keyboard = KeyboardType.Decimal),"
+        File(p.dir, "src/kiln/app/app1/ui").mkdirs()
+        File(p.dir, "src/kiln/app/app1/ui/Home.kt").writeText("package kiln.app.app1.ui\n\nfun f() {\n    KTextField(\n        value = \"\",\n$src\n    )\n}\n")
+        fun hint(msg: String, col: Int) = errorHints(BuildResult(ok = false, diagnostics = listOf(
+            Diagnostic("error", msg, "src/kiln/app/app1/ui/Home.kt", 6, col, "kotlinc", "> $src"))), p)
+        // "no parameter 'keyboard'" at the argument inside KeyboardOptions(…); "no value passed" at the KeyboardOptions call.
+        assertTrue(hint("no parameter with name 'keyboard' found.", src.indexOf("keyboard =", 30) + 1).contains("(KeyboardOptions)"))
+        assertTrue(hint("no value passed for parameter 'autoCorrect'.", src.indexOf("KeyboardOptions") + 1).contains("(KeyboardOptions)"))
+    }
+
     @Test fun helpers() {
         assertEquals(1, NameCheck.distance("kolnscreen", "kilnscreen"))
         val code = NameCheck.codeOnly("val a = \"KSlide\" // KSlide\nKSlide()")
