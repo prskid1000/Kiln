@@ -287,9 +287,17 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
     }
 
     /** "250,289" or "[250,289]" as a point — but not when an element is labelled that (an amount like "1,000"). */
+    /** [text] appears whole on screen (any case): "₹500" isn't on a screen showing "₹1,500". */
+    internal fun shows(nodes: List<UiNode>, text: String): Boolean {
+        val t = text.trim(); if (t.isEmpty()) return false
+        // Not inside a longer word or number ("₹5" isn't on "₹5,000").
+        val whole = Regex("""(?<![\p{L}\p{N}]|\d[.,])""" + Regex.escape(t) + """(?![\p{L}\p{N}]|[.,]\d)""", RegexOption.IGNORE_CASE)
+        return nodes.any { n -> whole.containsMatchIn(n.text) || whole.containsMatchIn(n.desc) }
+    }
+
     internal fun pointIn(s: String, nodes: List<app.kiln.device.UiNode>): Pair<Int, Int>? =
         // Exact labels only: the fuzzy finder matched "540,1200" to any "₹1200" on screen and tapped that instead.
-        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { nodes.none { n -> s.trim() in n.text || s.trim() in n.desc } }   // "1,000" in "₹1,000" is a label
+        Regex("""^\s*\[?(\d+)\s*,\s*(\d+)]?\s*$""").find(s)?.takeIf { nodes.none { n -> shows(listOf(n), s) } }   // "1,000" in "₹1,000" is a label; "540,960" in "₹1,540,960" isn't
             ?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
 
     internal suspend fun offScreen(n: app.kiln.device.UiNode, label: String): String {
@@ -346,7 +354,7 @@ class InstallTool(w: Warden, d: Device) : DeviceTool(w, d) {
         // Sources edited since that build (by any tool, or a helper) would install old code: build first.
         // Build inputs only: an attachment or a saved screenshot in the project isn't a code change.
         val inputs = listOf("src", "res", "assets").map { File(ctx.project.dir, it) } + listOf(File(ctx.project.dir, "AndroidManifest.xml"), File(ctx.project.dir, "kiln.json"))
-        if (inputs.any { f -> if (f.isDirectory) f.walkTopDown().any { it.isFile && it.lastModified() > apk.lastModified() } else f.isFile && f.lastModified() > apk.lastModified() })
+        if (inputs.any { f -> if (f.isDirectory) f.walkTopDown().any { it.lastModified() > apk.lastModified() }   /* folders too: a delete or move changes them */ else f.isFile && f.lastModified() > apk.lastModified() })
             return ToolResult.error("the sources changed since the last build — run build (or run_app) to install the current code")
         val r = device.install(apk)
         return if (r.out.contains("Success")) ToolResult.ok("installed ${pkg(ctx)}") else ToolResult.error("install failed: ${r.all.trim()}")
@@ -584,7 +592,7 @@ class WaitForTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val end = System.currentTimeMillis() + (input.int("timeout_ms") ?: 5000).coerceIn(500, 20_000)
         while (System.currentTimeMillis() < end) {
-            if (device.find(device.uiTree(pkg(ctx)), input.req("target")) != null) return ToolResult.ok("\"${input.str("target")}\" is on screen")
+            if (shows(device.uiTree(pkg(ctx)), input.req("target"))) return ToolResult.ok("\"${input.str("target")}\" is on screen")
             delay(500)
         }
         return ToolResult.error("\"${input.str("target")}\" did not appear")
@@ -722,7 +730,8 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         val keepGoing = input.str("keep_going") == "true"
         val pkg = pkg(ctx)
         val report = StringBuilder(); var failed = 0
-        suspend fun visible(text: String) = device.find(device.uiTree(pkg), text) != null
+        // An expectation is the whole text (any case), not the tap finder's fuzzy match: "₹500" must not pass on "₹1,500".
+        suspend fun visible(text: String) = shows(device.uiTree(pkg), text)
         for ((i, st) in steps.withIndex()) {
             val n = i + 1
             val (ok, what) = runCatching { step(ctx, pkg, st, ::visible) }
@@ -812,7 +821,8 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         // Actions beside the group run too (review: {"tap": "Save", "then": [...]} never tapped): "then" follows them,
         // the other group names come first.
         listOf("actions", "steps", "do", "then").firstOrNull { st[it] is JsonArray }?.let { key ->
-            val group = (st[key] as JsonArray).mapNotNull { it as? JsonObject }.flatMap(::expand)
+            // A non-object inside a group is an unknown step (it failed loudly at the top level, but vanished here).
+            val group = (st[key] as JsonArray).flatMap { (it as? JsonObject)?.let(::expand) ?: listOf(JsonObject(mapOf("unknown" to it))) }
             val rest = st - key - setOf("desc", "description", "name", "title", "note", "comment", "id")
             // Only real actions: {"step": 3, "actions": […]} or a stray "timeout_ms" beside the group isn't a step of its own.
             val own = if (rest.isEmpty()) emptyList() else expand(JsonObject(rest))

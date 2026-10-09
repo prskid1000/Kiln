@@ -301,7 +301,8 @@ class Device(private val warden: Warden, val testDisplay: TestDisplay? = null,
     }
     /** `input text` needs spaces as %s; in the app, text goes into the focused field as is. */
     suspend fun type(text: String, replace: Boolean = false) =
-        if (testDisplay != null) inApp("--es", "op", "text", "--es", "text", text, "--ez", "replace", replace.toString())
+        // Replacing needs the in-app path (system `input text` only appends), on either screen.
+        if (testDisplay != null || replace) inApp("--es", "op", "text", "--es", "text", text, "--ez", "replace", replace.toString())
         else warden.exec(input("text", text.replace(" ", "%s")))
 
     /**

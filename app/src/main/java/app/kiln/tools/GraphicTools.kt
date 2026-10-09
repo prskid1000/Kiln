@@ -39,7 +39,7 @@ class MakeGraphicTool : Tool {
         xmlProblem(svgText)?.let { return ToolResult.error("the XML doesn't parse — $it") }
         val f = ctx.project.resolveWritable(rel)
         if (isVectorDrawable(svgText)) {
-            if (f.extension.lowercase() != "xml" || !rel.replace('\\', '/').startsWith("res/drawable"))
+            if (f.extension.lowercase() != "xml" || !ctx.project.rel(f).startsWith("res/drawable"))
                 return ToolResult.error("that's an Android vector drawable; it can only be saved as res/drawable/<name>.xml. For a PNG or an .svg file, send SVG.")
             f.parentFile?.mkdirs(); f.writeText(svgText)
             ctx.state.readStamps[ctx.project.rel(f)] = f.lastModified()
@@ -53,7 +53,7 @@ class MakeGraphicTool : Tool {
         val note: String
         when (f.extension.lowercase()) {
             "xml" -> {
-                if (!rel.replace('\\', '/').startsWith("res/drawable")) return ToolResult.error("vector drawables go in res/drawable/<name>.xml")
+                if (!ctx.project.rel(f).startsWith("res/drawable")) return ToolResult.error("vector drawables go in res/drawable/<name>.xml")
                 val (xml, skipped) = runCatching { SvgToVector.convert(svgText) }.getOrElse { return ToolResult.error("can't convert to a vector drawable: ${it.message}") }
                 f.writeText(xml)
                 note = "vector drawable — use painterResource(R.drawable.${f.nameWithoutExtension})" +
@@ -168,8 +168,9 @@ $body</vector>
             e.getAttribute(k).takeIf { it.isNotBlank() }?.let { a[k] = it.trim() }
         e.getAttribute("style").split(';').forEach { d -> val kv = d.split(':', limit = 2); if (kv.size == 2) a[kv[0].trim()] = kv[1].trim() }
         return parent.copy(
-            fill = a["fill"]?.let { if (it == "none") null else it } ?: parent.fill,
-            stroke = a["stroke"]?.let { if (it == "none") null else it } ?: parent.stroke,
+            // "none" clears it (it fell back to the parent: Feather-style outlines came out filled black).
+            fill = if ("fill" in a) a["fill"].takeIf { it != "none" } else parent.fill,
+            stroke = if ("stroke" in a) a["stroke"].takeIf { it != "none" } else parent.stroke,
             strokeWidth = a["stroke-width"]?.let(::num) ?: parent.strokeWidth,
             opacity = parent.opacity * (a["opacity"]?.toFloatOrNull() ?: 1f),
             fillOpacity = a["fill-opacity"]?.toFloatOrNull() ?: parent.fillOpacity,

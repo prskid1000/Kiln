@@ -116,7 +116,7 @@ class McpClient(private val cfg: McpServerConfig) {
         }
         // An event-stream body keeps arriving after the headers: cancelling the call ends that read too.
         kotlinx.coroutines.coroutineScope {
-            val watch = launch { try { kotlinx.coroutines.awaitCancellation() } finally { call.cancel() } }
+            val watch = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { try { kotlinx.coroutines.awaitCancellation() } finally { call.cancel() } }
             try { rpcBody(response, method, notify) } finally { watch.cancel() }
         }
     }
