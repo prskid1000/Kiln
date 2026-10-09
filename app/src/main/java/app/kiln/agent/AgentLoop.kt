@@ -194,7 +194,7 @@ class AgentLoop(
                         state.todos = items.mapNotNull { (it as? JsonObject)?.let { t -> t.str("text")?.let { x -> SessionState.Todo(x, t.str("status") ?: "pending") } } }
                     }
                     add(Activity(ids.incrementAndGet(), Activity.Kind.TOOL, tool = o.str("name"), input = o["input"]?.compact(),
-                        status = if (text == "interrupted by the user") Activity.Status.STOPPED else if (err) Activity.Status.FAILED else Activity.Status.DONE, summary = text.lineSequence().firstOrNull()?.take(140) ?: ""))
+                        status = if (text == "interrupted by the user") Activity.Status.STOPPED else if (err) Activity.Status.FAILED else Activity.Status.DONE, summary = text.lineSequence().firstOrNull()?.trimStart()?.trimStart('#')?.trimStart()?.take(140) ?: ""))
                 }
             }
         }
@@ -685,7 +685,7 @@ class AgentLoop(
             ?: next(Activity.Kind.TOOL, tool = name, input = input.compact(), status = Activity.Status.RUNNING)
         val t0 = System.currentTimeMillis()
         fun result(r: ToolResult, status: Activity.Status): JsonObject {
-            update(aid) { it.copy(status = status, summary = r.summary, images = r.images, video = r.video, detail = r.detail, preview = r.preview, ms = System.currentTimeMillis() - t0, progress = "") }
+            update(aid) { it.copy(status = status, summary = r.summary.trimStart().trimStart('#').trimStart(), images = r.images, video = r.video, detail = r.detail, preview = r.preview, ms = System.currentTimeMillis() - t0, progress = "") }
             return obj("type" to "tool_result", "tool_use_id" to id, "content" to r.blocks(), "is_error" to if (r.isError) true else null)
         }
         val tool = byName[name] ?: return result(ToolResult.error("unknown tool $name"), Activity.Status.FAILED)

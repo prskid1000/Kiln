@@ -487,7 +487,9 @@ class KitDocsTool(private val toolchain: Toolchain, private val skills: Skills? 
         }
         if (out.isBlank()) return ToolResult.ok("Nothing in the kit matches \"$query\". Categories: " +
             catalog.map { it.category }.distinct().joinToString() + ". Try another word, or `sdk_lookup` for Android/Compose classes.")
-        return ToolResult.ok(out.toString().trim())
+        // A one-line summary for the step ("KDateTime, KDate, KDateField +3"), not the result's first "### …" heading.
+        val names = top.map { it.name }.distinct()
+        return ToolResult.ok(out.toString().trim(), if (names.isEmpty()) "kit reference" else names.take(3).joinToString() + if (names.size > 3) " +${names.size - 3}" else "")
     }
 
     private companion object {
