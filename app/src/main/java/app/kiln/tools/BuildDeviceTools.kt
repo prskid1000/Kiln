@@ -125,7 +125,7 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     val fixes = linkedSetOf<String>()
     // Names already imported right that still don't resolve: an extension missing its receiver (KToastHost outside a Box).
     // The compiler only says "unresolved", which sent the model looking for another name.
-    val receiverNotes = linkedSetOf<String>()
+    val receiverNotes = linkedMapOf<String, String>()   // name -> note
     // Kotlin reports Icons.Filled.Settings's 'Settings' only once 'Icons' resolves: up to three passes.
     for (pass in 1..3) {
     val before = fixes.size
@@ -198,7 +198,7 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
         val staleLine = stale.findAll(text).firstOrNull { !index.exists(it.groupValues[1]) && decls[name]?.contains(it.groupValues[1]) != true }
         val fixed = when {
             Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text) -> if (inline.isEmpty()) {
-                receiverNotes += "$name is imported ($fq) but is an extension that needs its scope: call it where that scope is " +
+                receiverNotes[name] = "$name is imported ($fq) but is an extension that needs its scope: call it where that scope is " +
                     "(KToastHost inside a Box { }, a RowScope/ColumnScope function inside Row/Column) — sdk_lookup $name shows its receiver."
                 continue
             } else text
@@ -246,7 +246,10 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
     r = builds.build(ctx.project, checkOnly = checkOnly) { ctx.progress(it) }
     if (r.ok) break
     }
-    val notes = if (receiverNotes.isEmpty() || r.ok) "" else receiverNotes.joinToString("\n", postfix = "\n") { "Note: $it" }
+    // Only names still unresolved in the final build: an import Kiln added earlier in this pass was mistaken for the
+    // model's own ("dp is imported but needs its scope" after dp had just been fixed).
+    val stillOpen = receiverNotes.filterKeys { n -> r.errors.any { "unresolved reference '$n'" in it.message } }.values
+    val notes = if (stillOpen.isEmpty() || r.ok) "" else stillOpen.joinToString("\n", postfix = "\n") { "Note: $it" }
     if (fixes.isEmpty()) return linted(r) to notes
     r = linted(r)
     return r to "Kiln auto-fixed these (imports and small resource slips; files you've read can still be edited):\n" + fixes.joinToString("\n") { "  $it" } + "\n" +
@@ -262,7 +265,7 @@ class CheckTool(private val builds: BuildEngine, private val index: ClassIndex) 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = true)
         ctx.state.lastBuild = r
-        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project, index), isError = !r.ok,
+        return ToolResult(fixed + r.report() + index.importHints(r, ctx.project) + errorHints(r, ctx.project, index), isError = !r.ok,
             summary = if (r.ok) (if (fixed.isEmpty()) "check OK" else "check OK · auto-fixed imports") else "${r.errors.size} errors")
     }
 }
@@ -276,7 +279,7 @@ class BuildTool(private val builds: BuildEngine, private val index: ClassIndex) 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project, index) + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
+        return ToolResult(fixed + r.report() + index.importHints(r, ctx.project) + errorHints(r, ctx.project, index) + (r.apk?.let { "apk: ${File(it).name} (${File(it).length() / 1024} KB)" } ?: ""),
             isError = !r.ok, summary = if (r.ok) "build OK ${r.totalMs}ms" else "${r.errors.size} errors")
     }
 }
@@ -413,7 +416,7 @@ class RunAppTool(private val builds: BuildEngine, w: Warden, d: Device, private 
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
         val (r, fixed) = buildFixingImports(builds, index, ctx, checkOnly = false)
         ctx.state.lastBuild = r
-        if (!r.ok) return ToolResult(fixed + r.report() + index.importHints(r) + errorHints(r, ctx.project, index), isError = true, summary = "${r.errors.size} build errors")
+        if (!r.ok) return ToolResult(fixed + r.report() + index.importHints(r, ctx.project) + errorHints(r, ctx.project, index), isError = true, summary = "${r.errors.size} build errors")
         val pkg = pkg(ctx)
         ctx.progress("install")
         val inst = device.install(File(r.apk!!))

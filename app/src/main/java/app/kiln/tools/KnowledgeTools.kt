@@ -156,7 +156,7 @@ class ClassIndex(private val toolchain: Toolchain) {
      * model once dropped KeyboardOptions as "not in the kit" after importing it from the wrong
      * package).
      */
-    fun importHints(build: app.kiln.build.BuildResult): String {
+    fun importHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Project? = null): String {
         if (build.ok) return ""
         val names = build.errors.mapNotNull { Regex("unresolved reference '([A-Za-z_][A-Za-z0-9_]*)'").find(it.message)?.groupValues?.get(1) }
             .filter { it.first().isUpperCase() }.distinct().take(12)
@@ -166,7 +166,10 @@ class ClassIndex(private val toolchain: Toolchain) {
         val lines = names.mapNotNull { n ->
             val hits = (where.keys.asSequence() + topLevel.asSequence()).filter { '$' !in it && it.substringAfterLast('.') == n && !it.contains(".internal.") }.distinct().toList()
                 .sortedBy { fq -> rank.indexOfFirst { fq.startsWith(it) }.let { if (it < 0) 99 else it } }.take(3)
-            if (hits.isEmpty()) null else "  $n → " + hits.joinToString(" or ") { "import $it" }
+            // Already imported in every file with the error: it isn't the import that's missing (a scope note says what is).
+            val files = build.errors.filter { "unresolved reference '$n'" in it.message }.mapNotNull { it.file }.distinct()
+            val imported = project != null && files.isNotEmpty() && files.all { p -> runCatching { project.resolve(p).readText() }.getOrDefault("").let { txt -> hits.any { h -> Regex("""(?m)^import\s+""" + Regex.escape(h) + """\s*$""").containsMatchIn(txt) } } }
+            if (hits.isEmpty() || imported) null else "  $n → " + hits.joinToString(" or ") { "import $it" }
         }
         return if (lines.isEmpty()) "" else "\nImport hints (these classes exist on the classpath):\n" + lines.joinToString("\n") + "\n"
     }
