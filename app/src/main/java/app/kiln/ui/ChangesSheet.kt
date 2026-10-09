@@ -28,6 +28,7 @@ import app.kiln.agent.Turns
 import app.kiln.ui.theme.N
 import app.kiln.ui.theme.T
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** What one turn changed, file by file, with a diff and per-file revert. */
@@ -38,6 +39,7 @@ fun ChangesSheet(vm: KilnVM, ps: ProjectState, index: Int, onDismiss: () -> Unit
     var open by remember { mutableStateOf<String?>(null) }
     var tick by remember { mutableStateOf(0) }
     LaunchedEffect(index, tick) { changes = withContext(Dispatchers.IO) { vm.turnChanges(ps.project.name, index) } }
+    val revertScope = androidx.compose.runtime.rememberCoroutineScope()   // reverting writes files: off the main thread
     ModalBottomSheet(onDismiss, containerColor = N.surface) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             Text("Changes in this turn", style = T.cardTitle)
@@ -53,7 +55,7 @@ fun ChangesSheet(vm: KilnVM, ps: ProjectState, index: Int, onDismiss: () -> Unit
                                 style = T.mono.copy(color = when (ch.kind) { Turns.Change.Kind.ADDED -> N.ok; Turns.Change.Kind.DELETED -> N.danger; else -> N.warn }),
                                 modifier = Modifier.padding(end = 10.dp))
                             Text(ch.path, style = T.mono.copy(color = N.text), modifier = Modifier.weight(1f))
-                            KButton("Revert") { vm.revertFile(ps.project.name, index, ch.path); tick++ }
+                            KButton("Revert") { revertScope.launch { withContext(Dispatchers.IO) { vm.revertFile(ps.project.name, index, ch.path) }; tick++ } }
                         }
                         if (open == ch.path) {
                             // Reads both versions and runs an LCS: computed off the main thread, once per open/revert.

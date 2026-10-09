@@ -105,10 +105,20 @@ private fun PlaySection(vm: KilnVM, ps: ProjectState, versionName: String, versi
     var result by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(Unit) { email = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.playAccount() } }
+    val keyScope = androidx.compose.runtime.rememberCoroutineScope()
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val json = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { String(it.readBytes().take(65_536).toByteArray()) } }.getOrNull()
-        vm.savePlayKey(json ?: "").onSuccess { email = it; error = null }.onFailure { error = it.message }
+        // At most 64 KB (a key file is ~2 KB; any file can be picked), read off the main thread.
+        keyScope.launch {
+            val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { ctx.contentResolver.openInputStream(uri)!!.use { s ->
+                    val buf = ByteArray(65_536); var n = 0
+                    while (n < buf.size) { val r = s.read(buf, n, buf.size - n); if (r < 0) break; n += r }
+                    String(buf, 0, n)
+                } }.getOrNull()
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.savePlayKey(json ?: "") }.onSuccess { email = it; error = null }.onFailure { error = it.message }
+        }
     }
     Column(Modifier.fillMaxWidth().vCard(N.shapeLg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Google Play · internal testing", style = T.subtitle)
@@ -171,7 +181,9 @@ private fun GitHubSection(vm: KilnVM, ps: ProjectState) {
             }
         } else {
             Text("Signed in as @$l", style = T.label)
-            KField("Repository", repo, { repo = it.trim(); vm.setGithubRepo(name, it) }, hint = "$l/${name.replace('_', '-')}", mono = true)
+            // Saved once typing pauses, off the main thread (it wrote a file per keystroke).
+            androidx.compose.runtime.LaunchedEffect(repo) { kotlinx.coroutines.delay(600); kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.setGithubRepo(name, repo) } }
+            KField("Repository", repo, { repo = it.trim() }, hint = "$l/${name.replace('_', '-')}", mono = true)
             KField("", message, { message = it }, hint = "What changed (commit message)")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 KButton("Push", Tone.Accent) { busy("Pushing…") { vm.pushToGithub(name, message) { step = it } } }

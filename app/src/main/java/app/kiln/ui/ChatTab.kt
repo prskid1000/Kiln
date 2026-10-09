@@ -226,7 +226,9 @@ private fun ChatEmpty(ps: ProjectState, onPick: (String) -> Unit) {
 @Composable
 private fun ChatList(vm: KilnVM, ps: ProjectState, loop: AgentLoop, feed: List<Activity>, running: Boolean) {
     var review by remember { mutableStateOf<Int?>(null) }
-    val snapshots = remember(loop, feed.size, running) { app.kiln.agent.Turns.indexes(loop.session).toSet() }
+    // Lists the snapshot folder: read off the main thread.
+    val snapshots by androidx.compose.runtime.produceState(emptySet<Int>(), loop, feed.size, running) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.kiln.agent.Turns.indexes(loop.session).toSet() } }
     review?.let { ChangesSheet(vm, ps, it) { review = null } }
     // A helper agent's steps (qa_check) follow the call that started them, as ordinary steps with a tag.
     val rows = remember(feed) { group(withHelperSteps(feed)) }
@@ -671,7 +673,8 @@ private fun Composer(running: Boolean, stopping: Boolean, runStartedAt: Long, dr
                     modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).fieldLabel("Message"))
             }
             Spacer(Modifier.width(8.dp))
-            if (running && text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, enabled = !stopping, onClick = onStop)
+            // Stop shows whenever there's no text to send, files or not: kept files mustn't hide it mid-run.
+            if (running && text.isBlank()) FilledIconBtn(Icons.Rounded.Stop, "Stop", container = N.danger, enabled = !stopping, onClick = onStop)
             else if (text.isBlank() && files.isEmpty()) FilledIconBtn(Icons.Rounded.Mic, "Speak") {
                 runCatching {
                     voice.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)

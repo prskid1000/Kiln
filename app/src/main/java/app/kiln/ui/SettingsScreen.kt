@@ -241,7 +241,7 @@ private fun ProfileEditor(start: Profile, onDone: () -> Unit) {
         KField("Base URL (with or without /v1)", p.baseUrl, { p = p.copy(baseUrl = it) }, mono = true)
         Text("Auth", style = T.label)
         SegTabs(AuthStyle.entries.map { when (it) { AuthStyle.X_API_KEY -> "x-api-key"; AuthStyle.BEARER -> "Bearer"; AuthStyle.NONE -> "None" } to "" }, p.auth.ordinal) { p = p.copy(auth = AuthStyle.entries[it]) }
-        KField(if (Graph.providers.key(p.id) != null) "API key (saved — type to replace)" else "API key", key, { key = it }, mono = true, hint = "kept in the Android Keystore")
+        KField(if (Graph.providers.key(p.id) != null) "API key (saved — type to replace)" else "API key", key, { key = it }, mono = true, hint = "kept in the Android Keystore", secret = true)
         KField("Models (comma-separated)", models, { models = it }, mono = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             KButton("Pin certificate") {

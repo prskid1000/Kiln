@@ -55,7 +55,8 @@ import java.io.File
 fun QaVideo(path: String, modifier: Modifier = Modifier) {
     if (!File(path).isFile) return
     // A VideoView stretches to whatever box it gets, so size the box to the video's own shape.
-    val ratio = remember(path) {
+    // Read off the main thread (it opens the file); a phone-shaped box until it's known.
+    val ratio by androidx.compose.runtime.produceState(9f / 19.5f, path) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
             android.media.MediaMetadataRetriever().use { r ->
                 r.setDataSource(path)
@@ -65,7 +66,7 @@ fun QaVideo(path: String, modifier: Modifier = Modifier) {
                 if (rot % 180 == 0) w / h else h / w
             }
         }.getOrDefault(9f / 19.5f)
-    }
+    } }
     androidx.compose.foundation.layout.Box(modifier, contentAlignment = Alignment.CenterStart) {
         AndroidView(factory = { ctx ->
             VideoView(ctx).apply {

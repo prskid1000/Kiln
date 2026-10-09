@@ -75,9 +75,14 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
      */
     companion object Runs {
         private val states = HashMap<String, ProjectState>()
+        /** Forget a project's state (a deleted project, a discarded attempt): a later one of that name starts fresh. */
+        internal fun forgetState(name: String): ProjectState? = synchronized(states) { states.remove(name) }
+        /** Projects being deleted: hidden from the list while their files go. */
+        internal val deleting: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
         internal val runScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
         /** Agent runs in flight across all projects; the foreground service lives while > 0. */
         private val active = java.util.concurrent.atomic.AtomicInteger()
+        private val serviceLock = Any()
 
         init { app.kiln.agent.Attention.loops = { name -> synchronized(states) { states[name] }?.loop?.value } }
 
@@ -113,23 +118,31 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
             if (!s.starting.compareAndSet(false, true)) return "Kiln is still working on this app — wait, or tap Stop"
             val l = s.loop.value?.takeIf { !freshChat } ?: runCatching { Graph.kiln.newSession(s.project) }
                 .getOrElse { s.starting.set(false); return it.message }.also { s.loop.value = it }
-            active.incrementAndGet()
-            ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java))
-            s.job = runScope.launch {
+            // The count and the service change together: a run ending as another starts stopped the new one's service.
+            // Starting can fail (Android 12+ refuses it from the background): release the claim and say so.
+            synchronized(serviceLock) {
+                active.incrementAndGet()
+                runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, RunService::class.java)) }.onFailure {
+                    active.decrementAndGet(); s.starting.set(false)
+                    return "Couldn't start the run in the background (${it.message}) — open Kiln and try again"
+                }
+            }
+            // ATOMIC: the body (and its finally, which releases the claim) runs even if cancelled before it starts.
+            s.job = runScope.launch(start = kotlinx.coroutines.CoroutineStart.ATOMIC) {
                 // Kiln in the background: approvals and questions become actionable notifications.
                 val watch = launch {
                     launch { l.approval.collect { a -> if (a != null) app.kiln.agent.Attention.approval(ctx, name, s.label, a.tool, a.input) else app.kiln.agent.Attention.clear(ctx, name) } }
                     launch { l.question.collect { q -> if (q != null) app.kiln.agent.Attention.question(ctx, name, s.label, q.text) else app.kiln.agent.Attention.clear(ctx, name) } }
                 }
                 try { l.send(text, attachments, mode, goal) } finally {
+                    // Released first: a follow-up sent as the run ends is a new run, not "still working".
+                    s.starting.set(false)
                     watch.cancel()
                     val last = l.feed.value.lastOrNull { it.kind == app.kiln.agent.Activity.Kind.ASSISTANT }?.text ?: ""
                     app.kiln.agent.Attention.done(ctx, name, s.label, last.trim().ifBlank { "Run finished" })
                     s.sessions.value = Session.list(Graph.paths.sessions, name)
                     s.stopping.value = false
-                    s.starting.set(false)
-                    if (active.decrementAndGet() == 0) {
-                        ctx.stopService(Intent(ctx, RunService::class.java))
+                    if (synchronized(serviceLock) { (active.decrementAndGet() == 0).also { if (it) ctx.stopService(Intent(ctx, RunService::class.java)) } }) {
                         // The last run is over: the user's crash dialogs come back.
                         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { Graph.testDevice.restoreCrashDialogs() } }
                     }
@@ -146,7 +159,7 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
     init { refresh() }
 
     private fun listProjects(): List<ProjectInfo> = Graph.paths.projects.listFiles()
-        ?.filter { File(it, "kiln.json").isFile && !app.kiln.agent.Attempts.isAttempt(it) }
+        ?.filter { File(it, "kiln.json").isFile && !app.kiln.agent.Attempts.isAttempt(it) && it.name !in deleting }
         ?.map { d ->
             val p = Project(d)
             val meta = runCatching { p.meta() }.getOrNull()
@@ -185,7 +198,10 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
 
     fun deleteProject(name: String) = viewModelScope.launch(Dispatchers.IO) {
         // Gone from the list at once; the uninstall and file removal below can take a few seconds.
+        deleting += name
         projects.value = projects.value.filter { it.project.name != name }
+        // A best-of loop would start its next attempt in the folders being deleted.
+        cancelBestOf(name)
         val s = synchronized(states) { states.remove(name) }
         // Let a cancelled run actually stop (a tool may be mid-write) before its files go.
         s?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
@@ -202,6 +218,8 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
         forgetAttempts(name)
         File(Graph.paths.projects, name).deleteRecursively()
         Session.list(Graph.paths.sessions, name).forEach { File(Graph.paths.sessions, it.id).deleteRecursively() }
+        // Opened again while it was going (the list showed it): drop that state too, then let the name be reused.
+        forgetState(name); deleting -= name
         refresh()
     }
 
@@ -222,15 +240,29 @@ class KilnVM(app: Application) : AndroidViewModel(app) {
              mode: app.kiln.agent.AgentLoop.Mode = app.kiln.agent.AgentLoop.Mode.BUILD, goal: String? = null) {
         if (text.isBlank() && attachments.isEmpty()) return
         // While it works, a message steers the run (delivered at its next step) instead of being refused.
-        state(name).loop.value?.takeIf { it.running.value }?.let { l ->
+        // Also while a run is starting: the message is delivered when it begins, not refused.
+        val s0 = state(name)
+        s0.loop.value?.takeIf { it.running.value || s0.starting.get() }?.let { l ->
             if (attachments.isNotEmpty()) message.value = "Files can be attached once this run finishes"
             l.steer(text); return
         }
         viewModelScope.launch(Dispatchers.IO) {
             warden.value = Graph.warden.status()
-            startRun(getApplication(), name, text, attachments, mode, goal, onFinish = { refresh() })?.let { message.value = it }
+            startRun(getApplication(), name, text, attachments, mode, goal, onFinish = { refresh() })?.let {
+                message.value = it
+                // Not started: the message goes back into the composer instead of being lost.
+                restoreDraft(name, text, attachments)
+            }
         }
     }
+
+    /** Put an unsent message (and its files) back into the project's composer. */
+    internal suspend fun restoreDraft(name: String, text: String, attachments: List<app.kiln.agent.Attachment>) =
+        kotlinx.coroutines.withContext(Dispatchers.Main) {
+            val s = state(name)
+            if (text.isNotBlank()) s.draft.value = text + (s.draft.value ?: "")
+            s.attachments.addAll(attachments)
+        }
 
     // Cancelling waits for the model's stream to close, which can take a few seconds: say so at once.
     fun stop(name: String) { state(name).let { it.stopping.value = true; it.job?.cancel() } }

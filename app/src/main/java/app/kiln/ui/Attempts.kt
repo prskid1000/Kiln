@@ -53,8 +53,10 @@ fun KilnVM.attempts(name: String): MutableStateFlow<List<String>> = attemptLists
 // In the runs' scope: Back on Android 11 finishes the activity and clears the ViewModel, which stopped attempts 2..n.
 fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launch {
     val s = state(name)
-    if (s.loop.value?.running?.value == true) { message.value = "Wait for the current run to finish"; return@launch }
+    if (s.loop.value?.running?.value == true) { message.value = "Wait for the current run to finish"; restoreDraft(name, request, emptyList()); return@launch }
     discardAttempts(name).join()
+    // Registered after that discard (which cancels the previous round's loop), so Discard and Delete can stop this one.
+    bestOfJobs[name] = coroutineContext[kotlinx.coroutines.Job]!!
     val tries = runCatching { Attempts.create(Graph.paths.projects, s.project, n, request) }
         .getOrElse { message.value = "Couldn't start the attempts: ${it.message}"; return@launch }
     attempts(name).value = tries.map { it.name }
@@ -62,7 +64,8 @@ fun KilnVM.bestOf(name: String, request: String, n: Int) = KilnVM.runScope.launc
     for ((i, t) in tries.withIndex()) {
         val prompt = request + "\n\n(This is attempt ${i + 1} of $n: separate copies of the app are each trying this " +
             "on their own and the user will keep the best one. Make your own best version, and verify it on the device.)"
-        KilnVM.startRun(getApplication(), t.name, prompt, freshChat = true)?.let { message.value = it; return@launch }
+        KilnVM.startRun(getApplication(), t.name, prompt, freshChat = true)?.let {
+            message.value = it; if (i == 0) restoreDraft(name, request, emptyList()); return@launch }
         state(t.name).job?.join()
     }
     message.value = "$n attempts are ready — compare them and keep one"
@@ -80,13 +83,24 @@ fun KilnVM.keepAttempt(name: String, attempt: String) = viewModelScope.launch(Di
 }
 
 fun KilnVM.discardAttempts(name: String) = viewModelScope.launch(Dispatchers.IO) {
+    // The round's loop first: it would start the next attempt on a deleted folder.
+    cancelBestOf(name)
     for (t in Attempts.list(Graph.paths.projects, name)) {
-        // Wait for its run to stop: it would keep writing into the folder being deleted.
-        state(t.name).job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
+        // Wait for its run to stop: it would keep writing into the folder being deleted. Its state goes too
+        // (the next round reuses the names, and showed this round's screenshot as "Done").
+        KilnVM.forgetState(t.name)?.job?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
         runCatching { Graph.device.uninstall(t.meta().`package`) }
     }
     Attempts.discard(Graph.paths.projects, name)
     attempts(name).value = emptyList()
+}
+
+private val bestOfJobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
+/** Stop a project's best-of loop (not the caller's own) and wait for it. */
+internal suspend fun cancelBestOf(name: String) {
+    val me = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+    bestOfJobs.remove(name)?.takeIf { it !== me }?.let { j -> j.cancel(); kotlinx.coroutines.withTimeoutOrNull(10_000) { j.join() } }
 }
 
 /** Forget a deleted project's attempts: a new project with the same name must not show them. */

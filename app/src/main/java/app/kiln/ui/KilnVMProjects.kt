@@ -34,7 +34,8 @@ fun KilnVM.transcriptMarkdown(name: String): String? {
     val nl = System.lineSeparator()
     return buildString {
         append("# ").append(session.meta.title.ifBlank { s.label }).append(nl).append(nl)
-        for (m in session.messages) for (b in m.content) {
+        // A copy taken under the session's lock: the run may be appending (iterating the live list crashed).
+        for (m in synchronized(session) { session.messages.toList() }) for (b in m.content) {
             val o = b as? JsonObject ?: continue
             when (o.str("type")) {
                 "text" -> {

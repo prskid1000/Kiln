@@ -127,15 +127,18 @@ private fun SourceList(ps: ProjectState, uploads: Int, onOpen: (Open) -> Unit) {
     // Re-list whenever the agent finishes a step.
     val feed = loop?.feed?.collectAsStateWithLifecycle()?.value
     val tick = feed?.count { it.status != app.kiln.agent.Activity.Status.RUNNING } ?: 0
-    val files = remember(ps.project, tick, uploads) { ps.project.files().map { ps.project.rel(it) to it }.sortedBy { it.first } }
+    // Walking the project and reading each file's size and time is IO: off the main thread.
+    val files by androidx.compose.runtime.produceState(emptyList<Triple<String, File, String>>(), ps.project, tick, uploads) {
+        value = withContext(Dispatchers.IO) { ps.project.files().map { f -> Triple(ps.project.rel(f), f, humanBytes(f.length()) + " · " + relativeTime(f.lastModified())) }.sortedBy { it.first } }
+    }
     // Folders as section headers; the package path is collapsed so Kotlin files don't drown in it.
     val pkgDir = "src/" + ps.pkg.replace('.', '/') + "/"
-    val groups = files.groupBy { (rel, _) -> rel.removePrefix(pkgDir).let { r -> if (rel.startsWith(pkgDir)) "src" + (r.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "/$it" }) else rel.substringBeforeLast('/', "") } }
+    val groups = files.groupBy { (rel, _, _) -> rel.removePrefix(pkgDir).let { r -> if (rel.startsWith(pkgDir)) "src" + (r.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "/$it" }) else rel.substringBeforeLast('/', "") } }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 24.dp)) {
         groups.toSortedMap(compareBy({ it.isNotEmpty() }, { it })).forEach { (dir, list) ->
             item(key = "d:$dir") { FolderHeader(dir.ifEmpty { "/" }) }
-            items(list, key = { it.first }) { (rel, f) ->
-                FileRow(iconFor(rel), rel.substringAfterLast('/'), humanBytes(f.length()) + " · " + relativeTime(f.lastModified())) {
+            items(list, key = { it.first }) { (rel, f, info) ->
+                FileRow(iconFor(rel), rel.substringAfterLast('/'), info) {
                     onOpen(Open.Source(f, rel))
                 }
             }

@@ -105,7 +105,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         setContent { KilnTheme { App(vm) } }
-        handle(intent)
+        // Only a fresh start: a recreated activity (rotation, process restore) would re-add the crash draft.
+        if (savedInstanceState == null) handle(intent)
     }
 
     override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); handle(intent) }

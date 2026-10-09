@@ -92,6 +92,8 @@ fun KField(label: String, value: String, onChange: (String) -> Unit, modifier: M
         Box(Modifier.fillMaxWidth().vInset().padding(horizontal = 12.dp, vertical = 10.dp)) {
             if (value.isEmpty() && hint.isNotEmpty()) Text(hint, style = (if (mono) T.mono else T.body).copy(color = N.textMuted))
             BasicTextField(value, onChange, singleLine = singleLine, cursorBrush = SolidColor(N.accent),
+                // A secret is hidden on screen and kept out of the keyboard's learning (no suggestions, password type).
+                keyboardOptions = if (secret) androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false) else androidx.compose.foundation.text.KeyboardOptions.Default,
                 visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
                 textStyle = if (mono) T.mono.copy(color = N.text) else T.body, modifier = Modifier.fillMaxWidth().fieldLabel(label.ifEmpty { hint }))
         }
