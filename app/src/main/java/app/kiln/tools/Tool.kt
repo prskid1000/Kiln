@@ -29,10 +29,17 @@ data class ToolResult(
 ) {
     /** Anthropic-shaped tool_result content blocks. */
     fun blocks(): JsonArray = arrOf(listOf(obj("type" to "text", "text" to text.ifBlank { "(no output)" })) +
-        images.map { obj("type" to "image", "source" to obj("type" to "base64", "media_type" to "image/png",
+        images.map { obj("type" to "image", "source" to obj("type" to "base64", "media_type" to mediaType(it),
             "data" to Base64.getEncoder().encodeToString(it))) })
 
     companion object {
+        /** From the bytes: an MCP tool's JPEG declared as PNG is rejected by the API, and stays in history. */
+        internal fun mediaType(b: ByteArray): String = when {
+            b.size > 2 && b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte() -> "image/jpeg"
+            b.size > 11 && String(b, 0, 4, Charsets.ISO_8859_1) == "RIFF" && String(b, 8, 4, Charsets.ISO_8859_1) == "WEBP" -> "image/webp"
+            b.size > 3 && String(b, 0, 4, Charsets.ISO_8859_1) == "GIF8" -> "image/gif"
+            else -> "image/png"
+        }
         fun ok(text: String, summary: String? = null) = ToolResult(text, summary = summary ?: text.lineSequence().firstOrNull()?.take(140) ?: "")
         fun error(text: String) = ToolResult(text, isError = true)
     }
@@ -46,6 +53,10 @@ class SessionState {
     val logMarkers = mutableMapOf<String, String>()
     var todos: List<Todo> = emptyList()
     var lastBuild: BuildResult? = null
+        set(v) { field = v; if (v?.ok == true && v.apk != null) lastApk = v.apk }
+    /** The APK of the last successful build: a later check (which builds no APK) doesn't hide it. */
+    var lastApk: String? = null
+        private set
     var launchMarker: Pair<String, String>? = null
     /** Deferred tools tool_search has loaded into this session. */
     val loadedTools: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()

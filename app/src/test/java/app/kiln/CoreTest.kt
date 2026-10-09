@@ -45,6 +45,8 @@ class CoreTest {
         assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+        // Review: an action beside a group runs too ("then" after it).
+        assertEquals(listOf("""{"tap":"Save"}""", """{"expect":"Saved"}"""), steps("""{"tap":"Save","then":[{"expect":"Saved"}]}"""))
         // Review: target beside a swipe is the row, not a second tap; a type object's label names the field.
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":"left","target":"Lunch"}"""))
         assertEquals(listOf("""{"type":"500","into":"Amount"}"""), steps("""{"type":{"label":"Amount","value":"500"}}"""))
@@ -223,6 +225,10 @@ class CoreTest {
         val again = app.kiln.tools.qaPlan(criteria, last.copy(results = last.results.map {
             if (it.startsWith("PASS — Expenses")) "PASS — Expenses tab: search and swipe to delete — carried over from the last QA run" else it }))
         assertTrue(again.test.toString(), "Expenses tab: search and swipe to delete" in again.test)
+        // A new criterion that merely resembles an old pass is tested (review: "Deleting…" rode on "Adding…").
+        val similar = app.kiln.tools.qaPlan(listOf("Deleting an expense updates the total", "Home tab shows monthly total and donut chart"),
+            last.copy(results = last.results + "PASS — Adding an expense updates the total — ok"))
+        assertTrue(similar.test.toString(), "Deleting an expense updates the total" in similar.test)
         // No earlier run, or nothing failed: everything is tested.
         assertEquals(criteria, app.kiln.tools.qaPlan(criteria, null).test)
         assertEquals(criteria, app.kiln.tools.qaPlan(criteria, last.copy(results = last.results.map { it.replace("FAIL", "PASS") })).test)

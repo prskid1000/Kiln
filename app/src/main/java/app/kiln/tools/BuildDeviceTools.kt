@@ -327,7 +327,9 @@ class InstallTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val description = "Install the last successful build on this phone (silently, through Warden)."
     override val schema = schema { }
     override suspend fun exec(ctx: ToolContext, input: JsonObject): ToolResult {
-        val apk = ctx.state.lastBuild?.apk?.let(::File)?.takeIf { it.isFile } ?: return ToolResult.error("no APK yet — run build first")
+        // A failed build may leave an APK behind (lint errors): never install what was reported as failing.
+        if (ctx.state.lastBuild?.ok == false) return ToolResult.error("the last build or check failed — fix it and build again first")
+        val apk = ctx.state.lastApk?.let(::File)?.takeIf { it.isFile } ?: return ToolResult.error("no APK yet — run build first")
         val r = device.install(apk)
         return if (r.out.contains("Success")) ToolResult.ok("installed ${pkg(ctx)}") else ToolResult.error("install failed: ${r.all.trim()}")
     }
@@ -488,7 +490,12 @@ class TapTool(w: Warden, d: Device) : DeviceTool(w, d) {
                 treeText(before.filter { it.clickable || it.text.isNotBlank() || it.desc.isNotBlank() }).take(2500))
             reachable(n) ?: return ToolResult.error(offScreen(n, target))
         } else if (coord != null) coord.groupValues[1].toInt() to coord.groupValues[2].toInt()
-        else (input.int("x") ?: 0) to (input.int("y") ?: 0)
+        else {
+            // No target and no point: say so (it tapped the corner and reported success).
+            val px = input.int("x"); val py = input.int("y")
+            if (px == null || py == null) return ToolResult.error("give target (the element's text) or both x and y")
+            px to py
+        }
         device.tap(x, y)
         delay(600)
         return withPreview(ToolResult.ok("tapped ${target?.let { "\"$it\" at $x,$y" } ?: "$x,$y"}. " + screenChange(ctx, before, x, y)))
@@ -611,7 +618,8 @@ internal fun projectDeclarations(project: app.kiln.build.Project): Map<String, L
     for (f in project.files().filter { it.extension == "kt" && it.path.startsWith(src.path) }) {
         val text = f.readText()
         val pkg = Regex("(?m)^package\\s+([\\w.]+)").find(text)?.groupValues?.get(1) ?: ""
-        Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|internal|public|data|sealed|enum|abstract|open|inline|suspend|value)\s+)*(?:fun|class|object|interface|val|var|typealias)\s+(?:<[^>]*>\s*)?([A-Za-z_]\w*)""")
+        Regex("""(?m)^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|internal|public|data|sealed|enum|abstract|open|inline|suspend|value)\s+)*(?:fun|class|object|interface|val|var|typealias)\s+(?:<[^>]*>\s*)?([A-Za-z_]\w*+)(?!\.|<[^>(]*>\.)""")
+            // ↑ not an extension's receiver: `fun Modifier.card()` declares card, not a project Modifier (review).
             .findAll(text).forEach { m ->
                 val line = m.value
                 if (line.startsWith("private")) return@forEach
@@ -675,6 +683,8 @@ internal suspend fun DeviceTool.screenChange(ctx: ToolContext, before: List<app.
 class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
     override val inputTool = true
     override val name = "test_flow"
+    // Each step dumps the UI tree at least twice: a 20-step flow outran the default 120 s and lost its whole report.
+    override val timeoutMs = 600_000L
     override val description = "Run a user journey on the device in one call and get a pass/fail line per step. Steps: " +
         "{\"tap\": \"Add expense\"}, {\"type\": \"500\", \"into\": \"Amount\"} (taps the field first; \"replace\": true to overwrite), " +
         "{\"swipe\": \"left\", \"on\": \"Lunch\"}, {\"key\": \"BACK\"}, {\"expect\": \"₹500\"}, {\"expect_gone\": \"New expense\"}, {\"wait_ms\": 1000}. " +
@@ -692,7 +702,8 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         suspend fun visible(text: String) = device.find(device.uiTree(pkg), text) != null
         for ((i, st) in steps.withIndex()) {
             val n = i + 1
-            val (ok, what) = runCatching { step(ctx, pkg, st, ::visible) }.getOrElse { false to "error: ${it.message}" }
+            val (ok, what) = runCatching { step(ctx, pkg, st, ::visible) }
+                .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false to "error: ${it.message}" }
             report.append(if (ok) "$n ✓ " else "$n ✗ ").append(what).append('\n')
             if (!ok) { failed++; if (!keepGoing) { report.append("stopped at step $n of ${steps.size}\n"); break } }
         }
@@ -746,13 +757,13 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         }
         s("key")?.let { k -> device.key(k); delay(500); return true to "key $k → ${screenChange(ctx, before)}" }
         s("expect")?.let { t ->
-            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000)
+            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(0, 20_000)
             while (System.currentTimeMillis() < until) { if (visible(t)) return true to "“$t” is on screen"; delay(300) }
             val now = device.uiTree(pkg).filter { it.text.isNotBlank() || it.desc.isNotBlank() }.take(12).joinToString { "“${it.label()}”" }
             return false to "expected “$t” — not on screen. Showing: $now"
         }
         s("expect_gone")?.let { t ->
-            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000)
+            val until = System.currentTimeMillis() + (st.str("timeout_ms")?.toLongOrNull() ?: 3000).coerceIn(0, 20_000)
             while (System.currentTimeMillis() < until) { if (!visible(t)) return true to "“$t” is gone"; delay(300) }
             return false to "expected “$t” to be gone — still on screen"
         }
@@ -769,8 +780,13 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
     companion object {
     internal fun expand(st: JsonObject): List<JsonObject> {
         // Grouped steps (run 9): {"desc": "Add food expense", "actions": [ … ]} → the actions, in order.
-        listOf("actions", "steps", "do", "then").firstNotNullOfOrNull { st[it] as? JsonArray }?.let { group ->
-            return group.mapNotNull { it as? JsonObject }.flatMap(::expand)
+        // Actions beside the group run too (review: {"tap": "Save", "then": [...]} never tapped): "then" follows them,
+        // the other group names come first.
+        listOf("actions", "steps", "do", "then").firstOrNull { st[it] is JsonArray }?.let { key ->
+            val group = (st[key] as JsonArray).mapNotNull { it as? JsonObject }.flatMap(::expand)
+            val rest = st - key - setOf("desc", "description", "name", "title", "note", "comment", "id")
+            val own = if (rest.isEmpty()) emptyList() else expand(JsonObject(rest))
+            return if (key == "then") own + group else group + own
         }
         val alias = mapOf("type_text" to "type", "input" to "type", "enter" to "type", "press_key" to "key", "press" to "key",
             "wait" to "wait_ms", "sleep" to "wait_ms", "wait_for" to "expect", "assert" to "expect", "see" to "expect",

@@ -352,12 +352,16 @@ internal fun qaPlan(criteria: List<String>, last: QaMemory?): QaPlan {
     if (last == null || last.results.none { verdict(it) == "FAIL" } || criteria.isEmpty()) return QaPlan(criteria, emptyList())
     fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length > 2 }.toSet()
     val test = mutableListOf<String>(); val carried = mutableListOf<Pair<String, String>>()
+    // Compare with the criterion part of a result line ("PASS — <criterion> — evidence"), both ways and nearly
+    // whole: "Deleting an expense updates the total" must not ride on "Adding an expense updates the total" (review).
+    fun criterion(line: String) = line.split(" — ", " - ").getOrNull(1) ?: line
+    fun overlap(a: Set<String>, b: Set<String>) = if (a.isEmpty() || b.isEmpty()) 0.0 else (a intersect b).size.toDouble() / maxOf(a.size, b.size)
     for (c in criteria) {
         val w = words(c)
-        val best = last.results.maxByOrNull { (words(it) intersect w).size }
-        val overlap = best?.let { if (w.isEmpty()) 0.0 else (words(it) intersect w).size.toDouble() / w.size } ?: 0.0
+        val best = last.results.maxByOrNull { overlap(words(criterion(it)), w) }
+        val overlap = best?.let { overlap(words(criterion(it)), w) } ?: 0.0
         // A pass is carried at most once in a row: one carried last time is tested now, so a fix that broke it is caught.
-        if (best != null && overlap >= 0.6 && verdict(best) == "PASS" && "carried over" !in best) carried += c to best else test += c
+        if (best != null && overlap >= 0.9 && verdict(best) == "PASS" && "carried over" !in best) carried += c to best else test += c
     }
     return if (test.isEmpty()) QaPlan(criteria, emptyList()) else QaPlan(test, carried)
 }

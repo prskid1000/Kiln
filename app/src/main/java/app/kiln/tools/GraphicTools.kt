@@ -147,7 +147,8 @@ object SvgToVector {
         val dpW = 24f; val dpH = dpW * vh / vw
         val wrap = ox != 0f || oy != 0f
         if (wrap) body.append("  <group android:translateX=\"${f(-ox)}\" android:translateY=\"${f(-oy)}\">\n")
-        children(root).forEach { emit(it, Style(), body, if (wrap) "    " else "  ", gradients, skipped) }
+        // The root's own fill/stroke apply to everything (Feather/Lucide icons set them only on <svg>).
+        children(root).forEach { emit(it, styleOf(root, Style()), body, if (wrap) "    " else "  ", gradients, skipped) }
         if (wrap) body.append("  </group>\n")
         val xml = """<vector xmlns:android="$ANDROID" xmlns:aapt="http://schemas.android.com/aapt"
     android:width="${f(if (vw >= vh) dpW else dpW * vw / vh)}dp" android:height="${f(if (vw >= vh) dpH else dpW)}dp"
@@ -182,17 +183,16 @@ $body</vector>
         val st = styleOf(e, parent)
         val transform = e.getAttribute("transform").takeIf { it.isNotBlank() }
         if (tag in setOf("defs", "title", "desc", "metadata", "linearGradient", "radialGradient", "style")) return
-        if (transform != null && tag != "g") {
-            out.append(ind).append("<group").append(groupAttrs(transform, skipped)).append(">\n")
-            emitShape(e, tag, st, out, "$ind  ", grads, skipped)
-            out.append(ind).append("</group>\n"); return
-        }
-        if (tag == "g" || tag == "svg") {
-            out.append(ind).append("<group").append(transform?.let { groupAttrs(it, skipped) } ?: "").append(">\n")
-            children(e).forEach { emit(it, st, out, "$ind  ", grads, skipped) }
-            out.append(ind).append("</group>\n"); return
-        }
-        emitShape(e, tag, st, out, ind, grads, skipped)
+        // One nested group per transform function, outermost first: "translate(12 12) rotate(45) translate(-12 -12)"
+        // wrote translateX twice on one group (invalid XML) and applied them in the wrong order.
+        val groups = transform?.let { groupAttrs(it, skipped) }.orEmpty()
+        val container = tag == "g" || tag == "svg"
+        if (!container && groups.isEmpty()) { emitShape(e, tag, st, out, ind, grads, skipped); return }
+        val opens = groups.ifEmpty { listOf("") }
+        var i = ind
+        for (g in opens) { out.append(i).append("<group").append(g).append(">\n"); i += "  " }
+        if (container) children(e).forEach { emit(it, st, out, i, grads, skipped) } else emitShape(e, tag, st, out, i, grads, skipped)
+        for (g in opens) { i = i.dropLast(2); out.append(i).append("</group>\n") }
     }
 
     private fun emitShape(e: Element, tag: String, st: Style, out: StringBuilder, ind: String, grads: Map<String, Element>, skipped: MutableSet<String>) {
@@ -267,8 +267,18 @@ $body</vector>
             }
             return origin + frac * size
         }
+        // A length (the radius): no origin — user-space values are taken as given, fractions scale by the width.
+        fun len(n: String, defFrac: Float): Float {
+            val v = g.getAttribute(n).trim()
+            return when {
+                v.isEmpty() -> defFrac * vw
+                v.endsWith("%") -> (v.dropLast(1).toFloatOrNull() ?: (defFrac * 100)) / 100 * vw
+                bbox -> (num(v) ?: defFrac) * vw
+                else -> num(v) ?: (defFrac * vw)
+            }
+        }
         val sb = StringBuilder(ind)
-        if (g.tagName.startsWith("radial")) sb.append("<gradient android:type=\"radial\" android:centerX=\"${f(pos("cx", 0.5f, true))}\" android:centerY=\"${f(pos("cy", 0.5f, false))}\" android:gradientRadius=\"${f(pos("r", 0.5f, true) - ox)}\"")
+        if (g.tagName.startsWith("radial")) sb.append("<gradient android:type=\"radial\" android:centerX=\"${f(pos("cx", 0.5f, true))}\" android:centerY=\"${f(pos("cy", 0.5f, false))}\" android:gradientRadius=\"${f(len("r", 0.5f))}\"")
         else sb.append("<gradient android:type=\"linear\" android:startX=\"${f(pos("x1", 0f, true))}\" android:startY=\"${f(pos("y1", 0f, false))}\" android:endX=\"${f(pos("x2", 1f, true))}\" android:endY=\"${f(pos("y2", 0f, false))}\"")
         sb.append(">\n")
         children(stopsFrom).filter { it.tagName == "stop" }.forEach { s ->
@@ -282,10 +292,12 @@ $body</vector>
         return sb.append(ind).append("</gradient>\n").toString()
     }
 
-    private fun groupAttrs(t: String, skipped: MutableSet<String>): String {
-        val sb = StringBuilder()
+    /** Each transform function as one group's attributes, in source order (outermost first). */
+    private fun groupAttrs(t: String, skipped: MutableSet<String>): List<String> {
+        val out = mutableListOf<String>()
         Regex("(\\w+)\\(([^)]*)\\)").findAll(t).forEach { m ->
             val v = m.groupValues[2].trim().split(Regex("[\\s,]+")).mapNotNull { it.toFloatOrNull() }
+            val sb = StringBuilder()
             when (m.groupValues[1]) {
                 "translate" -> sb.append(" android:translateX=\"${f(v.getOrElse(0) { 0f })}\" android:translateY=\"${f(v.getOrElse(1) { 0f })}\"")
                 "scale" -> sb.append(" android:scaleX=\"${f(v.getOrElse(0) { 1f })}\" android:scaleY=\"${f(v.getOrElse(1) { v.getOrElse(0) { 1f } })}\"")
@@ -293,8 +305,9 @@ $body</vector>
                     if (v.size >= 3) sb.append(" android:pivotX=\"${f(v[1])}\" android:pivotY=\"${f(v[2])}\"") }
                 else -> skipped += "transform ${m.groupValues[1]}()"
             }
+            if (sb.isNotEmpty()) out += sb.toString()
         }
-        return sb.toString()
+        return out
     }
 
     private val NAMED = mapOf("black" to "#000000", "white" to "#FFFFFF", "red" to "#FF0000", "green" to "#008000", "blue" to "#0000FF",

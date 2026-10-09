@@ -387,7 +387,8 @@ class WebFetchTool : Tool {
         val url = input.req("url")
         require(url.startsWith("https://")) { "https only" }
         http.newCall(Request.Builder().url(url).header("User-Agent", "Kiln/0.1").build()).execute().use { r ->
-            val body = r.body.string()
+            // At most 2 MB: the page is cut to max_chars anyway, and a huge or binary URL must not run the app out of memory.
+            val body = r.body.source().let { src -> src.request(2_000_000); src.buffer.readUtf8(minOf(src.buffer.size, 2_000_000)) }
             val text = if ((r.header("Content-Type") ?: "").contains("html")) body
                 .replace(Regex("(?is)<(script|style|noscript)[^>]*>.*?</\\1>"), " ")
                 .replace(Regex("(?s)<[^>]+>"), " ").replace(Regex("&nbsp;"), " ").replace(Regex("&amp;"), "&")

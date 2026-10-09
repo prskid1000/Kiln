@@ -54,9 +54,11 @@ class CommandTool(private val def: CommandToolDef, private val warden: Warden, t
     override val timeoutMs = def.timeoutMs
 
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
-        var cmd = def.command.replace("{{app_package}}", q(ctx.project.meta().`package`))
-            .replace("{{project_dir}}", q(ctx.project.dir.path))
-        for (k in def.params.keys) cmd = cmd.replace("{{$k}}", q((input[k] as? JsonPrimitive)?.content ?: ""))
+        // One pass: a value containing "{{other}}" must stay a literal inside its quotes, not pull the next
+        // value in unquoted (review: shell injection through chained placeholders).
+        val values = def.params.keys.associateWith { (input[it] as? JsonPrimitive)?.content ?: "" } +
+            mapOf("app_package" to ctx.project.meta().`package`, "project_dir" to ctx.project.dir.path)
+        val cmd = Regex("""\{\{(\w+)}}""").replace(def.command) { m -> values[m.groupValues[1]]?.let(::q) ?: m.value }
         val r = if (def.runAs == "broker") warden.exec(listOf("sh", "-c", cmd), timeoutMs = def.timeoutMs)
                 else Exec.run(listOf("/system/bin/sh", "-c", cmd), cwd = ctx.project.dir, timeoutMs = def.timeoutMs)
         return ToolResult(ctx.spill("exit ${r.code}\n${r.all}", def.maxOutputChars), isError = !r.ok)
