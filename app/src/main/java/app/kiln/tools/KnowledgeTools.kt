@@ -88,6 +88,9 @@ class ClassIndex(private val toolchain: Toolchain) {
     // Plus every name the kit's catalog lists: a name the class reader can't see is never called invented.
     fun kitNames(): Set<String> { ensure(); return kit + kitSigs.keys.filter { '.' !in it } }
 
+    /** Material icon names in one style package (androidx.compose.material.icons.filled → Home, Settings, …). */
+    fun iconNames(pkg: String): List<String> { ensure(); return topLevel.filter { it.startsWith("$pkg.") && it.lastIndexOf('.') == pkg.length }.map { it.substringAfterLast('.') } }
+
     @Synchronized private fun ensure() {   // parallel sdk_lookup calls share one index
         val dir = toolchain.dir ?: error("toolchain not installed")
         if (built == dir.path) return
@@ -596,7 +599,7 @@ private val ICON_STYLE = Regex("""Icons\.(?:(AutoMirrored)\.)?(Filled|Outlined|R
  * with what to do instead. Seen in benchmark runs; each cost a local model dozens of steps.
  */
 /** Icon names models borrow from other icon sets → Material Icons' names. */
-private val MATERIAL_ICON_NAMES = mapOf(
+internal val MATERIAL_ICON_NAMES = mapOf(
     "bell" to "Notifications", "alarm" to "Alarm", "trash" to "Delete", "bin" to "Delete", "gear" to "Settings", "cog" to "Settings",
     "pencil" to "Edit", "pen" to "Edit", "plus" to "Add", "cross" to "Close", "x" to "Close", "calendar" to "CalendarMonth",
     "wallet" to "AccountBalanceWallet", "money" to "AttachMoney", "cash" to "Payments", "coins" to "Savings", "chart" to "PieChart",

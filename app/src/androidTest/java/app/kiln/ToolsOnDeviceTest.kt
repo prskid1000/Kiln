@@ -224,6 +224,11 @@ class ToolsOnDeviceTest {
                 expect = "Again — KolnScreen"),
             Case("grep", """{"pattern":"KolnScreen","glob":"**/*.kt"}""", expect = "(no matches)"),
             Case("delete", """{"path":"$src/Bad2.kt"}"""),
+            // A real class imported from the kit's package is pointed at its own; an icon that doesn't exist is named at once.
+            Case("write_file", """{"path":"$src/Bad2.kt","content":"package kiln.app.tooltest\n\nimport androidx.compose.material.icons.Icons\nimport app.kiln.kit.Icons\nimport androidx.compose.material.icons.filled.Home\n\nval a = Icons.Filled.Home\nval b = Icons.Filled.Hoem\n"}""",
+                expect = "Icons.Filled.Hoem isn't a Material icon. Closest: Icons.Filled.Home", absent = "Icons isn't in the kit"),
+            Case("grep", """{"pattern":"import app.kiln.kit.Icons","glob":"**/Bad2.kt"}""", expect = "(no matches)"),
+            Case("delete", """{"path":"$src/Bad2.kt"}"""),
             // A Compose function in a differently named file is found by sdk_lookup (not android.app.DatePickerDialog).
             Case("sdk_lookup", """{"query":"DatePickerDialog"}""", expect = "androidx.compose.material3.DatePickerDialog — a top-level function"),
             // A name a letter off another component is suggested, never swapped in (KSlide meant KSwipeRow).

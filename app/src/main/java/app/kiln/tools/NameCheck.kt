@@ -44,6 +44,12 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             val pkg = fq.substringBeforeLast('.', "")
             if (fq.startsWith("app.kiln.kit.")) {
                 if (index.exists(fq) || index.exists(pkg) || (pkg == "app.kiln.kit" && name in kit)) continue   // a kit symbol, or a member of a kit object
+                // Not a kit name but a real class elsewhere (import app.kiln.kit.Icons): the import points there.
+                val real = if (name !in kit) runCatching { index.uniqueClass(name) }.getOrNull()?.takeIf { !it.startsWith("app.kiln.kit.") } else null
+                if (real != null) {
+                    text = replaceImport(text, fq, real); fixed += "import $fq → $real ($name isn't from the kit)"
+                    corrections += Correction(fq, real, import = true); continue
+                }
                 when (val s = kitFix(name, kit, declared)) {
                     is Fix.Exact -> { text = replaceImport(text, fq, "app.kiln.kit.$name"); fixed += "import $fq → app.kiln.kit.$name"
                         corrections += Correction(fq, "app.kiln.kit.$name", import = true) }
@@ -77,6 +83,23 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
             }
         }
         for (n in missing) { text = addImport(text, "app.kiln.kit.$n"); fixed += "added import app.kiln.kit.$n" }
+
+        // 3. Material icons: whether Icons.Filled.X exists is settled now, not left to a build (a run went back and forth
+        // four times over Icons.Filled.Circle).
+        val iconCode = codeOnly(text)
+        for (m in ICON.findAll(iconCode).distinctBy { it.value }) {
+            val (mirrored, style, name) = m.destructured
+            val pkg = "androidx.compose.material.icons." + (if (mirrored.isNotEmpty()) "automirrored." else "") + style.lowercase()
+            if (index.exists("$pkg.$name")) continue
+            val names = runCatching { index.iconNames(pkg) }.getOrDefault(emptyList())
+            if (names.isEmpty()) continue   // icons not on this classpath: nothing to compare with
+            val mapped = MATERIAL_ICON_NAMES[name.lowercase()]?.takeIf { it in names }
+            val near = (listOfNotNull(mapped) + names.map { it to distance(name.lowercase(), it.lowercase()) }
+                .filter { it.second <= maxOf(2, name.length / 3) }.sortedBy { it.second }.map { it.first }).distinct().take(4)
+            problems += "line ${lineOf(text, m.range.first)}: ${m.value} isn't a Material icon" +
+                (if (near.isEmpty()) " — pick another (Icons.${if (mirrored.isNotEmpty()) "AutoMirrored." else ""}$style has Home, Settings, Add, Delete, Edit, Search, Star, Info…)."
+                 else ". Closest: " + near.joinToString { "Icons.${if (mirrored.isNotEmpty()) "AutoMirrored." else ""}$style.$it" })
+        }
 
         if (fixed.isEmpty() && problems.isEmpty()) return Result(text, "")
         val out = StringBuilder("\nKiln checked this file's names against the kit and classpath:\n")
@@ -160,6 +183,7 @@ class NameCheck(private val index: ClassIndex, private val toolchain: Toolchain)
         // never reported, so ordinary names of that shape (KeyEvent) are left alone.
         val USE = Regex("""(?<![\w.$])(?:K[A-Z]\w*|Kiln[A-Z]\w*|K[a-z]{2,4}[A-Z]\w*)\b""")
         val KIT_SHAPED = Regex("""K[A-Z]\w*|Kiln[A-Z]\w*""")
+        val ICON = Regex("""(?<![\w.])Icons\.(AutoMirrored\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.([A-Z]\w*)""")
         val DECL = Regex("""\b(?:class|object|interface|typealias|fun|val|var)\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)""")
         val WORDS = Regex("""[A-Z][a-z0-9]+|[a-z0-9]+""")
         val CHECKED = listOf("androidx.", "kotlinx.", "android.", "java.", "javax.", "com.google.")
