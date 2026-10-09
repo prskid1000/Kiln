@@ -54,7 +54,8 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     // A purchase just finished: acknowledge (or consume) it and update [owned] right away.
     private fun handlePending(list: List<Purchase>) {
-        pending = list; KLog.i("billing: ${list.size} purchase(s) updated")
+        // Added to: a second update must not drop purchases not processed yet.
+        pending = pending + list; KLog.i("billing: ${list.size} purchase(s) updated")
         scope.launch { refresh() }
     }
 
@@ -104,9 +105,12 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
         val results = listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS).map { type ->
             client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(type).build())
         }
-        // A failed query isn't "owns nothing": keep what the user owns rather than taking Pro away on a Play hiccup.
-        if (results.any { it.billingResult.responseCode != BillingClient.BillingResponseCode.OK }) return
-        val all = results.flatMap { it.purchasesList } + pending
+        // A query that fails isn't "owns nothing" (subscriptions unsupported on the device just means none). New purchases
+        // are always finished, and on a failure what the user owns is only added to, never taken away.
+        fun ok(r: com.android.billingclient.api.PurchasesResult) = r.billingResult.responseCode == BillingClient.BillingResponseCode.OK ||
+            r.billingResult.responseCode == BillingClient.BillingResponseCode.FEATURE_NOT_SUPPORTED
+        val complete = results.all(::ok)
+        val all = results.filter(::ok).flatMap { it.purchasesList } + pending
         pending = emptyList()
         val owned = mutableSetOf<String>()
         for (p in all.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }.distinctBy { it.purchaseToken }) {
@@ -119,7 +123,7 @@ class KBilling(context: Context, private val consumable: Set<String> = emptySet(
                 owned += ids
             }
         }
-        _owned.value = owned
+        _owned.value = if (complete) owned else _owned.value + owned
     }
 }
 

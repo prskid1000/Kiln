@@ -45,8 +45,11 @@ private fun <T> insertBody(serializer: kotlinx.serialization.KSerializer<T>, row
 }
 
 class KSupabase(context: Context, private val url: String, private val anonKey: String) {
+    private companion object { val users = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<String?>>() }
     private val prefs = context.getSharedPreferences("kiln_supabase", Context.MODE_PRIVATE)
-    private val _user = MutableStateFlow(prefs.getString("user_id", null))
+    // One per project URL in the process: a sign-out by any instance (a refused refresh) shows in every screen's
+    // userId, not just the instance that refreshed.
+    private val _user = users.getOrPut(url) { MutableStateFlow(prefs.getString("user_id", null)) }
     /** The signed-in user's id, or null. */
     val userId: StateFlow<String?> = _user
 
@@ -115,6 +118,11 @@ class KSupabase(context: Context, private val url: String, private val anonKey: 
         suspend fun update(filter: String, fields: JsonElement) {
             send(Request.Builder().url(at(filter)).patch(fields.toString().toRequestBody(json)))
         }
+        /** Change the rows matching [filter] to [row]'s fields (dates sent with this device's offset, like insert). */
+        suspend fun <T> update(filter: String, serializer: KSerializer<T>, row: T) {
+            send(Request.Builder().url(at(filter)).patch(insertBody(serializer, row).toRequestBody(json)))
+        }
+        suspend inline fun <reified T> update(filter: String, row: T) = update(filter, KJson.serializersModule.serializer<T>(), row)
 
         suspend fun delete(filter: String) { send(Request.Builder().url(at(filter)).delete()) }
     }

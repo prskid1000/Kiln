@@ -36,7 +36,9 @@ fun SkillEditableList(items: List<Pair<Long, String>>, onAdd: (String) -> Unit, 
             items(items, key = { it.first }) { (id, text) ->
                 // Deleted once, when the swipe is confirmed (not on every recomposition while it animates away).
                 val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
-                    if (v == SwipeToDismissBoxValue.EndToStart) onDelete(id); true })
+                    if (v == SwipeToDismissBoxValue.EndToStart) { onDelete(id); true } else false },
+                    // Only right-to-left deletes; a swipe the other way snaps back instead of leaving a gap.
+                )
                 SwipeToDismissBox(state, backgroundContent = {}) { KListRow(title = text) }
             }
         }

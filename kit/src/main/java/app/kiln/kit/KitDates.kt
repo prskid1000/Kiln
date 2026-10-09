@@ -44,7 +44,9 @@ object KDateSerializer : KSerializer<LocalDate> {
     override fun serialize(encoder: Encoder, value: LocalDate) = encoder.encodeString(value.toString())
     // A timestamp with an offset is read as its local date ("…T22:30+00:00" is the next day in India), a bare one as written.
     override fun deserialize(decoder: Decoder): LocalDate = decoder.decodeString().let { s ->
-        runCatching { java.time.OffsetDateTime.parse(s).atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDate() }
+        // Midnight UTC is an all-day date ("2026-10-08T00:00:00Z"): kept as that date, not moved a day back west of UTC.
+        runCatching { java.time.OffsetDateTime.parse(s).takeIf { it.toLocalTime() != java.time.LocalTime.MIDNIGHT }!!
+            .atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDate() }
             .getOrElse { LocalDate.parse(s.take(10)) } }
 }
 

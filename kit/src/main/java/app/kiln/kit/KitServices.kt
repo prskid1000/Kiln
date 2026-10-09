@@ -301,7 +301,8 @@ fun rememberImagePicker(max: Int = 1, onPicked: (List<Uri>) -> Unit): () -> Unit
 @Composable
 fun rememberCameraShot(onPhoto: (Bitmap) -> Unit): () -> Unit {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { it?.let(onPhoto) }
-    return { launcher.launch(null) }
+    // Guarded: no camera app, or CAMERA declared but not granted, threw and crashed the app.
+    return { runCatching { launcher.launch(null) }.onFailure { KLog.w("camera: ${it.message}") } }
 }
 
 /** Images and media helpers. */
