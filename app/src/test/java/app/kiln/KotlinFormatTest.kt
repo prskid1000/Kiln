@@ -136,6 +136,9 @@ class KotlinFormatTest {
         // A tab, trailing spaces and a double blank line inside a raw string are content (review).
         val src = "val tsv = \"\"\"\nname\tamount   \n\n\nrent\t500\n\"\"\"\n"
         assertEquals(src, KotlinFormat.format(src))
+        // Trailing spaces on the opening line, and "import" lines inside, are content too (review round 3).
+        val md = "val md = \"\"\"Title  \nimport b\nimport a\n\nimport a\n\"\"\"\n"
+        assertEquals(md, KotlinFormat.format(md))
     }
 
     @Test fun `n++ and i-- don't indent the next line`() {

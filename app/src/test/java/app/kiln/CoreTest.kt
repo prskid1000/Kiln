@@ -96,6 +96,8 @@ class CoreTest {
         // Comments and strings don't count (review): a commented-out KilnScreen, a "}" before the padding is used.
         assertEquals(0, errors("// KilnScreen(\"A\") { Text(\"x\") }\nfun E() { }\n").size)
         assertEquals(0, errors("fun E() { KilnScreen(\"T\") { pad -> Text(\"}\"); Column(Modifier.padding(pad)) { } } }").size)
+        // A brace in a string inside a template isn't code (review).
+        assertEquals(0, errors("fun E() { KilnScreen(\"T\") { pad -> Text(\"\${if (o) \"{\" else \"\"}\"); Column(Modifier.padding(pad)) { } } }").size)
         // A typed parameter is a parameter too (review: it was flagged).
         assertEquals(0, errors("fun E() { KilnScreen(\"Home\") { pad: PaddingValues -> Column(Modifier.padding(pad)) { } } }").size)
         assertEquals(1, errors("fun E() { KilnScreen(\"Home\") { pad: PaddingValues -> Text(\"x\") } }").size)

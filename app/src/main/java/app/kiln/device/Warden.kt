@@ -74,7 +74,10 @@ class Warden(private val context: Context) {
                 // (destroy() ends the write). One that exits early closes its stdin: that's not our failure.
                 val feed = async(Dispatchers.IO) { runCatching { ParcelFileDescriptor.AutoCloseOutputStream(p.outputStream).use { o -> if (stdin != null) o.write(stdin) } } }
                 // Suspending, so Stop cancels it (a blocking get held an install for up to 5 minutes).
-                val code = withTimeoutOrNull(timeoutMs) { done.await() }
+                // On cancel, destroy here: the scope can't finish (and the outer catch can't run) until the blocking
+                // readers end, and they end only when the child does.
+                val code = try { withTimeoutOrNull(timeoutMs) { done.await() } }
+                    catch (e: kotlinx.coroutines.CancellationException) { runCatching { p.destroy() }; throw e }
                 if (code == null) runCatching { p.destroy() }
                 feed.await()
                 Raw(code ?: -1, out.await(), err.await(), System.currentTimeMillis() - t0, timedOut = code == null)
