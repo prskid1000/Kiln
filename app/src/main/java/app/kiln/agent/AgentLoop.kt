@@ -372,13 +372,14 @@ class AgentLoop(
             val flowNudge = if (singleStreak >= 8 && "test_flow" in tools.map { it.name }) {
                 singleStreak = 0
                 val example = asFlowSteps(recentSingles.takeLast(8)); recentSingles.clear()
-                obj("type" to "text", "text" to "<system-reminder>That's 8+ single taps/types in a row — each one costs a full step. " +
+                "\n\n[Kiln] That's 8+ single taps/types in a row — each one costs a full step. " +
                     "Your last ones as a single call would have been:\n  test_flow {\"steps\": $example}\n" +
-                    "Test the rest of this journey that way: one test_flow with its taps, typing and an expect at the end.</system-reminder>")
+                    "Test the rest of this journey that way: one test_flow with its taps, typing and an expect at the end."
             } else null
+            // Both nudges ride inside the latest tool result, where the model reads most closely.
+            val withNudge = listOfNotNull(todoNudge, flowNudge).fold(results) { acc, note -> withNote(acc, note) }
             // Queued user messages ride along with the tool results: the model sees them at its next step.
-            val withNudge = if (todoNudge == null) results else withNote(results, todoNudge)
-            session.append(Msg("user", JsonArray(withNudge + listOfNotNull(budget, finish, flowNudge) + (drainSteering() ?: emptyList()))))
+            session.append(Msg("user", JsonArray(withNudge + listOfNotNull(budget, finish) + (drainSteering() ?: emptyList()))))
         }
     }
 
