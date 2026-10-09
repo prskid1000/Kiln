@@ -139,6 +139,7 @@ object SvgToVector {
         val vw = vb.getOrNull(2) ?: num(root.getAttribute("width")) ?: 24f
         val vh = vb.getOrNull(3) ?: num(root.getAttribute("height")) ?: 24f
         val ox = vb.getOrNull(0) ?: 0f; val oy = vb.getOrNull(1) ?: 0f
+        view = floatArrayOf(ox, oy, vw, vh)
         val gradients = HashMap<String, Element>()
         collect(root) { if (it.tagName.endsWith("Gradient")) gradients[it.getAttribute("id")] = it }
         val skipped = linkedSetOf<String>()
@@ -242,15 +243,33 @@ $body</vector>
         out.append(gradientXml(g, grads, "$ind    ")).append(ind).append("  </aapt:attr>\n").append(ind).append("</path>\n")
     }
 
+    /** The SVG viewBox being converted: x, y, width, height (gradients need it). */
+    @Volatile private var view = floatArrayOf(0f, 0f, 24f, 24f)
+
     private fun gradientXml(g0: Element, grads: Map<String, Element>, ind: String): String {
         // Stops may come from a gradient this one links to with href.
         var g = g0
         val href = (g.getAttribute("href").ifBlank { g.getAttribute("xlink:href") }).removePrefix("#")
         val stopsFrom = if (children(g).none { it.tagName == "stop" } && href.isNotBlank()) grads[href] ?: g else g
-        fun a(n: String, def: Float) = g.getAttribute(n).let { v -> if (v.endsWith("%")) null else num(v) } ?: def
+        // Android gradients are in viewport coordinates. SVG's default units are fractions of the shape (0..1 or %),
+        // which were written as raw coordinates — a 0→1 gradient on a 108-unit icon came out one flat colour. Fractions
+        // and percentages are mapped onto the viewport (exact for a full-size shape, close for others).
+        val (ox, oy, vw, vh) = view.toList()
+        val bbox = g.getAttribute("gradientUnits").ifBlank { grads[href]?.getAttribute("gradientUnits").orEmpty() } != "userSpaceOnUse"
+        fun pos(n: String, defFrac: Float, horizontal: Boolean): Float {
+            val v = g.getAttribute(n).trim()
+            val size = if (horizontal) vw else vh; val origin = if (horizontal) ox else oy
+            val frac = when {
+                v.isEmpty() -> defFrac
+                v.endsWith("%") -> (v.dropLast(1).toFloatOrNull() ?: (defFrac * 100)) / 100
+                bbox -> num(v) ?: defFrac
+                else -> return num(v) ?: (origin + defFrac * size)
+            }
+            return origin + frac * size
+        }
         val sb = StringBuilder(ind)
-        if (g.tagName.startsWith("radial")) sb.append("<gradient android:type=\"radial\" android:centerX=\"${f(a("cx", 0f))}\" android:centerY=\"${f(a("cy", 0f))}\" android:gradientRadius=\"${f(a("r", 1f))}\"")
-        else sb.append("<gradient android:type=\"linear\" android:startX=\"${f(a("x1", 0f))}\" android:startY=\"${f(a("y1", 0f))}\" android:endX=\"${f(a("x2", 1f))}\" android:endY=\"${f(a("y2", 0f))}\"")
+        if (g.tagName.startsWith("radial")) sb.append("<gradient android:type=\"radial\" android:centerX=\"${f(pos("cx", 0.5f, true))}\" android:centerY=\"${f(pos("cy", 0.5f, false))}\" android:gradientRadius=\"${f(pos("r", 0.5f, true) - ox)}\"")
+        else sb.append("<gradient android:type=\"linear\" android:startX=\"${f(pos("x1", 0f, true))}\" android:startY=\"${f(pos("y1", 0f, false))}\" android:endX=\"${f(pos("x2", 1f, true))}\" android:endY=\"${f(pos("y2", 0f, false))}\"")
         sb.append(">\n")
         children(stopsFrom).filter { it.tagName == "stop" }.forEach { s ->
             val style = s.getAttribute("style").split(';').associate { it.substringBefore(':').trim() to it.substringAfter(':', "").trim() }
@@ -288,7 +307,10 @@ $body</vector>
         val c = c0.trim()
         NAMED[c]?.let { return it }
         if (c.startsWith("#")) return when (c.length) {
-            4 -> "#" + c.drop(1).map { "$it$it" }.joinToString(""); 7, 9 -> c.uppercase(); else -> null }
+            4 -> "#" + c.drop(1).map { "$it$it" }.joinToString(""); 7 -> c.uppercase()
+            // SVG's #RRGGBBAA is Android's #AARRGGBB: #FF000080 (half-clear red) was read as opaque navy.
+            9 -> ("#" + c.substring(7, 9) + c.substring(1, 7)).uppercase()
+            else -> null }
         Regex("rgba?\\(([^)]*)\\)").find(c)?.let { m ->
             val p = m.groupValues[1].split(',').map { it.trim() }
             fun ch(s: String) = (if (s.endsWith("%")) s.dropLast(1).toFloat() * 2.55f else s.toFloat()).toInt().coerceIn(0, 255)

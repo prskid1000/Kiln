@@ -26,6 +26,9 @@ class ClassIndex(private val toolchain: Toolchain) {
     /** Top-level Kotlin symbols, from file facades: pkg.IconKt → pkg.Icon (Compose functions, icon properties). */
     private val topLevel = HashSet<String>(60_000)
 
+    /** Whether [fq] names a class or top-level symbol on the classpath (a.b.C, or pkg.Icon from a facade). */
+    fun exists(fq: String): Boolean { ensure(); return fq in where || fq in topLevel }
+
     @Synchronized private fun ensure() {   // parallel sdk_lookup calls share one index
         val dir = toolchain.dir ?: error("toolchain not installed")
         if (built == dir.path) return

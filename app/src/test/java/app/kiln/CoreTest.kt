@@ -45,6 +45,9 @@ class CoreTest {
         assertEquals(listOf("""{"key":"BACK"}"""), steps("""{"back":true}"""))
         assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":{"direction":"left","on":"Lunch"}}"""))
         assertEquals(listOf("""{"wait_ms":"100"}"""), steps("""{"wait":{"ms":"100"}}"""))
+        // Review: target beside a swipe is the row, not a second tap; a type object's label names the field.
+        assertEquals(listOf("""{"swipe":"left","on":"Lunch"}"""), steps("""{"swipe":"left","target":"Lunch"}"""))
+        assertEquals(listOf("""{"type":"500","into":"Amount"}"""), steps("""{"type":{"label":"Amount","value":"500"}}"""))
         // Run 16: an expectation riding on a tap step under another name.
         assertEquals(listOf("""{"tap":"Category"}""", """{"expect":"Food"}"""), steps("""{"tap":"Category","expect_text_contains":"Food"}"""))
         // Run 13: a swipe given its row as "target" keeps "direction" as the direction.
@@ -115,6 +118,15 @@ class CoreTest {
         File(dir, "src/template/MainActivity.kt").writeText(File("../toolchain/templates/compose/src/MainActivity.kt").readText())
         val bad = app.kiln.build.Lint.run(app.kiln.build.Project(dir)).filter { it.severity == "error" }
         assertTrue(bad.joinToString("\n") { "${it.file}:${it.line} ${it.message.take(60)}" }, bad.isEmpty())
+    }
+
+    @Test fun `svg gradients span the shape and 8-digit colours keep their alpha`() {
+        val svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='0'>" +
+            "<stop offset='0' stop-color='#FF000080'/><stop offset='1' stop-color='#0000FF'/></linearGradient></defs>" +
+            "<rect width='108' height='108' fill='url(#g)'/></svg>"
+        val xml = app.kiln.tools.SvgToVector.convert(svg).first
+        assertTrue(xml, "android:endX=\"108\"" in xml)          // was 1: one flat colour
+        assertTrue(xml, "#80FF0000" in xml.uppercase())           // #RRGGBBAA → #AARRGGBB
     }
 
     @Test fun `a reminder goes inside the last tool result`() {

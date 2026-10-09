@@ -77,6 +77,8 @@ class ReadFileTool : Tool {
     override val traits = setOf(Trait.READ_ONLY, Trait.PARALLEL_SAFE)
     override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
         val f = ctx.project.resolve(input.req("path"))
+        // The app's signing key and its password live in .kiln/: never into a model's context.
+        if (f.parentFile?.name == ".kiln" && f.name.startsWith("signing")) return ToolResult.error("${input.req("path")} is the app's signing key — not readable")
         if (!f.isFile) return ToolResult.error("no such file: ${input.str("path")}")
         val lines = f.readLines()
         val from = ((input.int("offset") ?: 1) - 1).coerceIn(0, maxOf(0, lines.size))
@@ -334,8 +336,11 @@ internal fun splitImportEdit(text: String, old: String, new: String): String? {
     }
     val (oldImp, oldCode) = split(old); val (newImp, newCode) = split(new)
     if (oldImp.isEmpty() && newImp.isEmpty() || oldCode.isBlank()) return null
+    // The code part must name one place: "}" or a repeated Text("Hi") would otherwise edit the first one silently.
+    val hits = Regex(Regex.escape(oldCode)).findAll(text).count()
     val withCode = when {
-        text.contains(oldCode) -> text.replaceFirst(oldCode, newCode)
+        hits == 1 -> text.replaceFirst(oldCode, newCode)
+        hits > 1 -> return null
         else -> replaceIgnoringIndent(text, oldCode, newCode) ?: return null
     }
     // Imports: drop those the edit removed, add those it introduced.

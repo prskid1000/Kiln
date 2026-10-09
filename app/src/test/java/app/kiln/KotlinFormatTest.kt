@@ -121,6 +121,7 @@ class KotlinFormatTest {
         assertTrue(out, "val x = 2" in out && "val x = 1" !in out)
         assertEquals(listOf("import b.Added", "import d.D", "import e.E"), out.lines().filter { it.startsWith("import") }.sorted())
         assertNull(app.kiln.tools.splitImportEdit(file, old.replace("val x = 1", "val y = 9"), new))   // code part not there
+        assertNull(app.kiln.tools.splitImportEdit(file + "fun g() {\n    val x = 1\n}\n", "import d.D\n\n    val x = 1", "import d.D\n\n    val x = 3"))   // ambiguous
     }
 
     @Test fun `a whole-file edit that misses says to use write_file and keep the Theme line`() {

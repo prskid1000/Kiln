@@ -282,7 +282,13 @@ class QaCheckTool(
         // The QA agent's own steps: live in the chat while it works, and listed under its report.
         val trail = java.util.Collections.synchronizedList(mutableListOf<String>())
         // Every QA step — its tool call, result and screenshot — nested under this call in the chat, live.
-        val (report, _, usd) = run(criteria, ctx) { line -> trail += line; ctx.progress("QA · step ${trail.size}: $line") }
+        // The recording stops however QA ends (an error or the tool's timeout left it running, and the clip lost).
+        val (report, _, usd) = try {
+            run(criteria, ctx) { line -> trail += line; ctx.progress("QA · step ${trail.size}: $line") }
+        } catch (e: Throwable) {
+            withContext(kotlinx.coroutines.NonCancellable) { runCatching { rec?.stop() } }
+            throw e
+        }
         ctx.addCost(usd)
         val clip = runCatching { rec?.stop() }.getOrNull()
         val verdict = Regex("""VERDICT:\s*(PASS|FAIL)""", RegexOption.IGNORE_CASE).find(report)?.groupValues?.get(1)?.uppercase()

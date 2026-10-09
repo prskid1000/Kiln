@@ -133,7 +133,7 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
             // The project's own class, or a library class imported from the wrong package
             // (kotlinx.datetime.YearMonth → java.time.YearMonth).
             val simple = imported.substringAfterLast('.')
-            val real = decls[simple]?.singleOrNull() ?: simple.takeIf { it[0].isUpperCase() }?.let { index.uniqueClass(it, "") }
+            val real = decls[simple]?.singleOrNull() ?: simple.takeIf { it.isNotEmpty() && it[0].isUpperCase() }?.let { index.uniqueClass(it, "") }
             val path0 = e.file
             val f0 = path0?.let { File(it).let { x -> if (x.isAbsolute) x else ctx.project.resolve(it) } }
             if (real != null && real != imported && f0 != null && f0.isFile) {
@@ -174,10 +174,13 @@ suspend fun buildFixingImports(builds: BuildEngine, index: ClassIndex, ctx: Tool
             if (l.trimStart().startsWith("import ") || l.trimStart().startsWith("package ")) l
             else inline.fold(l) { acc, q -> Regex("""(?<![\w.])${Regex.escape(q)}\b""").replace(acc, name) }
         }
-        val stale = Regex("(?m)^import\\s+[\\w.]+\\.$name\\s*$")
+        // Only an import of this name that doesn't resolve is stale: a correct one (foundation.Image while the
+        // Image icon is missing) must stay, and the right import is added beside it.
+        val stale = Regex("(?m)^import\\s+([\\w.]+\\.$name)\\s*$")
+        val staleLine = stale.findAll(text).firstOrNull { !index.exists(it.groupValues[1]) && decls[name]?.contains(it.groupValues[1]) != true }
         val fixed = when {
             Regex("(?m)^import\\s+${Regex.escape(fq)}\\s*$").containsMatchIn(text) -> if (inline.isEmpty()) continue else text
-            stale.containsMatchIn(text) -> text.replace(stale, "import $fq")
+            staleLine != null -> text.replaceRange(staleLine.range, "import $fq")
             else -> addImport(text, fq)
         }
         val rel = ctx.project.rel(f)
@@ -282,11 +285,18 @@ abstract class DeviceTool(protected val warden: Warden, internal val device: Dev
     }
 
     internal suspend fun offScreen(n: app.kiln.device.UiNode, label: String): String {
-        val (_, h) = device.screenSize()
-        val where = if (n.top >= h) "below the bottom of the screen (y=${n.top}, screen is $h px tall)" else "above the top of the screen"
-        return "“$label” is $where, so a tap can't reach it. If the keyboard is open, close it (press_key BACK); otherwise scroll it " +
-            "into view (swipe ${if (n.top >= h) "up" else "down"}) and tap again. If it's a button in a sheet or dialog, the layout " +
-            "probably needs to scroll or sit above the keyboard."
+        val (w, h) = device.screenSize()
+        // Which side it's off (a carousel item is off to the side, not "above the top").
+        val (where, swipe) = when {
+            n.right - n.left < 8 || n.bottom - n.top < 8 -> "too small to tap (it has no size on screen)" to null
+            n.top >= h -> "below the bottom of the screen (y=${n.top}, screen is $h px tall)" to "up"
+            n.bottom <= 0 -> "above the top of the screen" to "down"
+            n.left >= w -> "off the right edge of the screen" to "left"
+            else -> "off the left edge of the screen" to "right"
+        }
+        return "“$label” is $where, so a tap can't reach it. " + (if (swipe == null) "Check the layout gives it a size." else
+            "If the keyboard is open, close it (press_key BACK); otherwise scroll it into view (swipe $swipe) and tap again. " +
+            "If it's a button in a sheet or dialog, the layout probably needs to scroll or sit above the keyboard.")
     }
 
     final override suspend fun run(ctx: ToolContext, input: JsonObject): ToolResult {
@@ -714,7 +724,9 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         s("type")?.let { text ->
             s("into")?.let { field ->
                 val node = device.find(before, field) ?: return false to "type into “$field”: no such field on screen"
-                device.tap(node.cx, node.cy); delay(400)
+                // Same reachability as tap: a field under the keyboard isn't focused, and the text would go elsewhere.
+                val (fx, fy) = reachable(node) ?: return false to "type into “$field”: ${offScreen(node, field)}"
+                device.tap(fx, fy); delay(400)
             }
             val r = device.type(text, replace = st.str("replace") == "true")
             return r.ok to (if (r.ok) r.out.ifBlank { "typed “$text”" } else "type “$text”: ${r.err}")
@@ -766,11 +778,15 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
             "press_button" to "tap", "direction" to "swipe")
         val actions = listOf("tap", "type", "swipe", "key", "expect", "expect_gone", "wait_ms", "select")
         val typing = st.keys.any { (alias[it] ?: it) == "type" }
+        val swiping = st.keys.any { (alias[it] ?: it) == "swipe" }
+        // A top-level "target" is its own tap only when the step has no other action (review: with a swipe it's the row).
+        val otherAction = st.keys.any { it != "target" && (alias[it] ?: it) in actions }
         // Field and options, wherever they were written.
         val opts = LinkedHashMap<String, JsonElement>()
         fun opt(src: JsonObject) {
             listOf("into", "field", "id", "in", "on_field", "at", "to", "label").firstNotNullOfOrNull { src.str(it) }?.let { opts["into"] = JsonPrimitive(it) }
             if (typing) src.str("target")?.let { opts.putIfAbsent("into", JsonPrimitive(it)) }
+            if (swiping) src.str("target")?.let { opts.putIfAbsent("on", JsonPrimitive(it)) }
             src.str("on")?.let { opts["on"] = JsonPrimitive(it) }
             src["replace"]?.let { opts["replace"] = it }
             src["timeout_ms"]?.let { opts["timeout_ms"] = it }
@@ -778,7 +794,7 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
         opt(st)
         val out = mutableListOf<JsonObject>()
         for ((k0, v) in st) {
-            val k = alias[k0] ?: if (k0 == "target" && !typing) "tap" else if (k0 == "back") "key" else k0
+            val k = alias[k0] ?: if (k0 == "target" && !otherAction) "tap" else if (k0 == "back") "key" else k0
             if (k !in actions) continue
             // Coordinates (run 10): {"tap": {"x": 250, "y": 289}} → "250,289"; {"swipe": {"x":…, "y":…, "dx":…, "dy":…}}.
             if (v is JsonObject && v.str("x") != null && v.str("y") != null && listOf("text", "target", "label", "direction").none { v.str(it) != null }) {
@@ -799,7 +815,9 @@ class TestFlowTool(w: Warden, d: Device) : DeviceTool(w, d) {
                     opt(v)
                     val c = listOf("contains", "texts", "containsText", "contains_text", "text_contains", "has_text").firstNotNullOfOrNull { v[it] }
                     if (c is JsonArray) c.mapNotNull { (it as? JsonPrimitive)?.content }
-                    else listOfNotNull(listOf("contains", "containsText", "contains_text", "text_contains", "has_text", "text", "target", "label", "value", "name", "direction", "key", "ms")
+                    // For typing, the text is text/value — label/target name the field (review: it typed "Amount").
+                    else listOfNotNull((if (k == "type") listOf("text", "value", "name") else
+                        listOf("contains", "containsText", "contains_text", "text_contains", "has_text", "text", "target", "label", "value", "name", "direction", "key", "ms"))
                         .firstNotNullOfOrNull { v.str(it) })
                 }
                 is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.content }
