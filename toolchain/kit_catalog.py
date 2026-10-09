@@ -53,6 +53,10 @@ def _signature(lines, i):
             elif depth == 0 and ch == "{":
                 cut = j; break
             elif depth == 0 and ch == "=" and line[j - 1:j] not in ("!", "<", ">", "=") and line[j + 1:j + 2] not in ("=", ">"):
+                # A typealias's "= …" is what it is (KDate = @Serializable(...) LocalDate): showing only "typealias
+                # KDate" left the model unsure whether it could be saved.
+                if re.search(r"\btypealias\b", " ".join(buf) + line[:j]):
+                    continue
                 cut = j; break
         buf.append((line[:cut] if cut is not None else line).rstrip())
         i += 1

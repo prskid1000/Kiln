@@ -38,7 +38,7 @@ val KJson: Json = Json {
  *
  * ```
  * @Serializable data class Todo(val id: Long, val text: String, val done: Boolean = false)
- * val todos = KStore(context, "todos", emptyList<Todo>())
+ * val todos = KStore("todos", emptyList<Todo>())   // no Context needed (an overload takes one)
  * val list by todos.state.collectAsStateWithLifecycle()
  * todos.update { it + Todo(System.currentTimeMillis(), "Buy milk") }
  * ```

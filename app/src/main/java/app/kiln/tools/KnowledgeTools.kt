@@ -405,6 +405,11 @@ class KitDocsTool(private val toolchain: Toolchain, private val skills: Skills? 
         }
         val ranked = catalog.map { it to score(it) }.filter { it.second > 6 }.sortedByDescending { it.second }
         val top = ranked.take(8).map { it.first }.toMutableList()
+        // Every name asked for is answered, with all its overloads: "KFormat money date KDate KTime" filled the 8 slots
+        // with date types, so KFormat.money and KFormat.date(LocalDate) never showed and the model wrote its own.
+        val named = words.flatMap { w -> catalog.filter { val n = it.name.lowercase(); n == w || n.substringAfterLast('.') == w } }
+        val siblings = top.flatMap { t -> catalog.filter { it.name == t.name && it !== t } }
+        for (e in named + siblings) if (e !in top && top.size < 20) top += e
         // Asked for an object/class by name: show all of its members too.
         top.firstOrNull { it.name.equals(query, true) }?.let { o -> catalog.filter { it.owner == o.name }.forEach { if (it !in top) top += it } }
         val out = StringBuilder()
@@ -622,7 +627,7 @@ fun errorHints(build: app.kiln.build.BuildResult, project: app.kiln.build.Projec
             out += "Icons.AutoMirrored.Filled.* only has direction-sensitive icons (ArrowBack, ArrowForward, List, Send, Logout, Undo…). Use Icons.Filled.X for everything else — the deprecation warning on Icons.Filled.List etc. is harmless."
         if ("cannot infer type for type parameter" in m || "uninferred" in m) {
             if (Regex("""K(Collection|Store)\s*\(""").containsMatchIn(src) || "rows" in src)
-                out += "Give KCollection/KStore its item type: KCollection<Expense>(context, \"expenses\"), KStore(context, \"settings\", Settings()). Without it every later use fails to infer."
+                out += "Give KCollection/KStore its item type: KCollection<Expense>(\"expenses\"), KStore(\"settings\", Settings()). Without it every later use fails to infer."
             else out += "Kotlin can't infer a type here: add the type explicitly (val x: List<Expense> = …, map<Expense, String> { … }) — usually one missing type causes the rest of these errors."
         }
         // Icon names from other icon sets (runs 13, 15: Icons.Filled.Bell, .Trash): Material's names for them.

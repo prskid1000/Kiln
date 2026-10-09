@@ -167,7 +167,7 @@ manifest already points at it). It is a 108×108 vector drawable:
 - UI state: `remember { mutableStateOf(…) }`, `rememberSaveable`, or a `ViewModel`
   (`viewModel()` from lifecycle-viewmodel-compose) exposing `StateFlow`; collect
   with `collectAsStateWithLifecycle()`.
-- Persisted data: `KStore(context, "name", default)` — a JSON file exposed as
+- Persisted data: `KStore("name", default)` (no Context needed; `KStore(context, "name", default)` also works) — a JSON file exposed as
   `state: StateFlow<T>`; `update { … }` / `set(value)`. Types must be
   `@Serializable`. One store per collection is fine.
 - Key/value prefs: DataStore Preferences (`androidx.datastore.preferences`).

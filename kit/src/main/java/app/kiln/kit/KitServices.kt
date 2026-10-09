@@ -86,7 +86,7 @@ data class KRow<T>(val id: Long, val value: T, val updatedAt: Long)
  * use [KStore] for one value (settings, a small list).
  * ```
  * @Serializable data class Note(val title: String, val body: String = "")
- * val notes = KCollection<Note>(context, "notes")
+ * val notes = KCollection<Note>("notes")   // no Context needed (an overload takes one)
  * val rows by notes.rows.collectAsStateWithLifecycle()      // List<KRow<Note>>, newest first
  * val id = notes.add(Note("Hi")); notes.update(id, Note("Hello")); notes.delete(id)
  * notes.query { it.title.contains("hi", ignoreCase = true) }
