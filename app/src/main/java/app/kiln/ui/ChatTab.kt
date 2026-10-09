@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -590,9 +591,43 @@ private fun StepRow(a: Activity) {
                 if (open) Text(d, style = T.monoSmall.copy(color = N.textLabel), modifier = Modifier.padding(top = 6.dp).fillMaxWidth().vInset().padding(8.dp))
                 else Text("${d.lines().size} QA steps · tap to see them", style = T.label.copy(color = N.accent2), maxLines = 1)
             }
-            if (open && !a.input.isNullOrBlank() && a.kind == Activity.Kind.TOOL)
-                Text(a.input.take(2000), style = T.monoSmall, softWrap = false,
-                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth().vInset().horizontalScroll(rememberScrollState()).padding(8.dp))
+            if (open && !a.input.isNullOrBlank() && a.kind == Activity.Kind.TOOL) StepDetail(a.tool, a.input)
+        }
+    }
+}
+
+/**
+ * What a step did, readable: a written file as code with its lines, an edit as removed/added text, other calls as
+ * one line per argument. (It was the raw JSON input on one line: "{"content":"package …\n\nimport …".)
+ */
+@Composable
+private fun StepDetail(tool: String?, input: String) {
+    val o = remember(input) { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(input) as? kotlinx.serialization.json.JsonObject }.getOrNull() }
+    fun str(x: kotlinx.serialization.json.JsonElement?) = (x as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+    val box = Modifier.padding(top = 6.dp).fillMaxWidth().vInset().heightIn(max = 420.dp)
+    @Composable fun Code(text: String, color: androidx.compose.ui.graphics.Color = N.text, numbered: Boolean = false) {
+        val lines = text.lines()
+        val shown = lines.take(400)
+        val body = if (numbered) shown.mapIndexed { i, l -> "${(i + 1).toString().padStart(lines.size.toString().length)}  $l" }.joinToString("\n") else shown.joinToString("\n")
+        Text(body + if (lines.size > shown.size) "\n… ${lines.size - shown.size} more lines" else "", style = T.monoSmall.copy(color = color), softWrap = false,
+            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(8.dp))
+    }
+    Column(box.verticalScroll(rememberScrollState())) {
+        when {
+            o == null -> Code(input.take(4000))
+            tool == "write_file" && str(o["content"]) != null -> Code(str(o["content"])!!, numbered = true)
+            tool == "edit_file" -> {
+                Code(str(o["old_text"]).orEmpty().lines().joinToString("\n") { "− $it" }, N.danger)
+                Code(str(o["new_text"]).orEmpty().lines().joinToString("\n") { "+ $it" }, N.ok)
+            }
+            tool == "multi_edit" -> (o["edits"] as? kotlinx.serialization.json.JsonArray)?.forEachIndexed { i, e ->
+                val eo = e as? kotlinx.serialization.json.JsonObject ?: return@forEachIndexed
+                Text("edit ${i + 1}", style = T.label, modifier = Modifier.padding(start = 8.dp, top = 6.dp))
+                Code(str(eo["old_text"]).orEmpty().lines().joinToString("\n") { "− $it" }, N.danger)
+                Code(str(eo["new_text"]).orEmpty().lines().joinToString("\n") { "+ $it" }, N.ok)
+            }
+            // Anything else: one line per argument, strings without their JSON escapes.
+            else -> Code(o.entries.joinToString("\n") { (k, v) -> "$k: " + (str(v) ?: v.toString()).let { s -> if (s.length > 600) s.take(600) + "…" else s } })
         }
     }
 }
