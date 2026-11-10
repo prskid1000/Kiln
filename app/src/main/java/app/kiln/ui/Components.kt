@@ -155,7 +155,7 @@ fun FilledIconBtn(icon: ImageVector, desc: String, modifier: Modifier = Modifier
     }
 }
 
-private val tileHues = listOf(0xFF9184D9, 0xFF7FB69A, 0xFFD9A48A, 0xFF84AED9, 0xFFC98AD9, 0xFFD9C48A).map { Color(it) }
+private val tileHues = listOf(0xFF8FBF7F, 0xFF83D6C5, 0xFFEFB080, 0xFF8FBBD4, 0xFFC495D4, 0xFFE0CE8A).map { Color(it) }
 
 /** The app's tile: its initial on a hue picked from its name — stable per project. */
 @Composable

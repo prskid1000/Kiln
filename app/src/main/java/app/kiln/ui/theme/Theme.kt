@@ -30,28 +30,28 @@ import app.kiln.R
  * Heading weight 500, hairline-ring + ambient-shadow elevation, accent kickers.
  */
 object N {
-    val bg = Color(0xFF161826)
-    val surface = Color(0xFF232532)
-    val surfaceHi = Color(0xFF2A2C3A)
-    val text = Color(0xFFE9E9ED)
-    val accent = Color(0xFF9184D9)
-    val accent2 = Color(0xFFA7A1DB)
+    val bg = Color(0xFF0C0C0C)
+    val surface = Color(0xFF1A1D1A)
+    val surfaceHi = Color(0xFF222622)
+    val text = Color(0xFFDDE3DC)
+    val accent = Color(0xFF8FBF7F)
+    val accent2 = Color(0xFFA8BEA7)
 
     // neutral ramp
-    val neutral100 = Color(0xFFF3F5FE)
-    val neutral600 = Color(0xFF75798C)
-    val neutral700 = Color(0xFF595D6C)
-    val neutral800 = Color(0xFF3F424D)
+    val neutral100 = Color(0xFFF2F5F1)
+    val neutral600 = Color(0xFF727C72)
+    val neutral700 = Color(0xFF565F56)
+    val neutral800 = Color(0xFF3D433D)
     // accent ramp
-    val accent100 = Color(0xFFF5F4FF)
-    val accent800 = Color(0xFF423A6A)
+    val accent100 = Color(0xFFF1F7EF)
+    val accent800 = Color(0xFF42583B)
     // status
-    val ok = Color(0xFF7FB69A)
-    val danger = Color(0xFFD98A8A)
-    val warn = Color(0xFFD9C48A)
+    val ok = Color(0xFF9FD48C)
+    val danger = Color(0xFFDC9089)
+    val warn = Color(0xFFE0CE8A)
     // Nocturne "section" indigo — used for the header glow band.
-    val section = Color(0xFF262A60)
-    val sectionGlow = Color(0xFF353B80)
+    val section = Color(0xFF233023)
+    val sectionGlow = Color(0xFF324332)
 
     // derived
     val textMuted = text.copy(alpha = 0.55f)
